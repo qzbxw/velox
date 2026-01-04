@@ -1,0 +1,8 @@
+services:
+  bot:
+    build: .
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["python", "-m", "bot.main"]

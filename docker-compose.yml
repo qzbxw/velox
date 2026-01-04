@@ -1,0 +1,29 @@
+services:
+  bot:
+    build: .
+    container_name: hl_bot
+    restart: always
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - MONGO_URI=mongodb://mongo:27017
+      - MONGO_DB_NAME=hyperliquid_bot
+    depends_on:
+      - mongo
+    networks:
+      - bot_net
+
+  mongo:
+    image: mongo:latest
+    container_name: hl_mongo
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - bot_net
+
+networks:
+  bot_net:
+    driver: bridge
+
+volumes:
+  mongo_data:

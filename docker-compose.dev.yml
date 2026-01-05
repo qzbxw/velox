@@ -5,4 +5,35 @@ services:
       - .:/app
     environment:
       - PYTHONUNBUFFERED=1
-    command: ["python", "-m", "bot.main"]
+      - BOT_TOKEN=${BOT_TOKEN}
+      - MONGO_URI=mongodb://mongo:27017
+      - MONGO_DB_NAME=hyperliquid_bot
+      - PROXIMITY_THRESHOLD=${PROXIMITY_THRESHOLD}
+      - BUY_PROXIMITY_THRESHOLD=${BUY_PROXIMITY_THRESHOLD}
+      - SELL_PROXIMITY_THRESHOLD=${SELL_PROXIMITY_THRESHOLD}
+      - PROXIMITY_USD_THRESHOLD=${PROXIMITY_USD_THRESHOLD}
+      - ALERT_COOLDOWN=${ALERT_COOLDOWN}
+      - MARKET_HISTORY_MINUTES=${MARKET_HISTORY_MINUTES}
+      - WATCH_ALERT_PCT=${WATCH_ALERT_PCT}
+      - WATCH_ALERT_WINDOW_SEC=${WATCH_ALERT_WINDOW_SEC}
+      - WATCH_ALERT_COOLDOWN=${WATCH_ALERT_COOLDOWN}
+    depends_on:
+      - mongo
+    networks:
+      - bot_net
+    command: ["watchfiles", "--filter", "python", "--target-type", "command", "python -m bot.main"]
+
+  mongo:
+    image: mongo:latest
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - bot_net
+
+networks:
+  bot_net:
+    driver: bridge
+
+volumes:
+  mongo_data:

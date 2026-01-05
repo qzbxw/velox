@@ -31,8 +31,25 @@ class Database:
             await self.wallets.insert_one({
                 "user_id": user_id,
                 "address": wallet,
-                "added_at": time.time()
+                "added_at": time.time(),
+                "tag": None,
+                "threshold": 0.0  # Min USD value for notifications
             })
+
+    async def update_wallet_settings(self, user_id, wallet_address, tag=None, threshold=None):
+        update_data = {}
+        if tag is not None: update_data["tag"] = tag
+        if threshold is not None: update_data["threshold"] = float(threshold)
+        
+        if update_data:
+            await self.wallets.update_one(
+                {"user_id": user_id, "address": wallet_address.lower()},
+                {"$set": update_data}
+            )
+
+    async def list_wallets_full(self, user_id):
+        cursor = self.wallets.find({"user_id": user_id})
+        return await cursor.to_list(length=None)
 
     async def list_wallets(self, user_id):
         cursor = self.wallets.find({"user_id": user_id})
@@ -60,24 +77,31 @@ class Database:
         return await cursor.to_list(length=None)
 
     async def get_users_by_wallet(self, wallet_address):
-        # We need to find users who have this wallet in their wallets collection
-        # OR users who have it as their primary wallet (legacy)
-        
-        # 1. Get users from 'wallets' collection
+        """Returns list of user configs for this wallet, including tags and thresholds."""
         cursor = self.wallets.find({"address": wallet_address.lower()})
         wallet_docs = await cursor.to_list(length=None)
-        user_ids = {doc["user_id"] for doc in wallet_docs}
         
-        # 2. Get users from 'users' collection (legacy wallet_address field)
+        results = []
+        for doc in wallet_docs:
+            results.append({
+                "chat_id": doc["user_id"],
+                "tag": doc.get("tag"),
+                "threshold": doc.get("threshold", 0.0)
+            })
+            
+        # Legacy check
         cursor_legacy = self.users.find({"wallet_address": wallet_address.lower()})
         legacy_docs = await cursor_legacy.to_list(length=None)
         for doc in legacy_docs:
-            user_ids.add(doc["user_id"])
+            # Only add if not already added from wallets collection
+            if not any(r["chat_id"] == doc["user_id"] for r in results):
+                results.append({
+                    "chat_id": doc["user_id"],
+                    "tag": None,
+                    "threshold": 0.0
+                })
             
-        # Return partial user objects (at least chat_id)
-        # We can just return the user_ids wrapped in dicts to match expected interface
-        # or fetch full user docs. WSManager expects objects with 'chat_id'.
-        return [{"chat_id": uid} for uid in user_ids]
+        return results
 
     # --- WATCHLIST ---
     async def get_watchlist(self, user_id):
@@ -146,5 +170,23 @@ class Database:
             await self.alerts.delete_one({"_id": ObjectId(alert_id)})
         except:
             pass
+
+    # --- USER SETTINGS ---
+    async def update_user_settings(self, user_id, settings_dict):
+        """
+        settings_dict can include:
+        - whale_alerts (bool)
+        - whale_threshold (float)
+        - prox_alert_pct (float)
+        """
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": settings_dict},
+            upsert=True
+        )
+
+    async def get_user_settings(self, user_id):
+        user = await self.users.find_one({"user_id": user_id})
+        return user if user else {}
 
 db = Database(settings.MONGO_URI, settings.MONGO_DB_NAME)

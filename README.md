@@ -1,98 +1,111 @@
-# 🤖 Velox — Hyperliquid Watcher
+# ⚡ Velox: Hyperliquid Wallet Watcher & Analytics Terminal
 
-**Velox** is a powerful, watch-only Telegram bot for monitoring your [Hyperliquid](https://hyperliquid.xyz) portfolio. It allows you to track wallets, receive real-time notifications for fills and price alerts, and analyze your PnL without ever needing your private keys.
-
-> **Safety First:** This bot operates in **watch-only** mode. It does NOT require private keys or API signing rights. It simply listens to public blockchain data and user-specified events.
+**Velox** is an institutional-grade Telegram bot designed for real-time monitoring, portfolio analytics, and market intelligence on the Hyperliquid L1 (Spot & Perpetuals). It transforms raw blockchain data into actionable insights through a sleek, visual-first interface.
 
 ---
 
-## ✨ Features
+## 🚀 Key Features
 
-*   **👀 Watch-Only Tracking:** Monitor any Hyperliquid wallet address (`0x...`) safely.
-*   **🎰 Perps Support:** Full monitoring of Perpetual positions including Leverage, Liquidation Price, and ROI%.
-*   **🔔 Real-time Notifications:**
-    *   **Fills:** Get instant alerts when your buy or sell orders are executed.
-    *   **Proximity Alerts:** Receive a notification when the market price gets close to your open limit orders.
-*   **💰 Portfolio Insights:**
-    *   **`/balance`**: View spot balances, perps equity, and account margin.
-    *   **`/positions`**: Detailed view of all active long/short positions.
-*   **📊 Market Intelligence:**
-    *   **`/funding`**: Check real-time funding rates and APR for any asset.
-    *   **`/stats`**: View Open Interest (OI) and 24h Volume.
-    *   **`/market`**: Quick snapshot of BTC/ETH/HYPE volatility and price moves.
-*   **🌍 Multi-language:** Supports **English** and **Russian**.
+### 1. 🛡️ Real-Time Wallet Sentinel
+*   **Multi-Wallet Tracking**: Monitor an unlimited number of wallets with custom tags and individual notification thresholds.
+*   **Instant Fill Alerts**: Real-time notifications for trades (Spot/Perps) including realized PnL and fee tracking.
+*   **Liquidation Watch**: Immediate alerts for account liquidations and margin ratio warnings (alerts at >80% margin usage).
+*   **Proximity Alerts**: Never miss a fill. Velox notifies you when the market price approaches your open limit orders (customizable USD and percentage thresholds).
 
----
+### 2. 📊 Visual Performance Analytics
+*   **Equity Curves**: Dynamic generation of performance graphs showing account value history directly in Telegram.
+*   **Flex PnL Cards**: Generate stylized, shareable ROI cards (Day/Week/Month/All-time) inspired by top-tier exchange UIs.
+*   **Trade Statistics**: Comprehensive breakdown of Win Rate, Profit Factor, Gross Profit/Loss, and Net PnL.
+*   **Data Export**: Export your entire trade history and equity data to CSV for external analysis.
 
-## 🚀 Quick Start (Docker)
+### 3. 🌊 Market Intelligence
+*   **Whale Watcher**: Live feed of institutional-sized trades ($50k+) for high-volume assets.
+*   **Volatility Alerts**: Real-time monitoring of significant price moves (e.g., ±2% within 5 minutes) for your custom watchlist.
+*   **Market Heatmaps**: Visual tables summarizing Funding Rates (APR), Open Interest, and 24h Volume across the Hyperliquid ecosystem.
+*   **Custom Price Alerts**: User-defined "Above/Below" alerts with persistent monitoring.
 
-The easiest way to run Velox is using Docker.
-
-### 1. Clone the repository
-```bash
-git clone https://github.com/qzbxw/hyperliquid-wallet-watcher.git
-cd hyperliquid-wallet-watcher
-```
-
-### 2. Configure Environment
-Create a `.env` file from the example:
-```bash
-cp .env.example .env
-```
-Edit `.env` and add your **Telegram Bot Token** (get one from [@BotFather](https://t.me/BotFather)):
-```ini
-BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
-MONGO_URI=mongodb://mongo:27017
-MONGO_DB_NAME=hyperliquid_bot
-```
-
-### 3. Run with Docker Compose
-```bash
-docker compose up -d --build
-```
-The bot should now be running! Open your bot in Telegram and press `/start`.
+### 4. 🛠️ Advanced Trading Tools
+*   **Professional Calculator**: Sophisticated risk management tool for Spot and Perps. Calculates position size, leverage, liquidation price, fees, and R:R ratios.
+*   **Inline Price Search**: Access real-time asset prices in any Telegram chat by typing `@your_bot_name SYMBOL`.
+*   **Automated Summaries**: Daily digests and weekly performance reports delivered straight to your DM.
 
 ---
 
-## 🛠 Manual Installation (Local)
+## 🛠️ Tech Stack
 
-If you prefer running without Docker:
+-   **Backend**: Python 3.10+ (Asynchronous event-driven architecture).
+-   **Framework**: `aiogram 3.x` for the Telegram Bot interface.
+-   **Real-time Data**: High-performance `websockets` integration with Hyperliquid L1.
+-   **Database**: `MongoDB` with `Motor` (async driver) for persistent storage of trades and user settings.
+-   **Data Vis**: `Matplotlib` & `Pandas` for dynamic image rendering and financial calculations.
+-   **Configuration**: `Pydantic Settings` for robust environment management.
+-   **Scheduling**: `APScheduler` for automated reports and background tasks.
 
-**Prerequisites:** Python 3.10+, MongoDB running locally.
+---
 
-1.  **Install Dependencies:**
+## 📦 Installation & Setup
+
+### Docker (Recommended)
+The easiest way to deploy Velox is using Docker Compose.
+
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/qzbxw/velox.git
+    cd velox
+    ```
+
+2.  **Configure environment**:
+    ```bash
+    cp .env.example .env
+    # Edit .env with your BOT_TOKEN and MONGO_URI
+    ```
+
+3.  **Launch**:
+    ```bash
+    docker-compose up -d --build
+    ```
+
+### Local Development
+1.  **Install dependencies**:
     ```bash
     pip install -r requirements.txt
     ```
 
-2.  **Set Environment Variables:**
-    Ensure `.env` is configured (set `MONGO_URI` to your local MongoDB instance, e.g., `mongodb://localhost:27017`).
-
-3.  **Run the Bot:**
+2.  **Run the bot**:
     ```bash
     python -m bot.main
     ```
 
 ---
 
-## 📚 Commands Guide
+## 🎮 Commands Overview
 
 | Command | Description |
 | :--- | :--- |
-| `/start` | Show the main menu and welcome message. |
-| `/add_wallet <0x...>` | Start tracking a wallet address. |
-| `/balance` | Show current spot balances and perps equity. |
-| `/positions` | Show open Futures (Perps) positions. |
-| `/orders` | Show open limit orders with distance to fill. |
-| `/funding <SYM>` | Show funding rates (current & APR). |
-| `/stats <SYM>` | Show OI and 24h Volume. |
-| `/pnl` | Show PnL analysis (Realized/Unrealized). |
-| `/market` | View volatility and price moves for top assets. |
-| `/watch <SYMBOL>` | Add a token to your personal watchlist. |
-| `/lang` | Switch language (English/Russian). |
+| `/start` | Open the main interactive menu |
+| `/add_wallet <0x...>` | Start tracking a new wallet |
+| `/tag <0x...> <Name>` | Assign a human-readable name to a wallet |
+| `/threshold <0x...> <USD>` | Set minimum trade size for notifications |
+| `/alert <SYM> <Price>` | Set a custom price alert |
+| `/watch <SYM>` | Add symbol to volatility watchlist |
+| `/export` | Get CSV export of trades and equity |
+
+---
+
+## 📐 Architecture
+
+Velox is built with scalability and reliability in mind:
+-   **`WSManager`**: A central engine managing real-time subscriptions and debouncing alerts to prevent spam.
+-   **`Analytics Engine`**: Decoupled logic for financial calculations and image rendering.
+-   **`Stateful Handlers`**: FSM-based interaction flow for complex operations like the risk calculator.
+-   **`Service Layer`**: Abstraction over the Hyperliquid REST API for data consistency.
 
 ---
 
 ## 📄 License
 
-MIT License.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
+
+---
+
+*Developed for traders who demand precision and speed.*

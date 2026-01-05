@@ -45,8 +45,14 @@ async def ensure_symbol_mapping():
                 tid = t.get("tokenId")
                 name = t.get("name")
                 if tid is not None and name:
-                    new_map[str(tid)] = name
-                    new_map[f"@{tid}"] = name
+                    # Do not overwrite existing keys (Universe index priority for Spot)
+                    s_tid = str(tid)
+                    if s_tid not in new_map:
+                        new_map[s_tid] = name
+                    
+                    at_tid = f"@{tid}"
+                    if at_tid not in new_map:
+                        new_map[at_tid] = name
 
     # Process Perps Meta
     if isinstance(perps_meta, dict):
@@ -69,6 +75,20 @@ async def get_symbol_name(token_id: str | int) -> str:
     await ensure_symbol_mapping()
     
     s_id = str(token_id)
+    
+    # Hardcoded overrides for canonical Perps
+    if s_id == "0": return "BTC"
+    if s_id == "1": return "ETH"
+    
+    # Common symbols bypass (Safety)
+    if s_id in ("BTC", "ETH", "SOL", "HYPE", "USDC"):
+        return s_id
+    
+    # If the input is already a known symbol name (e.g. "BTC", "ETH"), return it directly
+    # This prevents weird double lookups or failures if the ID is actually a name
+    if s_id in _SYMBOL_CACHE["map"].values():
+        return s_id
+
     # Check exact match
     if s_id in _SYMBOL_CACHE["map"]:
         return _SYMBOL_CACHE["map"][s_id]
@@ -273,11 +293,32 @@ async def get_user_portfolio(wallet_address: str):
     """Fetch historical PnL/Portfolio stats (Official API data)."""
     url = f"{settings.HYPERLIQUID_API_URL}/info"
     payload = {
-        "type": "userPortfolio",
+        "type": "portfolio",
+        "user": wallet_address
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # logger.info(f"Portfolio response for {wallet_address}: {str(data)[:200]}...")
+                    return data
+                logger.error(f"Error fetching portfolio for {wallet_address}: Status {resp.status}")
+                return None
+    except Exception as e:
+        logger.error(f"Exception fetching portfolio for {wallet_address}: {e}")
+        return None
+
+async def get_user_fills(wallet_address: str):
+    """Fetch user trade history (fills)."""
+    url = f"{settings.HYPERLIQUID_API_URL}/info"
+    payload = {
+        "type": "userFills",
         "user": wallet_address
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
-            return None
+            logger.error(f"Error fetching fills: {resp.status}")
+            return []

@@ -8,7 +8,8 @@ from collections import defaultdict
 from collections import deque
 from bot.config import settings
 from bot.database import db
-from bot.services import get_open_orders, get_spot_meta, normalize_spot_coin, pretty_float, get_symbol_name
+from bot.locales import _t
+from bot.services import get_open_orders, get_spot_meta, normalize_spot_coin, pretty_float, get_symbol_name, get_perps_context
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,9 @@ class WSManager:
         # Debounce: { (wallet, coin): timestamp }
         self.alert_cooldowns = {}
         
+        # Liquidation Alert Cooldown: { wallet: timestamp }
+        self.liq_alert_cooldowns = {}
+        
         # Custom Price Alerts (User defined)
         self.active_alerts = [] # List of alert dicts
         self.triggered_alerts = set() # Set of alert_ids that recently triggered (to avoid double trigger if DB lag)
@@ -41,12 +45,19 @@ class WSManager:
         # Task handles
         self.ping_task = None
         self.alerts_refresh_task = None
+        self.whale_task = None
+        
+        # Whale Watcher
+        self.top_assets = set()
+        self.whale_cache = deque(maxlen=20) # Dedup recent large trades
+        self.whale_subscribers_cache = [] # List of user docs
 
     async def start(self):
         self.running = True
         
         # Start background tasks
         self.alerts_refresh_task = asyncio.create_task(self._refresh_alerts_loop())
+        self.whale_task = asyncio.create_task(self._whale_assets_loop())
         
         while self.running:
             try:
@@ -91,6 +102,93 @@ class WSManager:
         
         if self.alerts_refresh_task:
             self.alerts_refresh_task.cancel()
+        if self.whale_task:
+            self.whale_task.cancel()
+
+    async def _whale_assets_loop(self):
+        """Periodically subscribe to trades for top volume assets."""
+        while self.running:
+            try:
+                if not self.ws:
+                    await asyncio.sleep(5)
+                    continue
+
+                ctx = await get_perps_context()
+                if ctx and isinstance(ctx, list) and len(ctx) == 2:
+                    universe = ctx[0]["universe"]
+                    asset_ctxs = ctx[1]
+                    
+                    # Sort by volume (dayNtlVlm)
+                    # asset_ctxs is same order as universe
+                    combined = []
+                    for i, u in enumerate(universe):
+                        if i < len(asset_ctxs):
+                            vol = float(asset_ctxs[i].get("dayNtlVlm", 0))
+                            combined.append((u["name"], vol))
+                    
+                    combined.sort(key=lambda x: x[1], reverse=True)
+                    top_20 = [x[0] for x in combined[:20]]
+                    
+                    # Subscribe to new ones
+                    new_assets = set(top_20)
+                    to_sub = new_assets - self.top_assets
+                    
+                    if to_sub:
+                        logger.info(f"Whale Watcher: Subscribing to {len(to_sub)} assets")
+                        for sym in to_sub:
+                            await self.ws.send(json.dumps({
+                                "method": "subscribe",
+                                "subscription": {"type": "trades", "coin": sym}
+                            }))
+                            await asyncio.sleep(0.1) # Rate limit
+                    
+                    self.top_assets = new_assets
+                    
+            except Exception as e:
+                logger.error(f"Whale loop error: {e}")
+            
+            await asyncio.sleep(300) # Refresh every 5 min
+
+    async def handle_trades(self, data):
+        """Handle public trades for Whale Watcher."""
+        trades = data.get("data", [])
+        if not trades: return
+        
+        # Use cached subscribers
+        whale_users = self.whale_subscribers_cache
+        if not whale_users: return
+
+        for t in trades:
+            sym = t.get("coin")
+            if not sym: continue 
+            
+            sz = float(t.get("sz", 0))
+            px = float(t.get("px", 0))
+            val = sz * px
+            
+            # Global min threshold to even bother ($50k)
+            if val < 50_000: continue
+            
+            # Dedup
+            tid = t.get("hash") or f"{sym}-{t.get('time')}-{sz}"
+            if tid in self.whale_cache: continue
+            self.whale_cache.append(tid)
+            
+            side = t.get("side", "").upper()
+            icon = "🟢" if side == "B" else "🔴"
+            side_txt = "BUY" if side == "B" else "SELL"
+            
+            for u in whale_users:
+                # Check user specific threshold if any
+                thr = u.get("whale_threshold", 100_000)
+                if val >= thr:
+                    try:
+                        lang = u.get("lang", "ru")
+                        msg = _t(lang, "whale_alert") + "\n" + _t(lang, "whale_msg", icon=icon, side=side_txt, symbol=sym, val=pretty_float(val, 0), price=pretty_float(px))
+                        await self.bot.send_message(u["user_id"], msg, parse_mode="HTML")
+                    except:
+                        pass
+
 
     async def _load_universe(self):
         try:
@@ -147,12 +245,18 @@ class WSManager:
                     pass
 
     async def _refresh_alerts_loop(self):
-        """Fetch alerts from DB periodically."""
+        """Fetch alerts and user settings from DB periodically."""
         while self.running:
             try:
+                # Price Alerts
                 alerts = await db.get_all_active_alerts()
                 if alerts is not None:
                     self.active_alerts = alerts
+                    
+                # Whale Subscribers
+                users = await db.get_all_users()
+                self.whale_subscribers_cache = [u for u in users if u.get("whale_alerts")]
+                
             except Exception as e:
                 logger.error(f"Error refreshing alerts: {e}")
             await asyncio.sleep(10)
@@ -252,15 +356,22 @@ class WSManager:
     async def subscribe_user(self, wallet):
         if not self.ws: return
         wallet = wallet.lower()
+        # User Fills
         await self.ws.send(json.dumps({
             "method": "subscribe",
             "subscription": {"type": "userFills", "user": wallet}
         }))
+        # Open Orders
         await self.ws.send(json.dumps({
             "method": "subscribe",
             "subscription": {"type": "openOrders", "user": wallet}
         }))
-        logger.info(f"Subscribed to updates for {wallet}")
+        # WebData2 (Clearinghouse state) for Liquidation Monitor
+        await self.ws.send(json.dumps({
+            "method": "subscribe",
+            "subscription": {"type": "webData2", "user": wallet}
+        }))
+        logger.info(f"Subscribed to updates (Fills, Orders, WebData2) for {wallet}")
 
     async def subscribe_all_mids(self):
         if not self.ws: return
@@ -277,6 +388,10 @@ class WSManager:
             await self.handle_fills(data.get("data", {}))
         elif channel == "openOrders":
             await self.handle_open_orders(data.get("data", []))
+        elif channel == "webData2":
+            await self.handle_web_data2(data.get("data", {}))
+        elif channel == "trades":
+            await self.handle_trades(data)
 
     async def handle_mids(self, mids):
         for coin, price in mids.items():
@@ -315,7 +430,12 @@ class WSManager:
                 # Remove from DB
                 await db.delete_alert(aid)
                 # Send message
-                msg = f"🔔 <b>Alert: {html.escape(symbol)}</b>\n\nPrice hit <b>${pretty_float(current_price)}</b> (Target: {direction} {target})"
+                try:
+                    lang = await db.get_lang(user_id)
+                except:
+                    lang = "ru"
+
+                msg = _t(lang, "custom_alert_title") + "\n\n" + _t(lang, "custom_alert_msg", symbol=html.escape(symbol), price=pretty_float(current_price), direction=direction, target=target)
                 try:
                     await self.bot.send_message(user_id, msg, parse_mode="HTML")
                 except Exception as e:
@@ -403,6 +523,15 @@ class WSManager:
 
             direction = "📈" if move > 0 else "📉"
             for chat_id in list(subs):
+                # Check user settings
+                user_settings = await db.get_user_settings(chat_id)
+                user_thresh = user_settings.get("watch_alert_pct")
+                
+                # If user defined a custom threshold, re-check logic
+                effective_thresh = user_thresh if user_thresh is not None else thresh
+                if abs(move) < effective_thresh:
+                    continue
+
                 key = (chat_id, sym)
                 last = self.watch_alert_cooldowns.get(key, 0)
                 if now - last < settings.WATCH_ALERT_COOLDOWN:
@@ -415,18 +544,7 @@ class WSManager:
                 except Exception:
                     lang = "ru"
 
-                title = "<b>Watch Alert</b>" if lang == "en" else "<b>Алерт: Watchlist</b>"
-                moved = "moved" if lang == "en" else "двинулся"
-                in_txt = "in" if lang == "en" else "за"
-                now_lbl = "Now" if lang == "en" else "Сейчас"
-                then_lbl = "Then" if lang == "en" else "Было"
-
-                msg = (
-                    f"{direction} {title}\n"
-                    f"<b>{sym}</b> {moved} <b>{move*100:+.2f}%</b> {in_txt} <b>{window//60}m</b>\n"
-                    f"{now_lbl}: <b>${float(cur):.4f}</b>\n"
-                    f"{then_lbl}: <b>${float(ref):.4f}</b>"
-                )
+                msg = _t(lang, "watch_alert_title") + "\n" + _t(lang, "watch_alert_msg", dir_icon=direction, symbol=sym, move=f"{move*100:+.2f}", time=window//60, curr=f"{float(cur):.4f}", prev=f"{float(ref):.4f}")
                 try:
                     await self.bot.send_message(chat_id, msg, parse_mode="HTML")
                 except Exception as e:
@@ -464,6 +582,10 @@ class WSManager:
                 hit_pct = pct_diff <= pct_thresh if pct_thresh else False
                 hit_usd = usd_diff <= settings.PROXIMITY_USD_THRESHOLD if (settings.PROXIMITY_USD_THRESHOLD and sz) else False
 
+                # If the deviation is > 0.5%, we shouldn't trigger a proximity alert just because the position size is small (USD dist)
+                if hit_usd and pct_diff > 0.005:
+                    hit_usd = False
+
                 if hit_pct or hit_usd:
                     oid = self._extract_order_id(order)
                     await self.trigger_proximity_alert(wallet, coin, limit_px, current_px, oid, side, sz, pct_diff, usd_diff)
@@ -479,38 +601,62 @@ class WSManager:
         for user in users:
             chat_id = user.get('chat_id')
             lang = "ru"
+            
+            # Check for user overrides
+            user_settings = await db.get_user_settings(chat_id)
+            user_prox_pct = user_settings.get("prox_alert_pct")
+            
+            # If user has custom pct setting, check if we actually hit it
+            # Because check_proximity uses global settings to trigger this function
+            # We must re-verify for this specific user
+            eff_thresh = user_prox_pct if user_prox_pct is not None else settings.PROXIMITY_THRESHOLD
+            if side == "buy" and not user_prox_pct: eff_thresh = settings.BUY_PROXIMITY_THRESHOLD
+            elif side == "sell" and not user_prox_pct: eff_thresh = settings.SELL_PROXIMITY_THRESHOLD
+            
+            if pct_diff > eff_thresh and (usd_diff > settings.PROXIMITY_USD_THRESHOLD if sz else True):
+                # If both failed (pct too high AND usd too high), skip
+                continue
+
             try:
                 if chat_id:
                     lang = await db.get_lang(chat_id)
             except Exception:
                 lang = "ru"
 
-            safe_coin = html.escape(str(coin))
-            side_txt = "🟢 BUY" if side == "buy" else ("🔴 SELL" if side == "sell" else "🟡 ORDER")
-            dir_txt = "↓" if side == "buy" else ("↑" if side == "sell" else "")
-            pct_thresh = settings.PROXIMITY_THRESHOLD
+            safe_coin = html.escape(await get_symbol_name(coin))
+            
             if side == "buy":
-                pct_thresh = settings.BUY_PROXIMITY_THRESHOLD
+                side_txt = _t(lang, "prox_alert_buy")
+                dir_txt = "↓"
             elif side == "sell":
-                pct_thresh = settings.SELL_PROXIMITY_THRESHOLD
+                side_txt = _t(lang, "prox_alert_sell")
+                dir_txt = "↑"
+            else:
+                side_txt = _t(lang, "prox_alert_order")
+                dir_txt = ""
 
-            title = "⚠️ <b>Proximity Alert</b>" if lang == "en" else "⚠️ <b>Алерт: Proximity</b>"
-            mid_lbl = "Mid" if lang == "en" else "Mid"
-            limit_lbl = "Limit" if lang == "en" else "Лимит"
-            to_fill_lbl = "To fill" if lang == "en" else "До исполнения"
-            diff_lbl = "Diff" if lang == "en" else "Отклонение"
-            usd_lbl = "USD dist" if lang == "en" else "USD дистанция"
+            # Check for "dust" orders triggering USD alert while being far away
+            # If the deviation is > 10%, we shouldn't trigger a proximity alert just because the position size is small
+            if pct_diff > 0.10:
+                return
 
-            msg = (
-                f"{title}\n"
-                f"{side_txt} {safe_coin}\n"
-                f"{mid_lbl}: <b>{current_px:.6f}</b>\n"
-                f"{limit_lbl}: <b>{limit_px:.6f}</b>\n"
-                f"{to_fill_lbl}: {dir_txt} {(abs(current_px - limit_px) / current_px) * 100:.2f}%\n"
-                f"{diff_lbl}: {pct_diff*100:.2f}% (thr {pct_thresh*100:.2f}%)\n"
-                + (f"{usd_lbl}: ${usd_diff:.2f} (thr ${settings.PROXIMITY_USD_THRESHOLD:.2f})\n" if sz else "")
-                + f"Wallet: <code>{wallet[:6]}...{wallet[-4:]}</code>"
-            )
+            # Formatted Numbers
+            mid_fmt = pretty_float(current_px)
+            lim_fmt = pretty_float(limit_px)
+            fill_pct_fmt = f"{dir_txt} {(abs(current_px - limit_px) / current_px) * 100:.2f}%"
+            diff_pct_fmt = f"{pct_diff*100:.2f}% (thr {eff_thresh*100:.2f}%)"
+            
+            msg = _t(lang, "prox_alert_title") + "\n"
+            msg += f"{side_txt} {safe_coin}\n"
+            msg += f"{_t(lang, 'prox_alert_mid')}: <b>{mid_fmt}</b>\n"
+            msg += f"{_t(lang, 'prox_alert_limit')}: <b>{lim_fmt}</b>\n"
+            msg += f"{_t(lang, 'prox_alert_to_fill')}: {fill_pct_fmt}\n"
+            msg += f"{_t(lang, 'prox_alert_diff')}: {diff_pct_fmt}\n"
+            
+            if sz:
+                msg += f"{_t(lang, 'prox_alert_dist')}: ${usd_diff:.2f} (thr ${settings.PROXIMITY_USD_THRESHOLD:.2f})\n"
+                
+            msg += f"Wallet: <code>{wallet[:6]}...{wallet[-4:]}</code>"
             try:
                 await self.bot.send_message(chat_id, msg, parse_mode="HTML")
             except Exception as e:
@@ -544,13 +690,17 @@ class WSManager:
             for fill in fills:
                 coin = fill.get("coin")
                 side = fill.get("side")
-                px = fill.get("px")
-                sz = fill.get("sz")
+                px = float(fill.get("px") or 0)
+                sz = float(fill.get("sz") or 0)
                 if not all([coin, side, px, sz]):
                     continue
                 
-                norm_coin = normalize_spot_coin(coin)
-                if not self._is_known_coin(norm_coin):
+                usd_value = px * sz
+                
+                # Resolve symbol name safely (async)
+                sym_name = await get_symbol_name(coin)
+                
+                if not self._is_known_coin(sym_name):
                     continue
                 
                 fill_with_user = dict(fill)
@@ -560,22 +710,33 @@ class WSManager:
                 # Check for liquidation
                 is_liq = fill.get("liquidation", False) or fill.get("isLiquidation", False)
                 
+                # Check user settings (threshold)
+                threshold = user.get("threshold", 0.0)
+                if usd_value < threshold and not is_liq:
+                    continue
+
                 side_emoji = "🟢" if side.lower() in ("b","buy","bid") else "🔴"
                 if is_liq:
                     side_emoji = "💀"
                 
-                safe_coin = html.escape(str(norm_coin))
-                wallet_tag = f"{user_wallet[:6]}...{user_wallet[-4:]}"
+                safe_coin = html.escape(sym_name)
                 
-                type_lbl = "Fill" if lang == "en" else "Исполнение"
+                tag = user.get("tag")
+                wallet_display = f"<b>{html.escape(tag)}</b>" if tag else f"<code>{user_wallet[:6]}...{user_wallet[-4:]}</code>"
+                
                 if is_liq:
-                    type_lbl = "LIQUIDATION" if lang == "en" else "ЛИКВИДАЦИЯ"
+                    title = _t(lang, "fill_alert_liq")
+                else:
+                    title = _t(lang, "fill_alert_title")
 
-                msg = (
-                    f"{side_emoji} <b>{type_lbl}</b>\n"
-                    f"<b>{safe_coin}</b>\n"
-                    f"{side_emoji} {side.upper()} {sz:.6f} @ ${float(px):.6f}\n"
-                    f"Wallet: <code>{wallet_tag}</code>"
+                msg = title + "\n" + _t(lang, "fill_alert_msg", 
+                    side_icon=side_emoji, 
+                    side=side.upper(), 
+                    sz=sz, 
+                    symbol=safe_coin, 
+                    px=pretty_float(px), 
+                    val=pretty_float(usd_value, 2), 
+                    wallet=wallet_display
                 )
                 try:
                     await self.bot.send_message(chat_id, msg, parse_mode="HTML")
@@ -603,3 +764,56 @@ class WSManager:
                 self.open_orders[user_wallet] = filtered
             else:
                 self.open_orders[user_wallet] = orders
+    
+    async def handle_web_data2(self, data):
+        """Handle clearinghouse state updates (margin/risk)."""
+        # We need 'user' to be present to know who to alert
+        user_wallet = data.get("user") # Try to get it from root of data
+        # Sometimes it's not there.
+        # If we can't identify the user, we skip.
+        if not user_wallet:
+            # Some reverse engineering or hope?
+            # For now, safe fail.
+            return
+            
+        user_wallet = user_wallet.lower()
+        
+        clearinghouse_state = data.get("clearinghouseState", {})
+        margin_summary = clearinghouse_state.get("marginSummary", {})
+        
+        account_value = float(margin_summary.get("accountValue", 0) or 0)
+        total_margin_used = float(margin_summary.get("totalMarginUsed", 0) or 0)
+        
+        if account_value <= 0: return
+        
+        margin_ratio = total_margin_used / account_value
+        
+        # ALERT
+        if margin_ratio > 0.8:
+            # Check cooldown
+            last_alert = self.liq_alert_cooldowns.get(user_wallet, 0)
+            if time.time() - last_alert < 3600: # 1 hour
+                return
+            
+            self.liq_alert_cooldowns[user_wallet] = time.time()
+            
+            # Notify
+            users = await db.get_users_by_wallet(user_wallet)
+            for user in users:
+                chat_id = user.get('chat_id')
+                lang = "ru"
+                try:
+                    lang = await db.get_lang(chat_id)
+                except:
+                    lang = "ru"
+                    
+                msg = _t(lang, "liq_risk_title") + "\n" + _t(lang, "liq_risk_msg", 
+                    wallet=f"{user_wallet[:6]}...", 
+                    ratio=f"{margin_ratio*100:.1f}", 
+                    equity=pretty_float(account_value)
+                )
+
+                try:
+                    await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                except:
+                    pass

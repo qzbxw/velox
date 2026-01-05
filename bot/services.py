@@ -1,18 +1,89 @@
 import aiohttp
 import logging
+import asyncio
+import time
 from bot.config import settings
 
 logger = logging.getLogger(__name__)
 
-def normalize_spot_coin(coin: str | None) -> str:
-    if not coin:
-        return ""
-    c = str(coin).upper()
-    if c == "USDC":
-        return c
-    if c.startswith("U") and len(c) > 1:
-        return c[1:]
-    return c
+# Cache for symbol mappings (ID -> Name)
+_SYMBOL_CACHE = {
+    "map": {},  # id (int/str) -> name (str)
+    "last_update": 0
+}
+
+async def ensure_symbol_mapping():
+    """Ensures the symbol mapping cache is populated and up-to-date."""
+    now = time.time()
+    if now - _SYMBOL_CACHE["last_update"] < 300 and _SYMBOL_CACHE["map"]:
+        return
+
+    # Fetch both Spot and Perps meta
+    spot_meta, perps_meta = await asyncio.gather(
+        get_spot_meta(),
+        get_perps_meta(),
+        return_exceptions=True
+    )
+
+    new_map = {}
+
+    # Process Spot Meta
+    if isinstance(spot_meta, dict):
+        # Universe mapping (Index -> Name)
+        universe = spot_meta.get("universe", [])
+        for idx, token in enumerate(universe):
+            if isinstance(token, dict) and "name" in token:
+                 new_map[str(token.get("index", idx))] = token["name"]
+                 new_map[f"@{idx}"] = token["name"] # Handle potential @ID format
+            elif isinstance(token, str): # Sometimes universe is just strings? (Rare in HL spot)
+                 new_map[str(idx)] = token
+
+        # Token ID mapping
+        tokens = spot_meta.get("tokens", [])
+        for t in tokens:
+            if isinstance(t, dict):
+                tid = t.get("tokenId")
+                name = t.get("name")
+                if tid is not None and name:
+                    new_map[str(tid)] = name
+                    new_map[f"@{tid}"] = name
+
+    # Process Perps Meta
+    if isinstance(perps_meta, dict):
+        universe = perps_meta.get("universe", [])
+        for idx, asset in enumerate(universe):
+            name = asset.get("name")
+            if name:
+                # Perps often reference by index in the universe array
+                new_map[str(idx)] = name
+                new_map[f"@{idx}"] = name 
+                # Also map the name to itself for safety
+                new_map[name] = name
+
+    _SYMBOL_CACHE["map"] = new_map
+    _SYMBOL_CACHE["last_update"] = now
+    logger.info(f"Refreshed symbol mapping. Total keys: {len(new_map)}")
+
+async def get_symbol_name(token_id: str | int) -> str:
+    """Resolves a token ID (or index) to its symbol name."""
+    await ensure_symbol_mapping()
+    
+    s_id = str(token_id)
+    # Check exact match
+    if s_id in _SYMBOL_CACHE["map"]:
+        return _SYMBOL_CACHE["map"][s_id]
+    
+    # Check @ID format
+    if not s_id.startswith("@"):
+        at_id = f"@{s_id}"
+        if at_id in _SYMBOL_CACHE["map"]:
+            return _SYMBOL_CACHE["map"][at_id]
+            
+    # Fallback: if it looks like a standard name (not an ID), return it
+    if not s_id.isdigit() and not s_id.startswith("@"):
+        return s_id
+        
+    return f"@{s_id}"
 
 def pretty_float(x: float, max_decimals: int = 6) -> str:
     """Human-friendly float: trim trailing zeros while keeping up to max_decimals."""
@@ -28,16 +99,21 @@ def pretty_float(x: float, max_decimals: int = 6) -> str:
     return s
 
 def extract_avg_entry_from_balance(balance: dict) -> float:
-    """Best-effort: try to use avg/entry provided by spotClearinghouseState.
-
-    Hyperliquid spot balance objects can vary; we probe common fields.
-    Returns 0.0 if not available.
+    """Best-effort: try to use avg/entry provided by clearinghouse state.
+    Works for both Spot balances and Perps positions.
     """
     if not isinstance(balance, dict):
         return 0.0
 
-    # direct average fields
-    for k in ("avgPx", "avg_px", "avgPrice", "entryPx", "entry_px", "avgEntry"):
+    # Perps fields: 'entryPx'
+    if "entryPx" in balance:
+        try:
+            return float(balance["entryPx"])
+        except (ValueError, TypeError):
+            pass
+
+    # Spot fields
+    for k in ("avgPx", "avg_px", "avgPrice", "avgEntry"):
         v = balance.get(k)
         if v is not None:
             try:
@@ -47,42 +123,11 @@ def extract_avg_entry_from_balance(balance: dict) -> float:
             except (TypeError, ValueError):
                 pass
 
-    # entry notional / cost basis divided by position size
-    total = balance.get("total")
-    for k in ("entryNtl", "entry_ntl", "cost", "costBasis", "cost_basis"):
-        v = balance.get(k)
-        if v is None:
-            continue
-        try:
-            ntl = float(v)
-            sz = float(total) if total is not None else 0.0
-            if ntl > 0 and sz > 0:
-                return ntl / sz
-        except (TypeError, ValueError):
-            pass
-
-    # nested objects
-    inner = balance.get("position")
-    if isinstance(inner, dict):
-        return extract_avg_entry_from_balance(inner)
-
     return 0.0
 
-def _extract_spot_balances(state: dict) -> list[dict]:
-    if not isinstance(state, dict):
-        return []
-    balances = state.get("balances")
-    if isinstance(balances, list):
-        return balances
-    inner = state.get("state")
-    if isinstance(inner, dict) and isinstance(inner.get("balances"), list):
-        return inner["balances"]
-    return []
-
 async def get_user_state(wallet_address: str):
-    """Fetch user state (balances) via REST API."""
+    """Fetch Spot user state (balances) via REST API."""
     url = f"{settings.HYPERLIQUID_API_URL}/info"
-    # Use spotClearinghouseState for Spot balances
     payload = {
         "type": "spotClearinghouseState",
         "user": wallet_address
@@ -93,12 +138,33 @@ async def get_user_state(wallet_address: str):
             if resp.status == 200:
                 return await resp.json()
             else:
-                logger.error(f"Error fetching state: {resp.status}")
+                logger.error(f"Error fetching spot state: {resp.status}")
+                return None
+
+async def get_perps_state(wallet_address: str):
+    """Fetch Perps (Futures) user state via REST API."""
+    url = f"{settings.HYPERLIQUID_API_URL}/info"
+    payload = {
+        "type": "clearinghouseState",
+        "user": wallet_address
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            else:
+                logger.error(f"Error fetching perps state: {resp.status}")
                 return None
 
 async def get_spot_balances(wallet_address: str) -> list[dict]:
     state = await get_user_state(wallet_address)
-    return _extract_spot_balances(state)
+    if not isinstance(state, dict):
+        return []
+    balances = state.get("balances")
+    if isinstance(balances, list):
+        return balances
+    return []
 
 async def get_spot_meta():
     """Fetch spot metadata (universe)."""
@@ -111,55 +177,27 @@ async def get_spot_meta():
                 return await resp.json()
             return None
 
-def extract_spot_symbol_map(spot_meta: dict) -> dict[int, str]:
-    out: dict[int, str] = {}
+async def get_perps_meta():
+    """Fetch perps metadata (universe)."""
+    url = f"{settings.HYPERLIQUID_API_URL}/info"
+    payload = {"type": "meta"}
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            return None
 
-    def walk(obj):
-        if isinstance(obj, dict):
-            name = obj.get("name")
-            idx = obj.get("index")
-            if isinstance(name, str) and isinstance(idx, int):
-                out[idx] = name
-
-            # common id keys
-            name = obj.get("name")
-            idx2 = obj.get("id")
-            if isinstance(name, str) and isinstance(idx2, int):
-                out[idx2] = name
-
-            name = obj.get("name")
-            tid = obj.get("tokenId")
-            if isinstance(name, str) and isinstance(tid, int):
-                out[tid] = name
-
-            name = obj.get("name")
-            coin_id = obj.get("coin")
-            if isinstance(name, str) and isinstance(coin_id, int):
-                out[coin_id] = name
-
-            for v in obj.values():
-                walk(v)
-        elif isinstance(obj, list):
-            for it in obj:
-                walk(it)
-
-    walk(spot_meta)
-
-    # positional mapping for universe arrays (sometimes coin is an index)
-    if isinstance(spot_meta, dict) and isinstance(spot_meta.get("universe"), list):
-        universe = spot_meta.get("universe")
-        for i, item in enumerate(universe):
-            if isinstance(item, dict) and isinstance(item.get("name"), str):
-                out.setdefault(i, item["name"])
-
-    if isinstance(spot_meta, dict) and isinstance(spot_meta.get("spotMeta"), dict):
-        inner = spot_meta.get("spotMeta")
-        if isinstance(inner.get("universe"), list):
-            for i, item in enumerate(inner["universe"]):
-                if isinstance(item, dict) and isinstance(item.get("name"), str):
-                    out.setdefault(i, item["name"])
-
-    return out
+async def get_perps_context():
+    """Fetch perps market context (funding, oi, volume, etc)."""
+    url = f"{settings.HYPERLIQUID_API_URL}/info"
+    payload = {"type": "metaAndAssetCtxs"}
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            return None
 
 async def get_open_orders(wallet_address: str):
     url = f"{settings.HYPERLIQUID_API_URL}/info"
@@ -207,10 +245,27 @@ async def get_mid_price(symbol: str) -> float:
     if not mids:
         return 0.0
 
-    px = mids.get(sym)
-    if px is None and sym.startswith("U") and len(sym) > 1:
-        px = mids.get(sym[1:])
-    try:
-        return float(px) if px is not None else 0.0
-    except (TypeError, ValueError):
-        return 0.0
+    # Try direct match
+    if sym in mids:
+        try:
+            return float(mids[sym])
+        except:
+            pass
+            
+    # Try handling generic names if internal name differs
+    # (Simplified: logic usually requires mapping back to universe)
+    
+    return 0.0
+
+async def get_user_portfolio(wallet_address: str):
+    """Fetch historical PnL/Portfolio stats (Official API data)."""
+    url = f"{settings.HYPERLIQUID_API_URL}/info"
+    payload = {
+        "type": "userPortfolio",
+        "user": wallet_address
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            return None

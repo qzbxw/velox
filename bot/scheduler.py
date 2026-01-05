@@ -1,11 +1,85 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.database import db
-from bot.services import get_spot_balances, get_user_portfolio, pretty_float
+from bot.services import get_spot_balances, get_user_portfolio, pretty_float, get_perps_context, get_hlp_info
+from bot.analytics import generate_market_report_card, generate_alpha_dashboard, generate_ecosystem_dashboard
+from bot.locales import _t
 from bot.config import settings
+from aiogram.types import BufferedInputFile, InputMediaPhoto
 import time
 import logging
+import datetime
+import asyncio
 
 logger = logging.getLogger(__name__)
+
+async def send_market_reports(bot):
+    """Checks all users and sends scheduled market reports."""
+    now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M")
+    
+    users = await db.get_all_users()
+    users_to_alert = []
+    
+    for user in users:
+        alert_times = user.get("market_alert_times", [])
+        if now_utc in alert_times:
+            users_to_alert.append(user)
+            
+    if not users_to_alert:
+        return
+        
+    logger.info(f"Sending market reports to {len(users_to_alert)} users for {now_utc} UTC")
+    
+    # Fetch market data once
+    ctx, hlp_info = await asyncio.gather(
+        get_perps_context(),
+        get_hlp_info(),
+        return_exceptions=True
+    )
+    
+    if isinstance(ctx, Exception) or not ctx or not isinstance(ctx, list) or len(ctx) != 2:
+        logger.error("Failed to fetch market context for scheduled reports")
+        return
+        
+    if isinstance(hlp_info, Exception):
+        hlp_info = None
+        
+    universe = []
+    if isinstance(ctx[0], dict) and "universe" in ctx[0]:
+        universe = ctx[0]["universe"]
+    elif isinstance(ctx[0], list):
+        universe = ctx[0]
+        
+    asset_ctxs = ctx[1]
+    
+    # Generate images once
+    buf1 = generate_market_report_card(asset_ctxs, universe)
+    buf2 = generate_alpha_dashboard(asset_ctxs, universe)
+    buf3 = generate_ecosystem_dashboard(asset_ctxs, universe, hlp_info)
+    
+    if not buf1 or not buf2 or not buf3:
+        logger.error("Failed to generate market dashboard images")
+        return
+        
+    img_data1 = buf1.read()
+    img_data2 = buf2.read()
+    img_data3 = buf3.read()
+    
+    for user in users_to_alert:
+        chat_id = user["user_id"]
+        lang = user.get("lang", "en")
+        
+        # Prepare caption
+        caption = f"📊 <b>{_t(lang, 'market_alerts_title')} ({now_utc} UTC)</b>"
+        
+        try:
+            media = [
+                InputMediaPhoto(media=BufferedInputFile(img_data1, filename="market_overview.png"), caption=caption, parse_mode="HTML"),
+                InputMediaPhoto(media=BufferedInputFile(img_data2, filename="alpha_sentiment.png")),
+                InputMediaPhoto(media=BufferedInputFile(img_data3, filename="ecosystem_liquidity.png"))
+            ]
+            await bot.send_media_group(chat_id, media)
+        except Exception as e:
+            logger.error(f"Failed to send market report to {chat_id}: {e}")
 
 def _is_buy(side: str) -> bool:
     s = (side or "").lower()
@@ -230,6 +304,14 @@ def setup_scheduler(bot):
         'cron',
         hour=9,
         minute=0,
+        args=[bot]
+    )
+
+    # Market Reports: Every minute
+    scheduler.add_job(
+        send_market_reports,
+        'cron',
+        minute='*',
         args=[bot]
     )
     

@@ -65,6 +65,7 @@ def _market_kb(lang):
         InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data="cb_market"),
         InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data="cb_whales")
     )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_alerts"))
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
 
@@ -724,6 +725,7 @@ async def cb_share_pnl(call: CallbackQuery):
     symbol = call.data.split(":")[1]
     await call.answer(f"Generating card for {symbol}...")
     
+    lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     ws = getattr(call.message.bot, "ws_manager", None)
     
@@ -1105,6 +1107,7 @@ async def cb_heatmap_sort(call: CallbackQuery):
     sort_by = call.data.split(":")[1]
     await call.answer(f"Sorting by {sort_by}...")
     
+    lang = await db.get_lang(call.message.chat.id)
     ctx = await get_perps_context()
     universe = ctx[0].get("universe", [])
     asset_ctxs = ctx[1]
@@ -1129,6 +1132,7 @@ async def cb_heatmap_sort(call: CallbackQuery):
 
 @router.message(Command("set_vol"))
 async def cmd_set_vol(message: Message):
+    lang = await db.get_lang(message.chat.id)
     args = message.text.split()
     if len(args) < 2:
         await message.answer(_t(lang, "set_vol_usage"), parse_mode="HTML")
@@ -1345,6 +1349,77 @@ class CalcStates(StatesGroup):
     sl = State()
     tp = State()
     risk = State()
+
+class MarketAlertStates(StatesGroup):
+    waiting_for_time = State()
+
+@router.callback_query(F.data == "cb_market_alerts")
+async def cb_market_alerts(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    user_settings = await db.get_user_settings(call.message.chat.id)
+    alert_times = user_settings.get("market_alert_times", [])
+    
+    text = f"{_t(lang, 'market_alerts_title')}\n\n{_t(lang, 'market_alerts_msg')}\n\n"
+    
+    kb = InlineKeyboardBuilder()
+    if not alert_times:
+        text += f"<i>{_t(lang, 'no_market_alerts')}</i>"
+    else:
+        for t in sorted(alert_times):
+            text += f"⏰ <b>{t} UTC</b>\n"
+            kb.button(text=f"❌ {t}", callback_data=f"del_market_alert:{t}")
+    
+    kb.button(text=_t(lang, "btn_add_time"), callback_data="cb_add_market_alert_time")
+    kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
+    kb.adjust(1)
+    
+    await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+
+@router.callback_query(F.data == "cb_add_market_alert_time")
+async def cb_add_market_alert_time(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_lang(call.message.chat.id)
+    await call.message.answer(_t(lang, "add_time_prompt"), parse_mode="HTML")
+    await state.set_state(MarketAlertStates.waiting_for_time)
+    await call.answer()
+
+@router.message(MarketAlertStates.waiting_for_time)
+async def process_market_alert_time(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    time_str = message.text.strip()
+    
+    # Validate format HH:MM
+    try:
+        parts = time_str.split(":")
+        if len(parts) != 2: raise ValueError
+        h, m = int(parts[0]), int(parts[1])
+        if not (0 <= h <= 23 and 0 <= m <= 59): raise ValueError
+        time_str = f"{h:02d}:{m:02d}"
+    except ValueError:
+        await message.answer(_t(lang, "invalid_time"))
+        return
+
+    user_settings = await db.get_user_settings(message.chat.id)
+    alert_times = user_settings.get("market_alert_times", [])
+    if time_str not in alert_times:
+        alert_times.append(time_str)
+        await db.update_user_settings(message.chat.id, {"market_alert_times": alert_times})
+        
+    await state.clear()
+    await message.answer(_t(lang, "market_alert_added").format(time=time_str), reply_markup=_back_kb(lang, "cb_market_alerts"), parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("del_market_alert:"))
+async def cb_del_market_alert(call: CallbackQuery):
+    time_str = call.data.split(":")[1]
+    lang = await db.get_lang(call.message.chat.id)
+    
+    user_settings = await db.get_user_settings(call.message.chat.id)
+    alert_times = user_settings.get("market_alert_times", [])
+    if time_str in alert_times:
+        alert_times.remove(time_str)
+        await db.update_user_settings(call.message.chat.id, {"market_alert_times": alert_times})
+        
+    await call.answer(_t(lang, "market_alert_removed").format(time=time_str))
+    await cb_market_alerts(call)
 
 @router.callback_query(F.data == "calc_start")
 async def calc_start(call: CallbackQuery, state: FSMContext):

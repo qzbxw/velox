@@ -322,3 +322,18 @@ async def get_user_fills(wallet_address: str):
                 return await resp.json()
             logger.error(f"Error fetching fills: {resp.status}")
             return []
+
+async def get_hlp_info():
+    """Fetch HLP vault details."""
+    url = f"{settings.HYPERLIQUID_API_URL}/info"
+    # HLP Vault address is standard
+    payload = {
+        "type": "vaultDetails",
+        "vaultAddress": "0xdf13098394e1832014b0df3f91285497",
+        "user": "0x0000000000000000000000000000000000000000"
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            return None

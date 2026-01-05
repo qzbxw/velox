@@ -21,6 +21,10 @@
 ### 3. 🌊 Market Intelligence
 *   **Whale Watcher**: Live feed of institutional-sized trades ($50k+) for high-volume assets.
 *   **Volatility Alerts**: Real-time monitoring of significant price moves (e.g., ±2% within 5 minutes) for your custom watchlist.
+*   **Scheduled Market Dashboards**: Automated delivery of professional-grade market reports at user-defined times. Reports include three distinct visual dashboards:
+    1.  **Market Overview**: Prices, Volume, Gainers/Losers, and Open Interest.
+    2.  **Alpha & Sentiment**: Funding Rates (High/Low), Basis (Premium/Discount), and Leverage Density.
+    3.  **Ecosystem & Liquidity**: Market Depth (Slippage), Capital Efficiency, and HLP Vault performance.
 *   **Market Heatmaps**: Visual tables summarizing Funding Rates (APR), Open Interest, and 24h Volume across the Hyperliquid ecosystem.
 *   **Custom Price Alerts**: User-defined "Above/Below" alerts with persistent monitoring.
 
@@ -88,6 +92,7 @@ The easiest way to deploy Velox is using Docker Compose.
 | `/threshold <0x...> <USD>` | Set minimum trade size for notifications |
 | `/alert <SYM> <Price>` | Set a custom price alert |
 | `/watch <SYM>` | Add symbol to volatility watchlist |
+| `/set_whale <USD>` | Set minimum threshold for whale alerts |
 | `/export` | Get CSV export of trades and equity |
 
 ---

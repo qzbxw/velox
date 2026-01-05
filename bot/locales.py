@@ -143,6 +143,17 @@ EN = {
     "sort_oi": "Sort: OI",
     "sort_change": "Sort: 24h %",
     
+    # Market Alerts
+    "btn_market_alerts": "🔔 Market Alerts",
+    "market_alerts_title": "🔔 <b>Market Overview Alerts</b>",
+    "market_alerts_msg": "Configure scheduled market reports.\nYou will receive detailed dashboards (Fundamentals & Alpha Insights).\nNote: All times are in <b>UTC</b>.",
+    "add_time_prompt": "⌨️ Enter time in <b>HH:MM</b> format (UTC):\nExample: <code>09:00</code> or <code>18:30</code>",
+    "invalid_time": "❌ Invalid time format. Use HH:MM (e.g., 09:30)",
+    "market_alert_added": "✅ Market alert scheduled for <b>{time} UTC</b>",
+    "market_alert_removed": "🗑️ Alert for <b>{time}</b> removed.",
+    "no_market_alerts": "📭 No scheduled market reports.",
+    "btn_add_time": "➕ Add Time",
+    
     # Buttons
     "btn_balance": "🏦 Balance",
     "btn_positions": "🎰 Positions",
@@ -342,6 +353,17 @@ RU = {
     "sort_funding": "Сорт: Фандинг",
     "sort_oi": "Сорт: OI",
     "sort_change": "Сорт: Изм. 24ч",
+    
+    # Market Alerts
+    "btn_market_alerts": "🔔 Алерты Рынка",
+    "market_alerts_title": "🔔 <b>Алерты обзора рынка</b>",
+    "market_alerts_msg": "Настройте расписание отчетов по рынку.\nВы будете получать детальные дашборды (Обзор рынка + Alpha аналитика).\nПримечание: Все время указывается в <b>UTC</b>.",
+    "add_time_prompt": "⌨️ Введите время в формате <b>ЧЧ:ММ</b> (UTC):\nПример: <code>09:00</code> или <code>18:30</code>",
+    "invalid_time": "❌ Неверный формат. Используйте ЧЧ:ММ (например, 09:30)",
+    "market_alert_added": "✅ Отчет запланирован на <b>{time} UTC</b>",
+    "market_alert_removed": "🗑️ Отчет на <b>{time}</b> удален.",
+    "no_market_alerts": "📭 У вас нет запланированных отчетов.",
+    "btn_add_time": "➕ Добавить время",
     
     # Buttons
     "btn_balance": "🏦 Баланс",

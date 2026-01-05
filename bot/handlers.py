@@ -405,7 +405,7 @@ async def cmd_add_wallet(message: Message):
         await message.answer(_t(lang, "usage_add_wallet"))
         return
     
-    wallet = args[1]
+    wallet = args[1].lower()
     # Basic validation (Hyperliquid addresses are 0x...)
     if not wallet.startswith("0x") or len(wallet) != 42:
          await message.answer(_t(lang, "invalid_address"))
@@ -428,7 +428,7 @@ async def cmd_remove_wallet(message: Message):
     if len(args) < 2:
         await message.answer("Usage: /remove_wallet <address>")
         return
-    wallet = args[1]
+    wallet = args[1].lower()
     if not wallet.startswith("0x") or len(wallet) != 42:
         await message.answer(_t(lang, "invalid_address"))
         return
@@ -566,7 +566,7 @@ async def cmd_orders(message: Message):
             coin = order.get("coin")
             side = order.get("side")
             sz = float(order.get("sz", 0) or 0)
-            limit_px = float(order.get("limitPx", 0) or 0)
+            limit_px = float(order.get("limitPx", 0) or float(order.get("limit_px", 0)) or 0)
             if not coin or sz <= 0 or limit_px <= 0:
                 continue
 
@@ -578,19 +578,25 @@ async def cmd_orders(message: Message):
                 mid = await get_mid_price(norm_coin)
 
             value = sz * limit_px
-            if side == "buy":
-                to_fill_pct = ((limit_px - mid) / limit_px) * 100 if limit_px else 0
-                edge = ((mid - limit_px) / limit_px) * 100 if limit_px else 0
+            # Calculate distance from mid price
+            # Positive if limit > mid (unlikely for buy unless marketable), Negative if limit < mid
+            dist_pct = ((limit_px - mid) / mid * 100) if mid else 0.0
+            
+            if str(side).lower().startswith("b"): # Buy
+                # For buy: Edge/Discount = how much lower is limit than mid?
+                # If limit=90, mid=100 -> dist_pct = -10%. Edge = 10%
+                edge = -dist_pct
                 buy_lines.append(
                     f"{norm_coin} ${pretty_float(limit_px, 6)} x {sz:.6f} (${value:.2f})\n"
-                    f"To fill: {to_fill_pct:+.2f}% | Edge: {edge:+.2f}%"
+                    f"Dist: {dist_pct:+.2f}%"
                 )
-            else:
-                to_fill_pct = ((mid - limit_px) / limit_px) * 100 if limit_px else 0
-                profit = ((mid - limit_px) / limit_px) * 100 if limit_px else 0
+            else: # Sell
+                # For sell: Profit/Premium = how much higher is limit than mid?
+                # If limit=110, mid=100 -> dist_pct = +10%. Profit = 10%
+                profit = dist_pct
                 sell_lines.append(
                     f"{norm_coin} ${pretty_float(limit_px, 6)} x {sz:.6f} (${value:.2f})\n"
-                    f"To fill: {to_fill_pct:+.2f}% | 🎯 {profit:+.2f}%"
+                    f"Dist: {dist_pct:+.2f}%"
                 )
 
     if not buy_lines and not sell_lines:

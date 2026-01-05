@@ -38,10 +38,12 @@ class Database:
         """Add a wallet to the user's wallets list (no duplicates)."""
         if not wallet_address or not wallet_address.startswith("0x") or len(wallet_address) != 42:
             raise ValueError("Invalid address")
+        
+        wallet_lower = wallet_address.lower()
         await self.users.update_one(
             {"chat_id": chat_id},
             {
-                "$addToSet": {"wallets": wallet_address},
+                "$addToSet": {"wallets": wallet_lower},
                 "$set": {"updated_at": time.time()},
                 "$setOnInsert": {
                     "created_at": time.time(),
@@ -51,29 +53,36 @@ class Database:
             },
             upsert=True,
         )
-        logger.info(f"Added wallet {wallet_address} to user {chat_id}")
+        logger.info(f"Added wallet {wallet_lower} to user {chat_id}")
 
     async def remove_wallet(self, chat_id: int, wallet_address: str):
         """Remove a wallet from the user's wallets list."""
+        wallet_lower = wallet_address.lower()
         await self.users.update_one(
             {"chat_id": chat_id},
-            {"$pull": {"wallets": wallet_address}, "$set": {"updated_at": time.time()}},
+            {"$pull": {"wallets": wallet_lower}, "$set": {"updated_at": time.time()}},
         )
-        logger.info(f"Removed wallet {wallet_address} from user {chat_id}")
+        logger.info(f"Removed wallet {wallet_lower} from user {chat_id}")
 
     async def list_wallets(self, chat_id: int):
         """Return list of wallets for the user."""
         user = await self.get_user(chat_id)
         if not user:
             return []
+        
         # Migrate legacy wallet_address if present and wallets list empty
-        if isinstance(user.get("wallet_address"), str) and not user.get("wallets"):
+        legacy_wallet = user.get("wallet_address")
+        wallets = user.get("wallets", [])
+        
+        if legacy_wallet and isinstance(legacy_wallet, str) and not wallets:
+            legacy_lower = legacy_wallet.lower()
             await self.users.update_one(
                 {"chat_id": chat_id},
-                {"$set": {"wallets": [user["wallet_address"]]}, "$unset": {"wallet_address": ""}},
+                {"$set": {"wallets": [legacy_lower]}, "$unset": {"wallet_address": ""}},
             )
-            return [user["wallet_address"]]
-        return [w for w in user.get("wallets", []) if isinstance(w, str)]
+            return [legacy_lower]
+        
+        return [w for w in wallets if isinstance(w, str)]
 
     async def set_lang(self, chat_id: int, lang: str):
         l = (lang or "").lower()
@@ -128,22 +137,21 @@ class Database:
 
     async def get_users_by_wallet(self, wallet_address: str):
         """Return list of users tracking a specific wallet."""
-        # Although we assume 1:1 mostly, multiple users could track same wallet
+        wallet_lower = wallet_address.lower()
         users = []
-        async for user in self.users.find({"wallet_address": wallet_address}):
+        # Search in the 'wallets' array
+        async for user in self.users.find({"wallets": wallet_lower}):
             users.append(user)
         return users
     
     async def add_fill(self, fill_data: dict):
         """Store fill data for analytics."""
-        # Create a unique ID or use existing one to prevent duplicates
-        # WsFill has 'tid' (trade id) or 'oid' (order id) + 'coin' + 'side'?
-        # The documentation says tid is unique trade id.
-        # We should use 'tid' as unique index if possible, or compound.
-        # fill_data likely comes from WsFill.
-        
-        # We'll use upsert based on tid to avoid dupes if we reconnect
         tid = fill_data.get("tid")
+        
+        # Ensure user address is stored in lowercase for consistency
+        if "user" in fill_data:
+            fill_data["user"] = fill_data["user"].lower()
+
         if tid:
             await self.fills.update_one(
                 {"tid": tid},
@@ -151,21 +159,20 @@ class Database:
                 upsert=True
             )
         else:
-            # Fallback if no tid
             await self.fills.insert_one(fill_data)
 
     async def get_fills(self, wallet_address: str, start_time: float, end_time: float):
         """Get fills for a wallet within a time range."""
         cursor = self.fills.find({
-            "user": wallet_address,  # Assuming we store the user address in fill_data as 'user'
-            "time": {"$gte": start_time * 1000, "$lte": end_time * 1000} # API uses millis
+            "user": wallet_address.lower(),
+            "time": {"$gte": start_time * 1000, "$lte": end_time * 1000}
         })
         return await cursor.to_list(length=None)
 
     async def get_fills_range(self, wallet_address: str, start_time: float, end_time: float, limit: int = 20000):
         cursor = (
             self.fills.find({
-                "user": wallet_address,
+                "user": wallet_address.lower(),
                 "time": {"$gte": start_time * 1000, "$lte": end_time * 1000}
             })
             .sort("time", 1)
@@ -176,7 +183,7 @@ class Database:
     async def get_fills_before(self, wallet_address: str, end_time: float, limit: int = 20000):
         cursor = (
             self.fills.find({
-                "user": wallet_address,
+                "user": wallet_address.lower(),
                 "time": {"$lte": end_time * 1000}
             })
             .sort("time", 1)
@@ -187,7 +194,7 @@ class Database:
     async def get_fills_by_coin(self, wallet_address: str, coin: str, limit: int = 5000):
         """Get recent fills for a wallet/coin (best-effort for avg entry calculations)."""
         cursor = (
-            self.fills.find({"user": wallet_address, "coin": coin})
+            self.fills.find({"user": wallet_address.lower(), "coin": coin})
             .sort("time", -1)
             .limit(limit)
         )

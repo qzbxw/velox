@@ -241,10 +241,12 @@ class WSManager:
         return False
 
     def track_wallet(self, wallet: str):
+        wallet = wallet.lower()
         self.tracked_wallets.add(wallet)
         logger.info(f"Now tracking wallet: {wallet}")
 
     def untrack_wallet(self, wallet: str):
+        wallet = wallet.lower()
         self.tracked_wallets.discard(wallet)
         # Clear cached data for this wallet
         self.open_orders.pop(wallet, None)
@@ -255,10 +257,11 @@ class WSManager:
         logger.info(f"Stopped tracking wallet: {wallet}")
 
     def get_open_orders_cached(self, wallet: str) -> list:
-        return list(self.open_orders.get(wallet, []))
+        return list(self.open_orders.get(wallet.lower(), []))
 
     async def subscribe_user(self, wallet):
         if not self.ws: return
+        wallet = wallet.lower()
         # User Fills
         await self.ws.send(json.dumps({
             "method": "subscribe",
@@ -506,6 +509,9 @@ class WSManager:
     async def handle_fills(self, data):
         # data format: { isSnapshot: bool, user: str, fills: [WsFill] }
         user_wallet = data.get("user")
+        if user_wallet:
+            user_wallet = user_wallet.lower()
+        
         fills = data.get("fills", [])
         
         # If snapshot, maybe we just store history but don't alert?
@@ -578,6 +584,9 @@ class WSManager:
              orders = data.get("orders", [])
              
         user_wallet = data.get("user") if isinstance(data, dict) else None
+        if user_wallet:
+            user_wallet = user_wallet.lower()
+
         # If we can't find user in data, we might need to rely on tracking contexts, 
         # but 'user' is in the OpenOrders object.
         

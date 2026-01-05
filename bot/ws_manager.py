@@ -23,10 +23,9 @@ class WSManager:
         self.last_mids_update_ts = 0.0
         self.open_orders = defaultdict(list)  # {wallet: [orders]}
 
-        # Spot whitelist (from spotMeta). If empty -> no filtering.
-        self.spot_coins = set()
-        # self.spot_symbol_map is removed as we use centralized service for mapping
-
+        # All known symbols (Spot + Perps)
+        self.all_coins = set()
+        
         # Market history + watchlist
         self.price_history = defaultdict(lambda: deque())  # symbol -> deque[(ts, px)]
         self.watch_subscribers = defaultdict(set)  # symbol -> set(chat_id)
@@ -55,7 +54,7 @@ class WSManager:
                     self.ws = ws
                     logger.info("Connected to Hyperliquid WS")
 
-                    await self._load_spot_universe()
+                    await self._load_universe()
                     
                     # Initial subscriptions
                     await self.subscribe_all_mids()
@@ -93,31 +92,35 @@ class WSManager:
         if self.alerts_refresh_task:
             self.alerts_refresh_task.cancel()
 
-    async def _load_spot_universe(self):
+    async def _load_universe(self):
         try:
-            meta = await get_spot_meta()
+            from bot.services import get_perps_meta
+            spot_meta, perps_meta = await asyncio.gather(
+                get_spot_meta(),
+                get_perps_meta(),
+                return_exceptions=True
+            )
+            
             coins: set[str] = set()
-            if isinstance(meta, dict):
-                universe = meta.get("universe")
-                if isinstance(universe, list):
-                    for item in universe:
-                        if isinstance(item, dict):
-                            name = item.get("name")
-                            if isinstance(name, str) and name:
-                                coins.add(name)
-                inner = meta.get("spotMeta") or meta.get("data")
-                if isinstance(inner, dict) and isinstance(inner.get("universe"), list):
-                    for item in inner["universe"]:
-                        if isinstance(item, dict):
-                            name = item.get("name")
-                            if isinstance(name, str) and name:
-                                coins.add(name)
+            # Spot
+            if isinstance(spot_meta, dict):
+                universe = spot_meta.get("universe", [])
+                for item in universe:
+                    if isinstance(item, dict) and item.get("name"):
+                        coins.add(item["name"])
+            
+            # Perps
+            if isinstance(perps_meta, dict):
+                universe = perps_meta.get("universe", [])
+                for item in universe:
+                    if isinstance(item, dict) and item.get("name"):
+                        coins.add(item["name"])
 
             if coins:
-                self.spot_coins = coins
-                logger.info(f"Loaded spot universe: {len(self.spot_coins)} coins")
+                self.all_coins = coins
+                logger.info(f"Loaded universe: {len(self.all_coins)} assets")
         except Exception as e:
-            logger.warning(f"Failed to load spotMeta: {e}")
+            logger.warning(f"Failed to load universe: {e}")
 
     def _resolve_coin_symbol(self, coin):
         if coin is None:
@@ -217,15 +220,15 @@ class WSManager:
             or order.get("id")
         )
 
-    def _is_spot_coin(self, coin: str | None) -> bool:
+    def _is_known_coin(self, coin: str | None) -> bool:
         coin = self._resolve_coin_symbol(coin)
         if not coin:
             return False
-        if not self.spot_coins:
+        if not self.all_coins:
             return True
-        if coin in self.spot_coins:
+        if coin in self.all_coins:
             return True
-        if coin.startswith("U") and coin[1:] in self.spot_coins:
+        if coin.startswith("U") and coin[1:] in self.all_coins:
             return True
         return False
 
@@ -433,7 +436,7 @@ class WSManager:
         for wallet, orders in self.open_orders.items():
             for order in orders:
                 coin, limit_px_raw = self._extract_order_fields(order)
-                if not self._is_spot_coin(coin):
+                if not self._is_known_coin(coin):
                     continue
                 if not coin or limit_px_raw is None:
                     continue
@@ -547,18 +550,29 @@ class WSManager:
                     continue
                 
                 norm_coin = normalize_spot_coin(coin)
-                if not self._is_spot_coin(norm_coin):
+                if not self._is_known_coin(norm_coin):
                     continue
                 
                 fill_with_user = dict(fill)
                 fill_with_user["user"] = user_wallet
                 await db.save_fill(fill_with_user)
                 
+                # Check for liquidation
+                is_liq = fill.get("liquidation", False) or fill.get("isLiquidation", False)
+                
                 side_emoji = "🟢" if side.lower() in ("b","buy","bid") else "🔴"
+                if is_liq:
+                    side_emoji = "💀"
+                
                 safe_coin = html.escape(str(norm_coin))
                 wallet_tag = f"{user_wallet[:6]}...{user_wallet[-4:]}"
+                
+                type_lbl = "Fill" if lang == "en" else "Исполнение"
+                if is_liq:
+                    type_lbl = "LIQUIDATION" if lang == "en" else "ЛИКВИДАЦИЯ"
+
                 msg = (
-                    f"{side_emoji} <b>Fill</b>\n"
+                    f"{side_emoji} <b>{type_lbl}</b>\n"
                     f"<b>{safe_coin}</b>\n"
                     f"{side_emoji} {side.upper()} {sz:.6f} @ ${float(px):.6f}\n"
                     f"Wallet: <code>{wallet_tag}</code>"
@@ -580,11 +594,11 @@ class WSManager:
             user_wallet = user_wallet.lower()
 
         if user_wallet:
-            if self.spot_coins:
+            if self.all_coins:
                 filtered = []
                 for o in orders:
                     coin, _ = self._extract_order_fields(o)
-                    if self._is_spot_coin(coin):
+                    if self._is_known_coin(coin):
                         filtered.append(o)
                 self.open_orders[user_wallet] = filtered
             else:

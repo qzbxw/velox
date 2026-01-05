@@ -1,203 +1,150 @@
 import motor.motor_asyncio
 import time
+from bson import ObjectId
 from bot.config import settings
-import logging
-
-logger = logging.getLogger(__name__)
 
 class Database:
-    def __init__(self):
-        self.client = motor.motor_asyncio.AsyncIOMotorClient(settings.MONGO_URI)
-        self.db = self.client[settings.MONGO_DB_NAME]
+    def __init__(self, uri, db_name):
+        self.client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+        self.db = self.client[db_name]
         self.users = self.db.users
+        self.wallets = self.db.wallets
         self.fills = self.db.fills
+        self.watchlist = self.db.watchlist
+        self.alerts = self.db.alerts  # New collection for price alerts
 
-    async def add_user(self, chat_id: int, wallet_address: str):
-        """Upsert user with wallet address."""
+    async def add_user(self, user_id, wallet_address=None):
+        existing = await self.users.find_one({"user_id": user_id})
+        if not existing:
+            await self.users.insert_one({
+                "user_id": user_id,
+                "wallet_address": wallet_address,  # Primary/Legacy wallet
+                "joined_at": time.time(),
+                "lang": "en"
+            })
+
+    async def add_wallet(self, user_id, wallet_address):
+        """Add a wallet to the separate wallets collection."""
+        wallet = wallet_address.lower()
+        existing = await self.wallets.find_one({"user_id": user_id, "address": wallet})
+        if not existing:
+            await self.wallets.insert_one({
+                "user_id": user_id,
+                "address": wallet,
+                "added_at": time.time()
+            })
+
+    async def list_wallets(self, user_id):
+        cursor = self.wallets.find({"user_id": user_id})
+        wallets = []
+        async for doc in cursor:
+            wallets.append(doc["address"])
+        return wallets
+
+    async def remove_wallet(self, user_id, wallet_address):
+        await self.wallets.delete_one({"user_id": user_id, "address": wallet_address.lower()})
+
+    async def set_lang(self, user_id, lang):
         await self.users.update_one(
-            {"chat_id": chat_id},
-            {
-                "$set": {
-                    "user_id": chat_id,
-                    "updated_at": time.time()
-                },
-                "$setOnInsert": {
-                    "created_at": time.time(),
-                    "watchlist": ["BTC", "ETH"],
-                    "lang": "ru",
-                }
-            },
+            {"user_id": user_id},
+            {"$set": {"lang": lang}},
             upsert=True
         )
-        logger.info(f"User {chat_id} updated with wallet {wallet_address}")
 
-    async def get_user(self, chat_id: int):
-        return await self.users.find_one({"chat_id": chat_id})
-
-    async def add_wallet(self, chat_id: int, wallet_address: str):
-        """Add a wallet to the user's wallets list (no duplicates)."""
-        if not wallet_address or not wallet_address.startswith("0x") or len(wallet_address) != 42:
-            raise ValueError("Invalid address")
-        
-        wallet_lower = wallet_address.lower()
-        await self.users.update_one(
-            {"chat_id": chat_id},
-            {
-                "$addToSet": {"wallets": wallet_lower},
-                "$set": {"updated_at": time.time()},
-                "$setOnInsert": {
-                    "created_at": time.time(),
-                    "watchlist": ["BTC", "ETH"],
-                    "lang": "ru",
-                }
-            },
-            upsert=True,
-        )
-        logger.info(f"Added wallet {wallet_lower} to user {chat_id}")
-
-    async def remove_wallet(self, chat_id: int, wallet_address: str):
-        """Remove a wallet from the user's wallets list."""
-        wallet_lower = wallet_address.lower()
-        await self.users.update_one(
-            {"chat_id": chat_id},
-            {"$pull": {"wallets": wallet_lower}, "$set": {"updated_at": time.time()}},
-        )
-        logger.info(f"Removed wallet {wallet_lower} from user {chat_id}")
-
-    async def list_wallets(self, chat_id: int):
-        """Return list of wallets for the user."""
-        user = await self.get_user(chat_id)
-        if not user:
-            return []
-        
-        # Migrate legacy wallet_address if present and wallets list empty
-        legacy_wallet = user.get("wallet_address")
-        wallets = user.get("wallets", [])
-        
-        if legacy_wallet and isinstance(legacy_wallet, str) and not wallets:
-            legacy_lower = legacy_wallet.lower()
-            await self.users.update_one(
-                {"chat_id": chat_id},
-                {"$set": {"wallets": [legacy_lower]}, "$unset": {"wallet_address": ""}},
-            )
-            return [legacy_lower]
-        
-        return [w for w in wallets if isinstance(w, str)]
-
-    async def set_lang(self, chat_id: int, lang: str):
-        l = (lang or "").lower()
-        if l not in ("ru", "en"):
-            return
-        await self.users.update_one(
-            {"chat_id": chat_id},
-            {"$set": {"lang": l, "updated_at": time.time()}},
-            upsert=True,
-        )
-
-    async def get_lang(self, chat_id: int) -> str:
-        user = await self.get_user(chat_id)
-        if isinstance(user, dict):
-            l = user.get("lang")
-            if isinstance(l, str) and l.lower() in ("ru", "en"):
-                return l.lower()
-        return "ru"
-
-    async def add_watch_symbol(self, chat_id: int, symbol: str):
-        sym = (symbol or "").upper()
-        if not sym:
-            return
-        await self.users.update_one(
-            {"chat_id": chat_id},
-            {"$addToSet": {"watchlist": sym}, "$set": {"updated_at": time.time()}},
-            upsert=True,
-        )
-
-    async def remove_watch_symbol(self, chat_id: int, symbol: str):
-        sym = (symbol or "").upper()
-        if not sym:
-            return
-        await self.users.update_one(
-            {"chat_id": chat_id},
-            {"$pull": {"watchlist": sym}, "$set": {"updated_at": time.time()}},
-        )
-
-    async def get_watchlist(self, chat_id: int):
-        user = await self.get_user(chat_id)
-        wl = []
-        if isinstance(user, dict) and isinstance(user.get("watchlist"), list):
-            wl = [str(x).upper() for x in user["watchlist"] if x]
-        return wl
+    async def get_lang(self, user_id):
+        u = await self.users.find_one({"user_id": user_id})
+        return u.get("lang", "en") if u else "en"
 
     async def get_all_users(self):
-        """Return list of all users."""
-        users = []
-        async for user in self.users.find():
-            users.append(user)
-        return users
+        cursor = self.users.find({})
+        return await cursor.to_list(length=None)
 
-    async def get_users_by_wallet(self, wallet_address: str):
-        """Return list of users tracking a specific wallet."""
-        wallet_lower = wallet_address.lower()
-        users = []
-        # Search in the 'wallets' array
-        async for user in self.users.find({"wallets": wallet_lower}):
-            users.append(user)
-        return users
-    
-    async def add_fill(self, fill_data: dict):
-        """Store fill data for analytics."""
-        tid = fill_data.get("tid")
+    async def get_users_by_wallet(self, wallet_address):
+        # We need to find users who have this wallet in their wallets collection
+        # OR users who have it as their primary wallet (legacy)
         
-        # Ensure user address is stored in lowercase for consistency
-        if "user" in fill_data:
-            fill_data["user"] = fill_data["user"].lower()
+        # 1. Get users from 'wallets' collection
+        cursor = self.wallets.find({"address": wallet_address.lower()})
+        wallet_docs = await cursor.to_list(length=None)
+        user_ids = {doc["user_id"] for doc in wallet_docs}
+        
+        # 2. Get users from 'users' collection (legacy wallet_address field)
+        cursor_legacy = self.users.find({"wallet_address": wallet_address.lower()})
+        legacy_docs = await cursor_legacy.to_list(length=None)
+        for doc in legacy_docs:
+            user_ids.add(doc["user_id"])
+            
+        # Return partial user objects (at least chat_id)
+        # We can just return the user_ids wrapped in dicts to match expected interface
+        # or fetch full user docs. WSManager expects objects with 'chat_id'.
+        return [{"chat_id": uid} for uid in user_ids]
 
-        if tid:
-            await self.fills.update_one(
-                {"tid": tid},
-                {"$set": fill_data},
-                upsert=True
-            )
-        else:
-            await self.fills.insert_one(fill_data)
+    # --- WATCHLIST ---
+    async def get_watchlist(self, user_id):
+        doc = await self.watchlist.find_one({"user_id": user_id})
+        return doc.get("symbols", []) if doc else []
 
-    async def get_fills(self, wallet_address: str, start_time: float, end_time: float):
-        """Get fills for a wallet within a time range."""
+    async def add_watch_symbol(self, user_id, symbol):
+        await self.watchlist.update_one(
+            {"user_id": user_id},
+            {"$addToSet": {"symbols": symbol.upper()}},
+            upsert=True
+        )
+
+    async def remove_watch_symbol(self, user_id, symbol):
+        await self.watchlist.update_one(
+            {"user_id": user_id},
+            {"$pull": {"symbols": symbol.upper()}}
+        )
+
+    # --- FILLS (PnL) ---
+    async def save_fill(self, fill_data):
+        # Unique index on (coin, oid) is recommended in Mongo setup
+        await self.fills.update_one(
+            {"oid": fill_data["oid"]},
+            {"$set": fill_data},
+            upsert=True
+        )
+
+    async def get_fills_range(self, wallet, start_ts, end_ts):
         cursor = self.fills.find({
-            "user": wallet_address.lower(),
-            "time": {"$gte": start_time * 1000, "$lte": end_time * 1000}
+            "user": wallet.lower(),
+            "time": {"$gte": start_ts * 1000, "$lt": end_ts * 1000}
         })
         return await cursor.to_list(length=None)
 
-    async def get_fills_range(self, wallet_address: str, start_time: float, end_time: float, limit: int = 20000):
-        cursor = (
-            self.fills.find({
-                "user": wallet_address.lower(),
-                "time": {"$gte": start_time * 1000, "$lte": end_time * 1000}
-            })
-            .sort("time", 1)
-            .limit(limit)
-        )
-        return await cursor.to_list(length=limit)
+    async def get_fills_before(self, wallet, ts):
+        cursor = self.fills.find({
+            "user": wallet.lower(),
+            "time": {"$lt": ts * 1000}
+        })
+        return await cursor.to_list(length=None)
+        
+    # --- ALERTS ---
+    async def add_price_alert(self, user_id: int, symbol: str, price: float, direction: str):
+        """
+        direction: 'above' or 'below'
+        """
+        await self.alerts.insert_one({
+            "user_id": user_id,
+            "symbol": symbol.upper(),
+            "price": price,
+            "direction": direction,
+            "created_at": time.time()
+        })
+        
+    async def get_user_alerts(self, user_id: int):
+        cursor = self.alerts.find({"user_id": user_id})
+        return await cursor.to_list(length=None)
+        
+    async def get_all_active_alerts(self):
+        cursor = self.alerts.find({})
+        return await cursor.to_list(length=None)
+        
+    async def delete_alert(self, alert_id: str):
+        try:
+            await self.alerts.delete_one({"_id": ObjectId(alert_id)})
+        except:
+            pass
 
-    async def get_fills_before(self, wallet_address: str, end_time: float, limit: int = 20000):
-        cursor = (
-            self.fills.find({
-                "user": wallet_address.lower(),
-                "time": {"$lte": end_time * 1000}
-            })
-            .sort("time", 1)
-            .limit(limit)
-        )
-        return await cursor.to_list(length=limit)
-
-    async def get_fills_by_coin(self, wallet_address: str, coin: str, limit: int = 5000):
-        """Get recent fills for a wallet/coin (best-effort for avg entry calculations)."""
-        cursor = (
-            self.fills.find({"user": wallet_address.lower(), "coin": coin})
-            .sort("time", -1)
-            .limit(limit)
-        )
-        return await cursor.to_list(length=limit)
-
-db = Database()
+db = Database(settings.MONGO_URI, settings.MONGO_DB_NAME)

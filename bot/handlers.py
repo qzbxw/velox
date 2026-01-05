@@ -1,12 +1,11 @@
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.database import db
 from bot.services import (
     get_symbol_name, get_mid_price, get_open_orders, get_spot_balances, 
-    get_perps_state, extract_avg_entry_from_balance, pretty_float,
-    get_user_portfolio, get_perps_context
+    get_perps_state, pretty_float, get_user_portfolio, get_perps_context
 )
 import logging
 import time
@@ -15,276 +14,123 @@ import html
 router = Router()
 logger = logging.getLogger(__name__)
 
-
-def _main_keyboard():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="/balance"), KeyboardButton(text="/positions")],
-            [KeyboardButton(text="/orders"), KeyboardButton(text="/pnl")],
-            [KeyboardButton(text="/funding"), KeyboardButton(text="/stats")],
-            [KeyboardButton(text="/market"), KeyboardButton(text="/watchlist")],
-            [KeyboardButton(text="/add_wallet"), KeyboardButton(text="/help")],
-        ],
-        resize_keyboard=True,
-    )
-
+# --- UI Helpers ---
 
 def _t(lang: str, key: str) -> str:
     l = (lang or "ru").lower()
     ru = {
-        "welcome": "👋 Привет! Это <b>Velox</b> — твой терминал для мониторинга Hyperliquid.",
-        "set_wallet": "🔎 Чтобы начать, добавь кошелёк: /add_wallet <code>0x...</code>",
-        "need_wallet": "⛔ Сначала добавь кошелёк через /add_wallet",
-        "usage_add_wallet": "📝 Использование: /add_wallet <code>0x...</code>",
-        "invalid_address": "❌ Неверный формат. Адрес должен начинаться с 0x...",
-        "tracking": "✅ Отслеживаю кошелёк:",
-        "help": (
-            "🤖 <b>Velox — Hyperliquid Assistant</b>\n\n"
-            "<b>👀 Мониторинг:</b>\n"
-            "• <code>/balance</code> — Спот балансы и эквити\n"
-            "• <code>/positions</code> — Фьючерсные позиции (Perps) и маржа\n"
-            "• <code>/orders</code> — Открытые лимитные ордера\n\n"
-            "<b>📊 Аналитика:</b>\n"
-            "• <code>/funding</code> — Ставки фандинга\n"
-            "• <code>/stats</code> — Объемы и открытый интерес\n"
-            "• <code>/pnl</code> — История PnL (Realized & Unrealized)\n"
-            "• <code>/market</code> — Состояние рынка (BTC/ETH/HYPE)\n"
-            "• <code>/watchlist</code> — Твой список наблюдения\n\n"
-            "<b>⚙️ Настройка:</b>\n"
-            "• <code>/add_wallet</code> — Добавить кошелёк (watch-only)\n"
-            "• <code>/lang</code> — Сменить язык (RU/EN)\n"
-        ),
-        "lang_title": "🌍 <b>Выбор языка / Language</b>",
-        "lang_set_ru": "✅ Язык установлен: Русский",
-        "lang_set_en": "✅ Language set: English",
-        "unknown_symbol": "❓ Неизвестный токен:",
-        "funding_usage": "📝 Использование: /funding [symbol]",
-        "stats_usage": "📝 Использование: /stats [symbol]",
-        "market_not_ready": "⏳ Данные рынка загружаются...",
-        "no_open_orders": "📭 Нет открытых ордеров.",
-        "no_positions": "📭 Нет открытых позиций.",
-        "price_usage": "📝 Использование: /price <code>SYMBOL</code>",
-        "watch_usage": "📝 Использование: /watch <code>SYMBOL</code>",
-        "unwatch_usage": "📝 Использование: /unwatch <code>SYMBOL</code>",
-        "watch_added": "✅ Добавлено в watchlist:",
-        "watch_removed": "🗑️ Удалено из watchlist:",
-        "balance_title": "🏦 <b>Spot Balances</b>",
-        "positions_title": "🎰 <b>Perps Positions</b>",
-        "totals_title": "💰 <b>Totals</b>",
-        "pnl_title": "🧮 <b>PnL History</b>",
-        "pnl_note": "⚠️ <i>Realized PnL считается приблизительно по истории сделок.</i>",
-        "current_upl": "📌 <b>Unrealized PnL</b>",
-        "portfolio_ex_usdc": "Portfolio Value:",
-        "market_title": "📊 <b>Market Snapshot</b>",
-        "watchlist_title": "👀 <b>Watchlist</b>",
+        "welcome": "👋 <b>Velox Terminal</b>\n\nМониторинг портфеля Hyperliquid в реальном времени.",
+        "set_wallet": "⚠️ Кошелёк не подключен. Используй /add_wallet <code>0x...</code>",
+        "tracking": "✅ Отслеживаю: <code>{wallet}</code>",
+        "alert_added": "✅ Алерт установлен: <b>{symbol}</b> {dir} <b>${price}</b>",
+        "alert_usage": "⚠️ Используй: <code>/alert ETH 3500</code> (бот сам поймет > или <)",
+        "alert_error": "❌ Ошибка. Проверь формат.",
+        "no_alerts": "📭 Активных алертов нет.",
+        "alerts_list": "🔔 <b>Твои алерты:</b>",
+        "deleted": "🗑️ Удалено.",
+        "balance_title": "🏦 <b>Балансы</b>",
+        "positions_title": "🎰 <b>Позиции</b>",
+        "orders_title": "🧾 <b>Ордера</b>",
+        "market_title": "📊 <b>Рынок</b>",
+        "settings_title": "⚙️ <b>Настройки</b>",
+        "lang_title": "🌍 <b>Язык / Language</b>",
+        "wait": "⏳ Загрузка...",
+        "need_wallet": "⛔ Сначала добавь кошелёк: /add_wallet",
+        # Buttons
+        "btn_balance": "🏦 Баланс",
+        "btn_positions": "🎰 Позиции",
+        "btn_orders": "🧾 Ордера",
+        "btn_pnl": "🧮 PnL",
+        "btn_market": "📊 Рынок",
+        "btn_settings": "⚙️ Настройки",
+        "btn_alerts": "🔔 Алерты",
+        "btn_lang": "🌍 Язык",
+        "btn_back": "🔙 Назад",
     }
     en = {
-        "welcome": "👋 Hi! I'm <b>Velox</b> — your Hyperliquid monitoring terminal.",
-        "set_wallet": "🔎 To start, add a wallet: /add_wallet <code>0x...</code>",
-        "need_wallet": "⛔ Please add a wallet first via /add_wallet",
-        "usage_add_wallet": "📝 Usage: /add_wallet <code>0x...</code>",
-        "invalid_address": "❌ Invalid format. Must start with 0x...",
-        "tracking": "✅ Tracking wallet:",
-        "help": (
-            "🤖 <b>Velox — Hyperliquid Assistant</b>\n\n"
-            "<b>👀 Monitoring:</b>\n"
-            "• <code>/balance</code> — Spot balances & Equity\n"
-            "• <code>/positions</code> — Futures positions (Perps) & Margin\n"
-            "• <code>/orders</code> — Open limit orders\n\n"
-            "<b>📊 Analytics:</b>\n"
-            "• <code>/funding</code> — Funding rates\n"
-            "• <code>/stats</code> — Volume & Open Interest\n"
-            "• <code>/pnl</code> — PnL History (Realized & Unrealized)\n"
-            "• <code>/market</code> — Market Overview (BTC/ETH/HYPE)\n"
-            "• <code>/watchlist</code> — Your custom watchlist\n\n"
-            "<b>⚙️ Settings:</b>\n"
-            "• <code>/add_wallet</code> — Add wallet (watch-only)\n"
-            "• <code>/lang</code> — Switch language (RU/EN)\n"
-        ),
+        "welcome": "👋 <b>Velox Terminal</b>\n\nReal-time Hyperliquid portfolio monitoring.",
+        "set_wallet": "⚠️ No wallet connected. Use /add_wallet <code>0x...</code>",
+        "tracking": "✅ Tracking: <code>{wallet}</code>",
+        "alert_added": "✅ Alert set: <b>{symbol}</b> {dir} <b>${price}</b>",
+        "alert_usage": "⚠️ Usage: <code>/alert ETH 3500</code> (auto-detects > or <)",
+        "alert_error": "❌ Error. Check format.",
+        "no_alerts": "📭 No active alerts.",
+        "alerts_list": "🔔 <b>Your Alerts:</b>",
+        "deleted": "🗑️ Deleted.",
+        "balance_title": "🏦 <b>Balances</b>",
+        "positions_title": "🎰 <b>Positions</b>",
+        "orders_title": "🧾 <b>Orders</b>",
+        "market_title": "📊 <b>Market</b>",
+        "settings_title": "⚙️ <b>Settings</b>",
         "lang_title": "🌍 <b>Language</b>",
-        "lang_set_ru": "✅ Язык установлен: Русский",
-        "lang_set_en": "✅ Language set: English",
-        "unknown_symbol": "❓ Unknown symbol:",
-        "funding_usage": "📝 Usage: /funding [symbol]",
-        "stats_usage": "📝 Usage: /stats [symbol]",
-        "market_not_ready": "⏳ Market data loading...",
-        "no_open_orders": "📭 No open orders.",
-        "no_positions": "📭 No open positions.",
-        "price_usage": "📝 Usage: /price <code>SYMBOL</code>",
-        "watch_usage": "📝 Usage: /watch <code>SYMBOL</code>",
-        "unwatch_usage": "📝 Usage: /unwatch <code>SYMBOL</code>",
-        "watch_added": "✅ Added to watchlist:",
-        "watch_removed": "🗑️ Removed from watchlist:",
-        "balance_title": "🏦 <b>Spot Balances</b>",
-        "positions_title": "🎰 <b>Perps Positions</b>",
-        "totals_title": "💰 <b>Totals</b>",
-        "pnl_title": "🧮 <b>PnL History</b>",
-        "pnl_note": "⚠️ <i>Realized PnL is estimated from trade history.</i>",
-        "current_upl": "📌 <b>Unrealized PnL</b>",
-        "portfolio_ex_usdc": "Portfolio Value:",
-        "market_title": "📊 <b>Market Snapshot</b>",
-        "watchlist_title": "👀 <b>Watchlist</b>",
+        "wait": "⏳ Loading...",
+        "need_wallet": "⛔ Add wallet first: /add_wallet",
+        # Buttons
+        "btn_balance": "🏦 Balance",
+        "btn_positions": "🎰 Positions",
+        "btn_orders": "🧾 Orders",
+        "btn_pnl": "🧮 PnL",
+        "btn_market": "📊 Market",
+        "btn_settings": "⚙️ Settings",
+        "btn_alerts": "🔔 Alerts",
+        "btn_lang": "🌍 Language",
+        "btn_back": "🔙 Back",
     }
     table = ru if l == "ru" else en
     return table.get(key, key)
 
+def _main_menu_kb(lang):
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_balance"), callback_data="cb_balance"),
+        InlineKeyboardButton(text=_t(lang, "btn_positions"), callback_data="cb_positions")
+    )
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_orders"), callback_data="cb_orders"),
+        InlineKeyboardButton(text=_t(lang, "btn_pnl"), callback_data="cb_pnl")
+    )
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data="cb_market"),
+        InlineKeyboardButton(text=_t(lang, "btn_settings"), callback_data="cb_settings")
+    )
+    return kb.as_markup()
+
+def _back_kb(lang):
+    kb = InlineKeyboardBuilder()
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    return kb.as_markup()
+
+def _settings_kb(lang):
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_alerts"), callback_data="cb_alerts"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_lang"), callback_data="cb_lang_menu"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    return kb.as_markup()
+
+# --- COMMANDS ---
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     lang = await db.get_lang(message.chat.id)
-    await message.answer(
-        _t(lang, "welcome") + "\n" + _t(lang, "set_wallet"),
-        reply_markup=_main_keyboard(),
-        parse_mode="HTML",
-    )
+    wallets = await db.list_wallets(message.chat.id)
+    
+    text = _t(lang, "welcome")
+    if not wallets:
+        text += "\n\n" + _t(lang, "set_wallet")
+    else:
+        text += "\n\n" + _t(lang, "tracking").format(wallet=f"{wallets[0][:6]}...{wallets[0][-4:]}")
+
+    await message.answer(text, reply_markup=_main_menu_kb(lang), parse_mode="HTML")
     await db.add_user(message.chat.id, None)
-
-
-@router.message(Command("help"))
-async def cmd_help(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    await message.answer(
-        _t(lang, "help"),
-        reply_markup=_main_keyboard(),
-        parse_mode="HTML",
-    )
-
-
-@router.message(Command("lang"))
-async def cmd_lang(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Русский", callback_data="lang:ru")
-    kb.button(text="English", callback_data="lang:en")
-    kb.adjust(2)
-    await message.answer(_t(lang, "lang_title"), reply_markup=kb.as_markup(), parse_mode="HTML")
-
-
-@router.callback_query(F.data.startswith("lang:"))
-async def cb_lang(callback):
-    try:
-        new_lang = callback.data.split(":", 1)[1]
-    except Exception:
-        new_lang = "ru"
-    await db.set_lang(callback.message.chat.id, new_lang)
-    lang = await db.get_lang(callback.message.chat.id)
-    text = _t(lang, "lang_set_ru") if lang == "ru" else _t(lang, "lang_set_en")
-    await callback.message.edit_text(text, parse_mode="HTML")
-    await callback.answer()
-
-
-@router.message(Command("market"))
-async def cmd_market(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    symbols = ["BTC", "ETH", "HYPE", "SOL"]
-    
-    lines = []
-    # If we have WS manager attached, try to get live data
-    ws = getattr(message.bot, "ws_manager", None)
-    
-    for sym in symbols:
-        snap = ws.get_market_snapshot(sym) if ws else None
-        
-        if not snap:
-            # Fallback to REST
-            px = 0.0
-            if ws:
-                px = ws.get_price(sym)
-            if not px:
-                px = await get_mid_price(sym)
-            
-            if px:
-                lines.append(f"🔹 <b>{sym}</b>: ${pretty_float(px, 4)}")
-            continue
-
-        def fmt(x):
-            if x is None: return "n/a"
-            color = "🟢" if x >= 0 else "🔴"
-            return f"{color} {x:+.2f}%"
-
-        lines.append(
-            f"🔹 <b>{sym}</b>: <b>${pretty_float(snap['px'], 4)}</b>\n"
-            f"   15m: {fmt(snap['chg_15m'])} | Vol: {pretty_float(snap['vol_15m'], 0)}"
-        )
-
-    msg = _t(lang, "market_title") + "\n\n" + "\n".join(lines)
-    await message.answer(msg, parse_mode="HTML")
-
-
-@router.message(Command("watchlist"))
-async def cmd_watchlist(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    wl = await db.get_watchlist(message.chat.id)
-    if not wl:
-        wl = ["BTC", "ETH"]
-    
-    lines = []
-    ws = getattr(message.bot, "ws_manager", None)
-    
-    for w in wl:
-        px = 0.0
-        if ws:
-            px = ws.get_price(w)
-        if not px:
-            px = await get_mid_price(w)
-        
-        lines.append(f"• <b>{w}</b>: ${pretty_float(px, 4)}" if px else f"• <b>{w}</b>: ...")
-        
-    msg = _t(lang, "watchlist_title") + "\n" + "\n".join(lines)
-    await message.answer(msg, parse_mode="HTML")
-
-
-@router.message(Command("watch"))
-async def cmd_watch(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer(_t(lang, "watch_usage"))
-        return
-    sym = args[1].upper()
-
-    # Verify existance
-    px = await get_mid_price(sym)
-    if not px:
-        await message.answer(f"{_t(lang, 'unknown_symbol')} {sym}")
-        return
-
-    await db.add_watch_symbol(message.chat.id, sym)
-    ws = getattr(message.bot, "ws_manager", None)
-    if ws:
-        ws.watch_subscribers[sym].add(message.chat.id)
-        
-    await message.answer(f"{_t(lang, 'watch_added')} <b>{sym}</b>", parse_mode="HTML")
-
-
-@router.message(Command("unwatch"))
-async def cmd_unwatch(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer(_t(lang, "unwatch_usage"))
-        return
-    sym = args[1].upper()
-    await db.remove_watch_symbol(message.chat.id, sym)
-    ws = getattr(message.bot, "ws_manager", None)
-    if ws and sym in ws.watch_subscribers:
-        ws.watch_subscribers[sym].discard(message.chat.id)
-    await message.answer(f"{_t(lang, 'watch_removed')} <b>{sym}</b>", parse_mode="HTML")
-
 
 @router.message(Command("add_wallet"))
 async def cmd_add_wallet(message: Message):
     lang = await db.get_lang(message.chat.id)
     args = message.text.split()
     if len(args) < 2:
-        await message.answer(_t(lang, "usage_add_wallet"))
+        await message.answer("Usage: /add_wallet 0x...")
         return
-    
     wallet = args[1].lower()
-    if not wallet.startswith("0x") or len(wallet) != 42:
-         await message.answer(_t(lang, "invalid_address"))
-         return
-         
     await db.add_wallet(message.chat.id, wallet)
     
     ws = getattr(message.bot, "ws_manager", None)
@@ -292,31 +138,72 @@ async def cmd_add_wallet(message: Message):
         ws.track_wallet(wallet)
         await ws.subscribe_user(wallet)
         
-    await message.answer(f"{_t(lang, 'tracking')} <code>{wallet}</code>", parse_mode="HTML")
+    await message.answer(_t(lang, "tracking").format(wallet=wallet), reply_markup=_back_kb(lang), parse_mode="HTML")
 
-
-@router.message(Command("balance"))
-async def cmd_balance(message: Message):
+@router.message(Command("alert"))
+async def cmd_alert(message: Message):
     lang = await db.get_lang(message.chat.id)
-    wallets = await db.list_wallets(message.chat.id)
+    args = message.text.split()
+    if len(args) < 3:
+        await message.answer(_t(lang, "alert_usage"), parse_mode="HTML")
+        return
+    
+    symbol = html.escape(args[1].upper())
+    try:
+        target = float(args[2])
+    except:
+        await message.answer(_t(lang, "alert_error"))
+        return
+
+    current = 0.0
+    ws = getattr(message.bot, "ws_manager", None)
+    if ws: current = ws.get_price(symbol)
+    if not current: current = await get_mid_price(symbol)
+    
+    if not current:
+        await message.answer(f"❌ Unknown price for {symbol}")
+        return
+        
+    direction = "above" if target > current else "below"
+    
+    await db.add_price_alert(message.chat.id, symbol, target, direction)
+    
+    dir_icon = "📈" if direction == "above" else "📉"
+    msg = _t(lang, "alert_added").format(symbol=symbol, dir=dir_icon, price=pretty_float(target))
+    await message.answer(msg, parse_mode="HTML")
+
+# --- CALLBACKS ---
+
+@router.callback_query(F.data == "cb_menu")
+async def cb_menu(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
+    text = _t(lang, "welcome")
+    if wallets:
+        text += "\n\n" + _t(lang, "tracking").format(wallet=f"{wallets[0][:6]}...{wallets[0][-4:]}")
+    
+    await call.message.edit_text(text, reply_markup=_main_menu_kb(lang), parse_mode="HTML")
+    await call.answer()
+
+@router.callback_query(F.data == "cb_balance")
+async def cb_balance(call: CallbackQuery):
+    await call.answer("Loading...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await message.answer(_t(lang, "need_wallet"))
+        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang), parse_mode="HTML")
         return
 
     msg_parts = []
-    
-    ws = getattr(message.bot, "ws_manager", None)
+    ws = getattr(call.message.bot, "ws_manager", None)
 
     for wallet in wallets:
-        # --- SPOT ---
         spot_bals = await get_spot_balances(wallet)
-        # --- PERPS ---
         perps_state = await get_perps_state(wallet)
-
-        wallet_lines = []
-        wallet_total_spot = 0.0
         
-        # Process Spot
+        wallet_lines = []
+        wallet_total = 0.0
+        
         if spot_bals:
             for b in spot_bals:
                 coin_id = b.get("coin")
@@ -329,351 +216,215 @@ async def cmd_balance(message: Message):
                 if not px: px = await get_mid_price(coin_name)
                 
                 val = amount * px
-                wallet_total_spot += val
-                
-                wallet_lines.append(
-                    f"▫️ <b>{coin_name}</b>: <code>{amount:.4f}</code> (${val:.2f})"
-                )
-        
-        # Process Perps Equity
+                wallet_total += val
+                wallet_lines.append(f"▫️ <b>{coin_name}</b>: {amount:.4f} (${val:.0f})")
+
         perps_equity = 0.0
-        margin_summary = ""
+        margin_used = 0.0
         if perps_state and "marginSummary" in perps_state:
             ms = perps_state["marginSummary"]
             perps_equity = float(ms.get("accountValue", 0) or 0)
             margin_used = float(ms.get("totalMarginUsed", 0) or 0)
-            if perps_equity > 1.0: # Only show if meaningful
-                 margin_summary = (
-                     f"   🎰 <b>Perps Equity:</b> ${pretty_float(perps_equity, 2)}\n"
-                     f"   ⚠️ Margin Used: ${pretty_float(margin_used, 2)}\n"
-                 )
 
         header = f"👛 <b>{wallet[:6]}...{wallet[-4:]}</b>"
         body = ""
-        
         if wallet_lines:
-            body += f"\n   <b>Spot (${pretty_float(wallet_total_spot, 2)}):</b>\n   " + "\n   ".join(wallet_lines) + "\n"
-        else:
-            body += "\n   <i>Spot is empty.</i>\n"
-            
-        if margin_summary:
-            body += f"\n{margin_summary}"
-        elif not wallet_lines:
-            body += "\n   <i>No active funds found.</i>"
-            
+            body += f"\n   <b>Spot:</b> ${pretty_float(wallet_total, 2)}\n   " + "\n   ".join(wallet_lines)
+        if perps_equity > 1:
+             body += f"\n   <b>Perps Eq:</b> ${pretty_float(perps_equity, 2)}"
+             body += f"\n   ⚠️ Margin: ${pretty_float(margin_used, 2)}"
+        
+        if not body: body = "\n   <i>Empty</i>"
         msg_parts.append(header + body)
 
-    final_msg = _t(lang, "balance_title") + "\n\n" + "\n\n".join(msg_parts)
-    await message.answer(final_msg, parse_mode="HTML")
+    text = _t(lang, "balance_title") + "\n\n" + "\n\n".join(msg_parts)
+    await call.message.edit_text(text, reply_markup=_back_kb(lang), parse_mode="HTML")
 
-
-@router.message(Command("positions"))
-async def cmd_positions(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    wallets = await db.list_wallets(message.chat.id)
+@router.callback_query(F.data == "cb_positions")
+async def cb_positions(call: CallbackQuery):
+    await call.answer("Loading...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await message.answer(_t(lang, "need_wallet"))
+        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang), parse_mode="HTML")
         return
 
     msg_parts = []
-    has_positions = False
-    
-    ws = getattr(message.bot, "ws_manager", None)
+    has_pos = False
+    ws = getattr(call.message.bot, "ws_manager", None)
 
     for wallet in wallets:
         state = await get_perps_state(wallet)
-        if not state:
-            continue
-            
-        positions = []
-        if "assetPositions" in state:
-            positions = state["assetPositions"]
-            
-        if not positions:
-            continue
-            
-        has_positions = True
-        lines = []
+        if not state: continue
+        positions = state.get("assetPositions", [])
+        if not positions: continue
         
+        has_pos = True
+        lines = []
         for p in positions:
             pos = p.get("position", {})
-            coin_id = pos.get("coin") # In Perps, this is often an index
-            symbol = await get_symbol_name(coin_id)
-            
-            szi = float(pos.get("szi", 0)) # Size
+            coin_id = pos.get("coin")
+            sym = await get_symbol_name(coin_id)
+            szi = float(pos.get("szi", 0))
             if szi == 0: continue
             
             entry_px = float(pos.get("entryPx", 0))
-            leverage = 0.0
-            if "leverage" in pos:
-                leverage = float(pos["leverage"].get("value", 0))
-            
+            leverage = float(pos.get("leverage", {}).get("value", 0))
             liq_px = float(pos.get("liquidationPx", 0) or 0)
             
-            # Get Mark Price
             mark_px = 0.0
-            if ws: mark_px = ws.get_price(symbol)
-            if not mark_px: mark_px = await get_mid_price(symbol)
+            if ws: mark_px = ws.get_price(sym)
+            if not mark_px: mark_px = await get_mid_price(sym)
             
-            # Calc uPnL
             upnl = (mark_px - entry_px) * szi if mark_px else 0.0
-            roi = (upnl / (abs(szi) * entry_px / leverage)) * 100 if leverage and szi and entry_px else 0.0
+            roi = 0.0
+            if leverage and szi and entry_px:
+                 roi = (upnl / (abs(szi) * entry_px / leverage)) * 100
             
-            side_emoji = "🟢" if szi > 0 else "🔴"
-            pnl_emoji = "🤑" if upnl >= 0 else "💸"
-            
+            icon = "🟢" if szi > 0 else "🔴"
             lines.append(
-                f"{side_emoji} <b>{symbol}</b> {leverage}x\n"
-                f"   Sz: <code>{szi:.4f}</code> @ ${pretty_float(entry_px, 4)}\n"
-                f"   Mark: ${pretty_float(mark_px, 4)} | Liq: <b>${pretty_float(liq_px, 4)}</b>\n"
-                f"   uPnL: {pnl_emoji} <b>${pretty_float(upnl, 2)}</b> ({roi:+.1f}%)"
+                f"{icon} <b>{sym}</b> {leverage}x\n"
+                f"   Sz: {szi:.4f} @ ${pretty_float(entry_px)}\n"
+                f"   Liq: ${pretty_float(liq_px)} | uPnL: <b>${pretty_float(upnl, 2)}</b> ({roi:+.0f}%)"
             )
             
         if lines:
-            header = f"👛 <b>{wallet[:6]}...{wallet[-4:]}</b>"
-            msg_parts.append(header + "\n" + "\n\n".join(lines))
+            msg_parts.append(f"👛 <b>{wallet[:6]}...</b>\n" + "\n".join(lines))
 
-    if not has_positions:
-        await message.answer(_t(lang, "no_positions"))
-        return
+    if not has_pos:
+        text = _t(lang, "positions_title") + "\n\n📭 No open positions."
+    else:
+        text = _t(lang, "positions_title") + "\n\n" + "\n\n".join(msg_parts)
+        
+    await call.message.edit_text(text, reply_markup=_back_kb(lang), parse_mode="HTML")
 
-    final_msg = _t(lang, "positions_title") + "\n\n" + "\n\n".join(msg_parts)
-    await message.answer(final_msg, parse_mode="HTML")
-
-
-@router.message(Command("orders"))
-async def cmd_orders(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    wallets = await db.list_wallets(message.chat.id)
+@router.callback_query(F.data == "cb_orders")
+async def cb_orders(call: CallbackQuery):
+    await call.answer("Loading...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await message.answer(_t(lang, "need_wallet"))
+        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang))
         return
 
     msg_parts = []
-    has_orders = False
-    ws = getattr(message.bot, "ws_manager", None)
-
     for wallet in wallets:
-        orders = []
-        if ws:
-            try: orders = ws.get_open_orders_cached(wallet)
-            except: pass
-        if not orders:
-            data = await get_open_orders(wallet)
-            if isinstance(data, dict): orders = data.get("orders", [])
-            elif isinstance(data, list): orders = data
-
+        orders = await get_open_orders(wallet)
+        if isinstance(orders, dict): orders = orders.get("orders", [])
         if not orders: continue
         
-        has_orders = True
-        o_lines = []
+        lines = []
         for o in orders:
             coin = o.get("coin")
             sym = await get_symbol_name(coin)
-            side = o.get("side")
             sz = float(o.get("sz", 0))
             px = float(o.get("limitPx", 0))
-            
-            mid = 0.0
-            if ws: mid = ws.get_price(sym)
-            if not mid: mid = await get_mid_price(sym)
-            
-            dist = 0.0
-            if mid: dist = (px - mid) / mid * 100
-            
-            # Simple icon
+            side = o.get("side")
             icon = "🟢" if str(side).lower().startswith("b") else "🔴"
-            o_lines.append(
-                f"{icon} <b>{sym}</b>: <code>{sz}</code> @ ${pretty_float(px, 4)}\n"
-                f"   Dist: {dist:+.2f}%"
-            )
+            lines.append(f"{icon} <b>{sym}</b>: {sz} @ ${pretty_float(px)}")
             
-        if o_lines:
-             header = f"👛 <b>{wallet[:6]}...{wallet[-4:]}</b>"
-             msg_parts.append(header + "\n" + "\n".join(o_lines))
+        if lines:
+             msg_parts.append(f"👛 <b>{wallet[:6]}...</b>\n" + "\n".join(lines))
 
-    if not has_orders:
-        await message.answer(_t(lang, "no_open_orders"))
-        return
+    text = _t(lang, "orders_title") + "\n\n" + ("\n\n".join(msg_parts) if msg_parts else "📭 No open orders.")
+    await call.message.edit_text(text, reply_markup=_back_kb(lang), parse_mode="HTML")
 
-    await message.answer("🧾 <b>Open Orders</b>\n\n" + "\n\n".join(msg_parts), parse_mode="HTML")
+@router.callback_query(F.data == "cb_settings")
+async def cb_settings(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    await call.message.edit_text(_t(lang, "settings_title"), reply_markup=_settings_kb(lang), parse_mode="HTML")
+    await call.answer()
 
+@router.callback_query(F.data == "cb_lang_menu")
+async def cb_lang_menu(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🇷🇺 Русский", callback_data="lang:ru")
+    kb.button(text="🇬🇧 English", callback_data="lang:en")
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_settings")
+    kb.adjust(2, 1)
+    await call.message.edit_text(_t(lang, "lang_title"), reply_markup=kb.as_markup(), parse_mode="HTML")
 
-@router.message(Command("pnl"))
-async def cmd_pnl(message: Message):
-    """Shows PnL. Currently basic implementation, plan to expand with official stats."""
-    lang = await db.get_lang(message.chat.id)
-    wallets = await db.list_wallets(message.chat.id)
-    if not wallets:
-        await message.answer(_t(lang, "need_wallet"))
-        return
+@router.callback_query(F.data.startswith("lang:"))
+async def cb_set_lang(call: CallbackQuery):
+    lang_code = call.data.split(":")[1]
+    await db.set_lang(call.message.chat.id, lang_code)
+    await cb_settings(call)
 
-    # TODO: Use get_user_portfolio for better charts in future updates
-    # For now, sticking to the manual fill calculation logic but cleaning up display
-    # (Simplified for brevity in this refactor, relying on existing calc logic if needed
-    # or just showing current state).
+@router.callback_query(F.data == "cb_alerts")
+async def cb_alerts(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    alerts = await db.get_user_alerts(call.message.chat.id)
     
-    # Let's show a "Not fully implemented for new PnL yet" or basic snapshot
-    # Since the user asked for "Official PnL", let's try to fetch portfolio stats
-    
-    msg_parts = []
-    for wallet in wallets:
-        # Try fetching official stats
-        try:
-            port = await get_user_portfolio(wallet)
-            # data.history is list of [ts, accountValue]
-            # data.pnlHistory is list of [ts, pnlCumulative?]
-             
-            # If complex to parse, we fallback to current uPnL
-            pass
-        except:
-            pass
-            
-        # Re-using logic from balance for uPnL snapshot
-        # This part requires the heavier calculation from the previous version
-        # For now, let's just point the user to /balance and /positions for live PnL
-        msg_parts.append(f"👛 <b>{wallet[:6]}...{wallet[-4:]}</b>")
-        msg_parts.append("<i>Official historical PnL analysis coming soon. Check /balance for live uPnL.</i>")
-
-    await message.answer("\n".join(msg_parts), parse_mode="HTML")
-
-
-@router.message(Command("funding"))
-async def cmd_funding(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    ctx = await get_perps_context()
-    if not ctx:
-        await message.answer(_t(lang, "market_not_ready"))
-        return
-
-    universe = ctx[0]["universe"] # List of asset info
-    asset_ctxs = ctx[1] # List of dynamic ctx
-    
-    # Map index to name
-    idx_to_name = {i: u["name"] for i, u in enumerate(universe)}
-    
-    args = message.text.split()
-    if len(args) > 1:
-        # Specific symbol
-        sym = args[1].upper()
-        
-        # Find index
-        found_idx = -1
-        for idx, name in idx_to_name.items():
-            if name == sym:
-                found_idx = idx
-                break
-        
-        if found_idx == -1 or found_idx >= len(asset_ctxs):
-            await message.answer(f"{_t(lang, 'unknown_symbol')} {sym}")
-            return
-            
-        c = asset_ctxs[found_idx]
-        funding_rate = float(c.get("funding", 0) or 0)
-        # Funding is usually hourly rate
-        hourly_pct = funding_rate * 100
-        apr = funding_rate * 24 * 365 * 100
-        
-        await message.answer(
-            f"💸 <b>{sym} Funding</b>\n\n"
-            f"1h: <b>{hourly_pct:+.4f}%</b>\n"
-            f"APR: <b>{apr:+.1f}%</b>",
+    if not alerts:
+        await call.message.edit_text(
+            f"{_t(lang, 'settings_title')} > <b>Alerts</b>\n\n{_t(lang, 'no_alerts')}\n{_t(lang, 'alert_usage')}",
+            reply_markup=_settings_kb(lang),
             parse_mode="HTML"
         )
         return
 
-    # Top/Bottom Funding
-    # Build list of (name, funding)
-    rates = []
-    for i, c in enumerate(asset_ctxs):
-        name = idx_to_name.get(i, f"@{i}")
-        f = float(c.get("funding", 0) or 0)
-        rates.append((name, f))
+    kb = InlineKeyboardBuilder()
+    text = _t(lang, "alerts_list") + "\n"
+    
+    for a in alerts:
+        aid = str(a["_id"])
+        s = str(a.get("symbol", "???"))
+        p = pretty_float(a.get("price", 0))
+        d = "📈" if a.get("direction") == "above" else "📉"
         
-    rates.sort(key=lambda x: x[1], reverse=True)
-    
-    top_5 = rates[:5]
-    bot_5 = rates[-5:]
-    
-    lines = ["🔥 <b>Highest Funding (APR)</b>"]
-    for name, f in top_5:
-        apr = f * 24 * 365 * 100
-        lines.append(f"{name}: {apr:+.1f}%")
+        # Plain text format
+        text += f"\n• {s} {d} {p}"
+        kb.button(text=f"❌ Del {s}", callback_data=f"del_alert:{aid}")
         
-    lines.append("\n🧊 <b>Lowest Funding (APR)</b>")
-    for name, f in bot_5:
-        apr = f * 24 * 365 * 100
-        lines.append(f"{name}: {apr:+.1f}%")
-        
-    lines.append("\n" + _t(lang, "funding_usage"))
+    kb.button(text="🗑️ Clear All", callback_data="clear_all_alerts")
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_settings")
+    kb.adjust(1)
     
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    # Send as plain text to be safe
+    await call.message.edit_text(text, reply_markup=kb.as_markup())
 
+@router.callback_query(F.data == "clear_all_alerts")
+async def cb_clear_all_alerts(call: CallbackQuery):
+    alerts = await db.get_user_alerts(call.message.chat.id)
+    for a in alerts:
+        await db.delete_alert(str(a["_id"]))
+    await cb_alerts(call)
 
-@router.message(Command("stats"))
-async def cmd_stats(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer(_t(lang, "stats_usage"))
-        return
-        
-    sym = args[1].upper()
-    ctx = await get_perps_context()
-    if not ctx:
-        await message.answer(_t(lang, "market_not_ready"))
-        return
+@router.callback_query(F.data.startswith("del_alert:"))
+async def cb_del_alert(call: CallbackQuery):
+    aid = call.data.split(":")[1]
+    await db.delete_alert(aid)
+    await cb_alerts(call)
 
-    universe = ctx[0]["universe"]
-    asset_ctxs = ctx[1]
+@router.callback_query(F.data == "cb_market")
+async def cb_market(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    ws = getattr(call.message.bot, "ws_manager", None)
+    symbols = ["BTC", "ETH", "HYPE", "SOL", "PURR"]
+    lines = []
+    for sym in symbols:
+        p = 0.0
+        if ws: p = ws.get_price(sym)
+        if not p: p = await get_mid_price(sym)
+        lines.append(f"🔹 <b>{sym}</b>: ${pretty_float(p, 4)}")
     
-    idx_to_name = {i: u["name"] for i, u in enumerate(universe)}
+    # Add timestamp
+    ts = time.strftime("%H:%M:%S", time.gmtime())
+    text = f"{_t(lang, 'market_title')} (updated {ts})\n\n" + "\n".join(lines)
     
-    found_idx = -1
-    for idx, name in idx_to_name.items():
-        if name == sym:
-            found_idx = idx
-            break
-            
-    if found_idx == -1 or found_idx >= len(asset_ctxs):
-        await message.answer(f"{_t(lang, 'unknown_symbol')} {sym}")
-        return
-        
-    c = asset_ctxs[found_idx]
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Refresh", callback_data="cb_market")
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    kb.adjust(1)
     
-    mark_px = float(c.get("markPx", 0) or 0)
-    oi = float(c.get("openInterest", 0) or 0)
-    vol24 = float(c.get("dayNtlVlm", 0) or 0)
-    
-    oi_usd = oi * mark_px
-    
-    await message.answer(
-        f"📊 <b>{sym} Stats</b>\n\n"
-        f"Price: <b>${pretty_float(mark_px, 4)}</b>\n"
-        f"OI: {pretty_float(oi, 2)} ({sym}) / <b>${pretty_float(oi_usd, 0)}</b>\n"
-        f"24h Vol: <b>${pretty_float(vol24, 0)}</b>",
-        parse_mode="HTML"
-    )
+    # Use suppress=True for same content error if user spams refresh
+    try:
+        await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    except Exception:
+        await call.answer()
 
-@router.message(Command("price"))
-async def cmd_price(message: Message):
-    lang = await db.get_lang(message.chat.id)
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer(_t(lang, "price_usage"))
-        return
 
-    symbol = args[1].upper()
-    safe_symbol = html.escape(symbol)
-
-    price = 0.0
-    ws = getattr(message.bot, "ws_manager", None)
-    if ws:
-        price = ws.get_price(symbol)
-    if not price:
-        price = await get_mid_price(symbol)
-
-    if price:
-        await message.answer(f"🏷️ <b>{safe_symbol}</b>: ${pretty_float(price, 6)}", parse_mode="HTML")
-    else:
-        await message.answer(f"❌ {_t(lang, 'unknown_symbol')} {safe_symbol}", parse_mode="HTML")
+@router.callback_query(F.data == "cb_pnl")
+async def cb_pnl_placeholder(call: CallbackQuery):
+    await call.answer("Coming soon!")

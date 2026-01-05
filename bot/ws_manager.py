@@ -8,7 +8,7 @@ from collections import defaultdict
 from collections import deque
 from bot.config import settings
 from bot.database import db
-from bot.services import extract_spot_symbol_map, get_open_orders, get_spot_meta, normalize_spot_coin
+from bot.services import get_open_orders, get_spot_meta, normalize_spot_coin, pretty_float, get_symbol_name
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,7 @@ class WSManager:
 
         # Spot whitelist (from spotMeta). If empty -> no filtering.
         self.spot_coins = set()
-
-        self.spot_symbol_map: dict[int, str] = {}
+        # self.spot_symbol_map is removed as we use centralized service for mapping
 
         # Market history + watchlist
         self.price_history = defaultdict(lambda: deque())  # symbol -> deque[(ts, px)]
@@ -36,11 +35,20 @@ class WSManager:
         # Debounce: { (wallet, coin): timestamp }
         self.alert_cooldowns = {}
         
+        # Custom Price Alerts (User defined)
+        self.active_alerts = [] # List of alert dicts
+        self.triggered_alerts = set() # Set of alert_ids that recently triggered (to avoid double trigger if DB lag)
+        
         # Task handles
         self.ping_task = None
+        self.alerts_refresh_task = None
 
     async def start(self):
         self.running = True
+        
+        # Start background tasks
+        self.alerts_refresh_task = asyncio.create_task(self._refresh_alerts_loop())
+        
         while self.running:
             try:
                 async with websockets.connect(self.ws_url) as ws:
@@ -68,10 +76,6 @@ class WSManager:
                                 for sym in wl:
                                     if isinstance(sym, str) and sym:
                                         self.watch_subscribers[sym.upper()].add(chat_id)
-                            else:
-                                # default
-                                self.watch_subscribers["BTC"].add(chat_id)
-                                self.watch_subscribers["ETH"].add(chat_id)
                             
                     # Start Ping loop
                     self.ping_task = asyncio.create_task(self._ping_loop())
@@ -85,19 +89,15 @@ class WSManager:
             finally:
                 if self.ping_task:
                     self.ping_task.cancel()
+        
+        if self.alerts_refresh_task:
+            self.alerts_refresh_task.cancel()
 
     async def _load_spot_universe(self):
         try:
             meta = await get_spot_meta()
-            if isinstance(meta, dict):
-                try:
-                    self.spot_symbol_map = extract_spot_symbol_map(meta)
-                except Exception:
-                    self.spot_symbol_map = {}
             coins: set[str] = set()
-            # spotMeta response shape can vary; try best-effort extraction.
             if isinstance(meta, dict):
-                # common: { "universe": [{"name": "ETH"}, ...] }
                 universe = meta.get("universe")
                 if isinstance(universe, list):
                     for item in universe:
@@ -105,7 +105,6 @@ class WSManager:
                             name = item.get("name")
                             if isinstance(name, str) and name:
                                 coins.add(name)
-                # other variants may nest
                 inner = meta.get("spotMeta") or meta.get("data")
                 if isinstance(inner, dict) and isinstance(inner.get("universe"), list):
                     for item in inner["universe"]:
@@ -117,33 +116,13 @@ class WSManager:
             if coins:
                 self.spot_coins = coins
                 logger.info(f"Loaded spot universe: {len(self.spot_coins)} coins")
-            else:
-                logger.warning("Could not parse spotMeta universe; spot filtering disabled")
         except Exception as e:
             logger.warning(f"Failed to load spotMeta: {e}")
 
     def _resolve_coin_symbol(self, coin):
         if coin is None:
             return None
-        if isinstance(coin, int):
-            sym = self.spot_symbol_map.get(coin)
-            if sym:
-                return normalize_spot_coin(sym)
-            logger.warning(f"Unknown spot coin id: {coin}")
-            return str(coin)
-        if isinstance(coin, str):
-            if coin.isdigit():
-                try:
-                    cid = int(coin)
-                except ValueError:
-                    return coin
-                sym = self.spot_symbol_map.get(cid)
-                if sym:
-                    return normalize_spot_coin(sym)
-                logger.warning(f"Unknown spot coin id: {coin}")
-                return coin
-            return normalize_spot_coin(coin)
-        return str(coin)
+        return normalize_spot_coin(str(coin))
 
     async def _seed_open_orders(self, wallet: str):
         try:
@@ -163,6 +142,17 @@ class WSManager:
                     await self.ws.send(json.dumps({"method": "ping"}))
                 except:
                     pass
+
+    async def _refresh_alerts_loop(self):
+        """Fetch alerts from DB periodically."""
+        while self.running:
+            try:
+                alerts = await db.get_all_active_alerts()
+                if alerts is not None:
+                    self.active_alerts = alerts
+            except Exception as e:
+                logger.error(f"Error refreshing alerts: {e}")
+            await asyncio.sleep(10)
 
     def get_price(self, coin: str) -> float:
         if not coin:
@@ -235,7 +225,6 @@ class WSManager:
             return True
         if coin in self.spot_coins:
             return True
-        # Some APIs prefix spot assets with U
         if coin.startswith("U") and coin[1:] in self.spot_coins:
             return True
         return False
@@ -248,9 +237,7 @@ class WSManager:
     def untrack_wallet(self, wallet: str):
         wallet = wallet.lower()
         self.tracked_wallets.discard(wallet)
-        # Clear cached data for this wallet
         self.open_orders.pop(wallet, None)
-        # Remove cooldowns for this wallet
         keys_to_remove = [k for k in self.alert_cooldowns if k[0] == wallet]
         for k in keys_to_remove:
             del self.alert_cooldowns[k]
@@ -262,12 +249,10 @@ class WSManager:
     async def subscribe_user(self, wallet):
         if not self.ws: return
         wallet = wallet.lower()
-        # User Fills
         await self.ws.send(json.dumps({
             "method": "subscribe",
             "subscription": {"type": "userFills", "user": wallet}
         }))
-        # Open Orders
         await self.ws.send(json.dumps({
             "method": "subscribe",
             "subscription": {"type": "openOrders", "user": wallet}
@@ -283,29 +268,55 @@ class WSManager:
 
     async def handle_message(self, data):
         channel = data.get("channel")
-        
         if channel == "allMids":
             await self.handle_mids(data.get("data", {}).get("mids", {}))
         elif channel == "userFills":
             await self.handle_fills(data.get("data", {}))
         elif channel == "openOrders":
-            await self.handle_open_orders(data.get("data", [])) # Verify format
-        elif channel == "subscriptionResponse":
-            pass # Acknowledge
-        elif channel == "pong":
-            pass
+            await self.handle_open_orders(data.get("data", []))
 
     async def handle_mids(self, mids):
-        # Update local cache
         for coin, price in mids.items():
             self.mid_prices[coin] = float(price)
 
         self.last_mids_update_ts = time.time()
-
         await self._update_market_history_and_alerts()
-            
-        # Check proximity
         await self.check_proximity()
+        await self._check_custom_alerts() # Check user defined alerts
+
+    async def _check_custom_alerts(self):
+        """Check all active custom alerts against current prices."""
+        for alert in self.active_alerts:
+            aid = str(alert.get("_id"))
+            if aid in self.triggered_alerts:
+                continue
+                
+            symbol = alert.get("symbol")
+            target = alert.get("price")
+            direction = alert.get("direction") # above / below
+            user_id = alert.get("user_id")
+            
+            current_price = self.get_price(symbol)
+            if not current_price:
+                continue
+                
+            triggered = False
+            if direction == "above" and current_price >= target:
+                triggered = True
+            elif direction == "below" and current_price <= target:
+                triggered = True
+                
+            if triggered:
+                # Fire alert
+                self.triggered_alerts.add(aid)
+                # Remove from DB
+                await db.delete_alert(aid)
+                # Send message
+                msg = f"🔔 <b>Alert: {html.escape(symbol)}</b>\n\nPrice hit <b>${pretty_float(current_price)}</b> (Target: {direction} {target})"
+                try:
+                    await self.bot.send_message(user_id, msg, parse_mode="HTML")
+                except Exception as e:
+                    logger.error(f"Failed to send alert to {user_id}: {e}")
 
     async def _update_market_history_and_alerts(self):
         now = time.time()
@@ -419,7 +430,6 @@ class WSManager:
                     logger.error(f"Failed to send watch alert: {e}")
 
     async def check_proximity(self):
-        # For each wallet, check open orders against current mid price
         for wallet, orders in self.open_orders.items():
             for order in orders:
                 coin, limit_px_raw = self._extract_order_fields(order)
@@ -456,15 +466,12 @@ class WSManager:
                     await self.trigger_proximity_alert(wallet, coin, limit_px, current_px, oid, side, sz, pct_diff, usd_diff)
 
     async def trigger_proximity_alert(self, wallet, coin, limit_px, current_px, oid=None, side="", sz=0.0, pct_diff=0.0, usd_diff=0.0):
-        # Check cooldown
         key = (wallet, coin, oid or "")
         last_alert = self.alert_cooldowns.get(key, 0)
         if time.time() - last_alert < settings.ALERT_COOLDOWN:
             return
-            
         self.alert_cooldowns[key] = time.time()
         
-        # Notify users tracking this wallet
         users = await db.get_users_by_wallet(wallet)
         for user in users:
             chat_id = user.get('chat_id')
@@ -507,27 +514,20 @@ class WSManager:
                 logger.error(f"Failed to send alert to {chat_id}: {e}")
 
     async def handle_fills(self, data):
-        # data format: { isSnapshot: bool, user: str, fills: [WsFill] }
         user_wallet = data.get("user")
         if user_wallet:
             user_wallet = user_wallet.lower()
         
         fills = data.get("fills", [])
         
-        # If snapshot, maybe we just store history but don't alert?
-        # Prompt says "User Fills: Subscribe to user events... send an instant notification"
-        # Usually snapshots are initial state. We might want to skip alerting on snapshot 
-        # to avoid spamming old fills on restart.
         if data.get("isSnapshot"):
             logger.info(f"Received snapshot for {user_wallet} with {len(fills)} fills (no alerts)")
-            # Store fills silently
             for fill in fills:
                 fill_with_user = dict(fill)
                 fill_with_user["user"] = user_wallet
-                await db.add_fill(fill_with_user)
+                await db.save_fill(fill_with_user)
             return
         
-        # Notify users tracking this wallet
         users = await db.get_users_by_wallet(user_wallet)
         for user in users:
             chat_id = user.get('chat_id')
@@ -546,15 +546,13 @@ class WSManager:
                 if not all([coin, side, px, sz]):
                     continue
                 
-                # Only spot coins
                 norm_coin = normalize_spot_coin(coin)
                 if not self._is_spot_coin(norm_coin):
                     continue
                 
-                # Store fill
                 fill_with_user = dict(fill)
                 fill_with_user["user"] = user_wallet
-                await db.add_fill(fill_with_user)
+                await db.save_fill(fill_with_user)
                 
                 side_emoji = "🟢" if side.lower() in ("b","buy","bid") else "🔴"
                 safe_coin = html.escape(str(norm_coin))
@@ -571,15 +569,9 @@ class WSManager:
                     logger.error(f"Failed to send fill notification to {chat_id}: {e}")
 
     async def handle_open_orders(self, data):
-        # data format for openOrders subscription?
-        # Docs: "Data format: OpenOrders".
-        # Interface OpenOrders { dex: string, user: string, orders: Array<Order> }
-        # Need to check if 'data' is the OpenOrders object or list of orders.
-        # Docs say: "The data field providing the subscribed data." -> "Data format: OpenOrders"
-        
         orders = []
         if isinstance(data, list):
-            orders = data # In case it's just a list
+            orders = data
         elif isinstance(data, dict):
              orders = data.get("orders", [])
              
@@ -587,11 +579,7 @@ class WSManager:
         if user_wallet:
             user_wallet = user_wallet.lower()
 
-        # If we can't find user in data, we might need to rely on tracking contexts, 
-        # but 'user' is in the OpenOrders object.
-        
         if user_wallet:
-            # Filter to spot coins if we were able to load spot universe.
             if self.spot_coins:
                 filtered = []
                 for o in orders:

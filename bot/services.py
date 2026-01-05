@@ -85,6 +85,18 @@ async def get_symbol_name(token_id: str | int) -> str:
         
     return f"@{s_id}"
 
+def normalize_spot_coin(coin: str | None) -> str:
+    if not coin:
+        return ""
+    c = str(coin).upper()
+    if c == "USDC":
+        return c
+    # If it starts with U and followed by letters (e.g. UPURR), it might be internal name
+    # But often spot coins are just "PURR" or "@123"
+    if c.startswith("U") and len(c) > 1 and not c[1].isdigit():
+         return c[1:]
+    return c
+
 def pretty_float(x: float, max_decimals: int = 6) -> str:
     """Human-friendly float: trim trailing zeros while keeping up to max_decimals."""
     try:

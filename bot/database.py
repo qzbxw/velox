@@ -154,35 +154,47 @@ class Database:
             "time": {"$lt": ts * 1000}
         })
         return await cursor.to_list(length=None)
+
+    async def get_fills_by_coin(self, wallet, coin):
+        cursor = self.fills.find({
+            "user": wallet.lower(), 
+            "coin": coin
+        })
+        return await cursor.to_list(length=None)
+
+    async def get_fills(self, wallet, start_ts, end_ts):
+        return await self.get_fills_range(wallet, start_ts, end_ts)
         
     # --- ALERTS ---
-        async def add_alert(self, user_id: int, symbol: str, target: float, direction: str, alert_type: str = "price"):
-            """
-            alert_type: 'price', 'funding', 'oi'
-            direction: 'above', 'below'
-            """
-            await self.alerts.insert_one({
-                "user_id": user_id,
-                "symbol": symbol.upper(),
-                "target": target,
-                "direction": direction,
-                "type": alert_type,
-                "created_at": time.time()
-            })
-    
-        async def get_known_assets(self):
-            doc = await self.db.internal_state.find_one({"key": "known_assets"})
-            return set(doc.get("list", [])) if doc else set()
-    
-        async def update_known_assets(self, assets_list):
-            await self.db.internal_state.update_one(
-                {"key": "known_assets"},
-                {"$set": {"list": list(assets_list)}},
-                upsert=True
-            )
-    
-        async def delete_alert(self, alert_id: str):
-    
+    async def add_alert(self, user_id: int, symbol: str, target: float, direction: str, alert_type: str = "price"):
+        """
+        alert_type: 'price', 'funding', 'oi'
+        direction: 'above', 'below'
+        """
+        await self.alerts.insert_one({
+            "user_id": user_id,
+            "symbol": symbol.upper(),
+            "target": target,
+            "direction": direction,
+            "type": alert_type,
+            "created_at": time.time()
+        })
+
+    async def add_price_alert(self, user_id, symbol, price, direction):
+        return await self.add_alert(user_id, symbol, price, direction, "price")
+
+    async def get_known_assets(self):
+        doc = await self.db.internal_state.find_one({"key": "known_assets"})
+        return set(doc.get("list", [])) if doc else set()
+
+    async def update_known_assets(self, assets_list):
+        await self.db.internal_state.update_one(
+            {"key": "known_assets"},
+            {"$set": {"list": list(assets_list)}},
+            upsert=True
+        )
+
+    async def get_user_alerts(self, user_id: int):
         cursor = self.alerts.find({"user_id": user_id})
         return await cursor.to_list(length=None)
         

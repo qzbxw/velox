@@ -141,35 +141,6 @@ async def send_market_reports(bot):
         except Exception as e:
             logger.error(f"Failed to send market media group to {chat_id}: {e}")
 
-def _is_buy(side: str) -> bool:
-    s = (side or "").lower()
-    return s in ("b", "buy", "bid")
-
-def _calc_coin_avg_entry_from_fills(fills: list[dict]) -> float:
-    if not fills:
-        return 0.0
-
-    fills_sorted = sorted(fills, key=lambda x: float(x.get("time", 0)))
-    qty = 0.0
-    cost = 0.0
-    for f in fills_sorted:
-        sz = float(f.get("sz", 0) or 0)
-        px = float(f.get("px", 0) or 0)
-        if _is_buy(str(f.get("side", ""))):
-            qty += sz
-            cost += sz * px
-        else:
-            if qty <= 0:
-                continue
-            sell_sz = min(sz, qty)
-            avg_cost = cost / qty if qty else 0.0
-            qty -= sell_sz
-            cost -= avg_cost * sell_sz
-
-    if qty > 0 and cost > 0:
-        return cost / qty
-    return 0.0
-
 async def send_daily_digest(bot):
     """Generate and send daily digest (Equity PnL) to all users."""
     logger.info("Generating daily digest...")

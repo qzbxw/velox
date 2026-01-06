@@ -420,6 +420,20 @@ async def get_user_vault_equities(wallet_address: str):
                 return await resp.json()
             return []
 
+async def get_hlp_info():
+    """Fetch HLP vault details."""
+    url = f"{settings.HYPERLIQUID_API_URL}/info"
+    payload = {
+        "type": "vaultDetails",
+        "vaultAddress": "0xdf13098394e1832014b0df3f91285497",
+        "user": "0x0000000000000000000000000000000000000000"
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            return None
+
 async def get_all_assets_meta():
     """Fetch both spot and perps meta in one go."""
     spot, perps = await asyncio.gather(

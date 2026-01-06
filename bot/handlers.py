@@ -10,7 +10,8 @@ from bot.locales import _t
 from bot.services import (
     get_symbol_name, get_mid_price, get_open_orders, get_spot_balances, 
     get_perps_state, pretty_float, get_user_portfolio, get_perps_context,
-    extract_avg_entry_from_balance, get_user_fills, get_hlp_info
+    extract_avg_entry_from_balance, get_user_fills, get_hlp_info,
+    get_user_vault_equities
 )
 from bot.analytics import generate_pnl_chart, format_funding_heatmap, generate_pnl_card, calculate_trade_stats, generate_flex_pnl_card
 import logging

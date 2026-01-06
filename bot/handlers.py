@@ -859,7 +859,7 @@ async def cb_positions(call: CallbackQuery):
         
         kb.inline_keyboard.insert(-1, [InlineKeyboardButton(text=btn_label, callback_data=cb_data)])
 
-    await smart_edit(call, text, reply_markup=kb.as_markup())
+    await smart_edit(call, text, reply_markup=kb)
 
 @router.callback_query(F.data.startswith("calc_exit:"))
 async def cb_calc_exit(call: CallbackQuery, state: FSMContext):

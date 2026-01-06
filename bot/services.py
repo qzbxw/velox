@@ -407,6 +407,38 @@ async def get_user_fills(wallet_address: str):
             logger.error(f"Error fetching fills: {resp.status}")
             return []
 
+async def get_user_funding(wallet_address: str, start_time: int = None):
+    """Fetch user funding history."""
+    url = f"{settings.HYPERLIQUID_API_URL}/info"
+    payload = {
+        "type": "userFundingHistory",
+        "user": wallet_address
+    }
+    if start_time:
+        payload["startTime"] = start_time
+        
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            return []
+
+async def get_user_ledger(wallet_address: str, start_time: int = None):
+    """Fetch user non-funding ledger updates (deposits, withdrawals, transfers)."""
+    url = f"{settings.HYPERLIQUID_API_URL}/info"
+    payload = {
+        "type": "userNonFundingLedgerUpdates",
+        "user": wallet_address
+    }
+    if start_time:
+        payload["startTime"] = start_time
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            return []
+
 async def get_user_vault_equities(wallet_address: str):
     """Fetch user's equity in all vaults they participate in."""
     url = f"{settings.HYPERLIQUID_API_URL}/info"

@@ -245,6 +245,7 @@ EN = {
     "vaults_lbl": "Vaults",
     "calc_exit_btn": "🧮 Calc Exit {sym}",
     "exit_calc_title": "📊 <b>Exit Calculator: {sym}</b>\nPre-filled from position.\n\n",
+    "calc_funding_row": "\n{icon} <b>Funding:</b> {f_rate}% ({apr}% APR)",
 }
 
 # --- RUSSIAN ---
@@ -476,5 +477,6 @@ RU = {
             "vaults_lbl": "Ваулты",
             "calc_exit_btn": "🧮 Выход {sym}",
             "exit_calc_title": "📊 <b>Калькулятор выхода: {sym}</b>\nДанные подтянуты из позиции.\n\n",
+            "calc_funding_row": "\n{icon} <b>Фандинг:</b> {f_rate}% ({apr}% APR)",
         }
         

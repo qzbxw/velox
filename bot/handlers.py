@@ -11,7 +11,7 @@ from bot.services import (
     get_symbol_name, get_mid_price, get_open_orders, get_spot_balances, 
     get_perps_state, pretty_float, get_user_portfolio, get_perps_context,
     extract_avg_entry_from_balance, get_user_fills, get_hlp_info,
-    get_user_vault_equities
+    get_user_vault_equities, get_user_funding, get_user_ledger
 )
 from bot.analytics import generate_pnl_chart, format_funding_heatmap, generate_pnl_card, calculate_trade_stats, generate_flex_pnl_card
 import logging
@@ -292,6 +292,160 @@ async def cmd_oi_alert(message: Message):
     dir_icon = "📈" if direction == "above" else "📉"
     await message.answer(_t(lang, "oi_alert_set", symbol=symbol, dir=dir_icon, val=target), parse_mode="HTML")
 
+async def _generate_export_files(wallet: str):
+    """Internal helper to generate CSV files for a wallet."""
+    # --- 1. Fetch Data ---
+    portf, fills, funding, ledger = await asyncio.gather(
+        get_user_portfolio(wallet),
+        get_user_fills(wallet),
+        get_user_funding(wallet),
+        get_user_ledger(wallet),
+        return_exceptions=True
+    )
+    
+    # Handle exceptions in gather
+    if isinstance(portf, Exception): portf = None
+    if isinstance(fills, Exception): fills = []
+    if isinstance(funding, Exception): funding = []
+    if isinstance(ledger, Exception): ledger = []
+
+    history = []
+    pnl_history = []
+    
+    if portf:
+        target_data = {}
+        if isinstance(portf, list):
+            for item in portf:
+                if isinstance(item, list) and len(item) == 2:
+                    period, p_data = item
+                    if period == "allTime":
+                        target_data = p_data
+                        break
+            if not target_data and portf and isinstance(portf[0], list) and len(portf[0]) == 2:
+                    target_data = portf[0][1]
+        elif isinstance(portf, dict):
+            target_data = portf.get("data", {})
+        
+        history = target_data.get("accountValueHistory", [])
+        pnl_history = target_data.get("pnlHistory", [])
+
+    if not history and not fills and not funding and not ledger:
+        return None, None
+
+    # --- 2. Process History CSV ---
+    # Combined list for History: [ts, date, equity, pnl, cash_flow, funding, type]
+    combined_history = []
+    pnl_map = {p[0]: p[1] for p in pnl_history} if pnl_history else {}
+
+    for p in history:
+        ts = p[0]
+        combined_history.append({
+            "ts": ts,
+            "equity": p[1],
+            "pnl": pnl_map.get(ts, "0"),
+            "cash": 0,
+            "funding": 0,
+            "type": "Equity Sample"
+        })
+
+    for l in ledger:
+        combined_history.append({
+            "ts": l.get("time", 0),
+            "equity": "",
+            "pnl": "",
+            "cash": l.get("delta", {}).get("amount", 0),
+            "funding": 0,
+            "type": f"Ledger: {l.get('delta', {}).get('type', 'update')}"
+        })
+
+    for f in funding:
+        combined_history.append({
+            "ts": f.get("time", 0),
+            "equity": "",
+            "pnl": "",
+            "cash": 0,
+            "funding": f.get("delta", {}).get("amount", 0),
+            "type": "Funding Payment"
+        })
+
+    combined_history.sort(key=lambda x: x["ts"])
+
+    output_hist = io.StringIO()
+    writer_hist = csv.writer(output_hist)
+    writer_hist.writerow(["Timestamp", "Date", "Equity", "PnL (Cumulative)", "Cash Flow", "Funding", "Type"])
+    
+    for row in combined_history:
+        dt = datetime.datetime.fromtimestamp(row["ts"]/1000).strftime("%Y-%m-%d %H:%M:%S")
+        writer_hist.writerow([row["ts"], dt, row["equity"], row["pnl"], row["cash"], row["funding"], row["type"]])
+    
+    output_hist.seek(0)
+    doc_hist = BufferedInputFile(output_hist.getvalue().encode(), filename=f"history_{wallet[:6]}.csv")
+
+    # --- 3. Process Fills CSV ---
+    output_fills = io.StringIO()
+    writer_fills = csv.writer(output_fills)
+    writer_fills.writerow(["Time", "Symbol", "Side", "Price", "Size", "Value", "Fee", "Realized PnL", "Trade ID", "Liquidity", "Type"])
+    
+    # Combine Fills and Funding for detailed transaction view
+    combined_fills = []
+    for f in fills:
+        combined_fills.append({
+            "time": f.get("time", 0),
+            "coin": f.get("coin", ""),
+            "side": f.get("side", ""),
+            "dir": f.get("dir", ""),
+            "px": f.get("px", 0),
+            "sz": f.get("sz", 0),
+            "fee": f.get("fee", 0),
+            "pnl": f.get("closedPnl", 0),
+            "tid": f.get("tid", ""),
+            "liq": f.get("liquidity", ""),
+            "type": "Fill"
+        })
+    
+    for f in funding:
+        combined_fills.append({
+            "time": f.get("time", 0),
+            "coin": f.get("delta", {}).get("coin", ""),
+            "side": "",
+            "dir": "Funding",
+            "px": f.get("delta", {}).get("fundingRate", 0),
+            "sz": f.get("delta", {}).get("szi", 0),
+            "fee": 0,
+            "pnl": f.get("delta", {}).get("amount", 0),
+            "tid": f.get("hash", ""),
+            "liq": "",
+            "type": "Funding"
+        })
+
+    combined_fills.sort(key=lambda x: x["time"], reverse=True)
+
+    for f in combined_fills:
+        try:
+            ts = f["time"]
+            dt = datetime.datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d %H:%M:%S")
+            coin = f["coin"]
+            if coin.startswith("@"):
+                try: coin = await get_symbol_name(coin)
+                except: pass
+            
+            direction = f["dir"]
+            if not direction and f["type"] == "Fill":
+                direction = "Buy" if f["side"] == "B" else "Sell"
+            
+            px = float(f["px"])
+            sz = float(f["sz"])
+            val = px * sz if f["type"] == "Fill" else 0
+            
+            writer_fills.writerow([dt, coin, direction, px, sz, f"{val:.2f}", f["fee"], f["pnl"], f["tid"], f["liq"], f["type"]])
+        except:
+            continue
+
+    output_fills.seek(0)
+    doc_fills = BufferedInputFile(output_fills.getvalue().encode(), filename=f"fills_{wallet[:6]}.csv")
+    
+    return doc_hist, doc_fills
+
 @router.message(Command("export"))
 async def cmd_export(message: Message):
     status_msg = await message.answer("⏳ Exporting data...")
@@ -309,98 +463,15 @@ async def cmd_export(message: Message):
         except:
             pass
 
-        # --- 1. Portfolio History ---
-        portf = await get_user_portfolio(wallet)
-        history = []
-        pnl_history = []
+        doc_hist, doc_fills = await _generate_export_files(wallet)
         
-        if portf:
-            target_data = {}
-            if isinstance(portf, list):
-                for item in portf:
-                    if isinstance(item, list) and len(item) == 2:
-                        period, p_data = item
-                        if period == "allTime":
-                            target_data = p_data
-                            break
-                if not target_data and portf and isinstance(portf[0], list) and len(portf[0]) == 2:
-                     target_data = portf[0][1]
-            elif isinstance(portf, dict):
-                target_data = portf.get("data", {})
-            
-            history = target_data.get("accountValueHistory", [])
-            pnl_history = target_data.get("pnlHistory", [])
-
-        # --- 2. Fills (Trades) ---
-        fills = await get_user_fills(wallet)
-
-        if not history and not fills:
-            continue
-            
-        found_any = True
+        if doc_hist:
+            found_any = True
+            await message.answer_document(doc_hist, caption=f"📊 Equity & Ledger History: {wallet[:6]}")
         
-        # Prepare PnL lookup
-        pnl_map = {p[0]: p[1] for p in pnl_history} if pnl_history else {}
-
-        # CSV 1: History
-        if history:
-            output_hist = io.StringIO()
-            writer = csv.writer(output_hist)
-            writer.writerow(["Timestamp", "Date", "Equity", "PnL (Cumulative)"])
-            
-            for p in history:
-                try:
-                    ts_ms = p[0]
-                    val = p[1]
-                    pnl_val = pnl_map.get(ts_ms, "0")
-                    dt = datetime.datetime.fromtimestamp(ts_ms/1000).strftime("%Y-%m-%d %H:%M:%S")
-                    writer.writerow([ts_ms, dt, val, pnl_val])
-                except:
-                    continue
-                
-            output_hist.seek(0)
-            doc_hist = BufferedInputFile(output_hist.getvalue().encode(), filename=f"history_{wallet[:6]}.csv")
-            await message.answer_document(doc_hist, caption=f"📊 Equity & PnL History: {wallet[:6]}")
-
-        # CSV 2: Fills
-        if fills:
-            output_fills = io.StringIO()
-            writer = csv.writer(output_fills)
-            writer.writerow(["Time", "Symbol", "Side", "Price", "Size", "Value", "Fee", "Realized PnL", "Type"])
-            
-            # Sort fills by time desc
-            fills.sort(key=lambda x: x.get("time", 0), reverse=True)
-            
-            for f in fills:
-                try:
-                    ts = f.get("time", 0)
-                    dt = datetime.datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d %H:%M:%S")
-                    coin = f.get("coin", "")
-                    # Resolve coin name if it's @ID
-                    if coin.startswith("@"):
-                        try:
-                            coin = await get_symbol_name(coin)
-                        except:
-                            pass
-                        
-                    side = f.get("side", "")
-                    direction = f.get("dir", "") # Open Long, Close Short etc often just 'Open Long' or 'Buy'
-                    if not direction:
-                        direction = "Buy" if side == "B" else "Sell"
-                        
-                    px = float(f.get("px", 0))
-                    sz = float(f.get("sz", 0))
-                    val = px * sz
-                    fee = f.get("fee", 0)
-                    cl_pnl = f.get("closedPnl", 0)
-                    
-                    writer.writerow([dt, coin, direction, px, sz, f"{val:.2f}", fee, cl_pnl, "Fill"])
-                except:
-                    continue
-
-            output_fills.seek(0)
-            doc_fills = BufferedInputFile(output_fills.getvalue().encode(), filename=f"fills_{wallet[:6]}.csv")
-            await message.answer_document(doc_fills, caption=f"📝 Trade History: {wallet[:6]}")
+        if doc_fills:
+            found_any = True
+            await message.answer_document(doc_fills, caption=f"📝 Trade & Transaction History: {wallet[:6]}")
 
     try:
         if not found_any:
@@ -409,6 +480,7 @@ async def cmd_export(message: Message):
             await status_msg.delete()
     except:
         pass
+
 
 # --- CALLBACKS ---
 
@@ -430,97 +502,15 @@ async def cb_export(call: CallbackQuery):
         except:
             pass
 
-        # --- 1. Portfolio History ---
-        portf = await get_user_portfolio(wallet)
-        history = []
-        pnl_history = []
+        doc_hist, doc_fills = await _generate_export_files(wallet)
         
-        if portf:
-            target_data = {}
-            if isinstance(portf, list):
-                for item in portf:
-                    if isinstance(item, list) and len(item) == 2:
-                        period, p_data = item
-                        if period == "allTime":
-                            target_data = p_data
-                            break
-                if not target_data and portf and isinstance(portf[0], list) and len(portf[0]) == 2:
-                     target_data = portf[0][1]
-            elif isinstance(portf, dict):
-                target_data = portf.get("data", {})
-            
-            history = target_data.get("accountValueHistory", [])
-            pnl_history = target_data.get("pnlHistory", [])
-
-        # --- 2. Fills (Trades) ---
-        fills = await get_user_fills(wallet)
-
-        if not history and not fills:
-            continue
-            
-        found_any = True
+        if doc_hist:
+            found_any = True
+            await call.message.answer_document(doc_hist, caption=f"📊 Equity & Ledger History: {wallet[:6]}")
         
-        # Prepare PnL lookup
-        pnl_map = {p[0]: p[1] for p in pnl_history} if pnl_history else {}
-
-        # CSV 1: History
-        if history:
-            output_hist = io.StringIO()
-            writer = csv.writer(output_hist)
-            writer.writerow(["Timestamp", "Date", "Equity", "PnL (Cumulative)"])
-            
-            for p in history:
-                try:
-                    ts_ms = p[0]
-                    val = p[1]
-                    pnl_val = pnl_map.get(ts_ms, "0")
-                    dt = datetime.datetime.fromtimestamp(ts_ms/1000).strftime("%Y-%m-%d %H:%M:%S")
-                    writer.writerow([ts_ms, dt, val, pnl_val])
-                except:
-                    continue
-                
-            output_hist.seek(0)
-            doc_hist = BufferedInputFile(output_hist.getvalue().encode(), filename=f"history_{wallet[:6]}.csv")
-            await call.message.answer_document(doc_hist, caption=f"📊 Equity & PnL History: {wallet[:6]}")
-
-        # CSV 2: Fills
-        if fills:
-            output_fills = io.StringIO()
-            writer = csv.writer(output_fills)
-            writer.writerow(["Time", "Symbol", "Side", "Price", "Size", "Value", "Fee", "Realized PnL", "Type"])
-            
-            # Sort fills by time desc
-            fills.sort(key=lambda x: x.get("time", 0), reverse=True)
-            
-            for f in fills:
-                try:
-                    ts = f.get("time", 0)
-                    dt = datetime.datetime.fromtimestamp(ts/1000).strftime("%Y-%m-%d %H:%M:%S")
-                    coin = f.get("coin", "")
-                    if coin.startswith("@"):
-                        try:
-                            coin = await get_symbol_name(coin)
-                        except:
-                            pass
-                        
-                    side = f.get("side", "")
-                    direction = f.get("dir", "")
-                    if not direction:
-                        direction = "Buy" if side == "B" else "Sell"
-                        
-                    px = float(f.get("px", 0))
-                    sz = float(f.get("sz", 0))
-                    val = px * sz
-                    fee = f.get("fee", 0)
-                    cl_pnl = f.get("closedPnl", 0)
-                    
-                    writer.writerow([dt, coin, direction, px, sz, f"{val:.2f}", fee, cl_pnl, "Fill"])
-                except:
-                    continue
-
-            output_fills.seek(0)
-            doc_fills = BufferedInputFile(output_fills.getvalue().encode(), filename=f"fills_{wallet[:6]}.csv")
-            await call.message.answer_document(doc_fills, caption=f"📝 Trade History: {wallet[:6]}")
+        if doc_fills:
+            found_any = True
+            await call.message.answer_document(doc_fills, caption=f"📝 Trade & Transaction History: {wallet[:6]}")
 
     try:
         if not found_any:
@@ -529,6 +519,7 @@ async def cb_export(call: CallbackQuery):
             await status_msg.delete()
     except:
         pass
+
 
 @router.callback_query(F.data == "cb_menu")
 async def cb_menu(call: CallbackQuery):
@@ -846,24 +837,42 @@ async def cb_positions(call: CallbackQuery):
     # Add Exit Calc buttons for the current page items
     for i, item in enumerate(page_items):
         btn_label = _t(lang, "calc_exit_btn", sym=item['sym'])
-        # Store data in callback_data is size limited, so we use a shorthand or state
-        kb.inline_keyboard.insert(-1, [InlineKeyboardButton(text=btn_label, callback_data=f"calc_exit:{item['sym']}:{item['entry']}:{abs(item['szi'])}:{item['lev']}:{item['szi']>0}")])
+        # Store data in callback_data is size limited, so we use a shorthand
+        # Format: calc_exit:SYM:ENTRY:SIZE:LEV:IS_LONG:LIQ
+        cb_data = f"calc_exit:{item['sym']}:{item['entry']:.4f}:{abs(item['szi']):.4f}:{item['lev']}:{item['szi']>0}:{item['liq']:.2f}"
+        if len(cb_data) > 64:
+             # Fallback if too long
+             cb_data = f"calc_exit:{item['sym']}:{int(item['entry'])}:{int(abs(item['szi']))}:{int(item['lev'])}:{item['szi']>0}:{int(item['liq'])}"
+        
+        kb.inline_keyboard.insert(-1, [InlineKeyboardButton(text=btn_label, callback_data=cb_data)])
 
-    await smart_edit(call, text, reply_markup=kb)
+    await smart_edit(call, text, reply_markup=kb.as_markup())
 
 @router.callback_query(F.data.startswith("calc_exit:"))
 async def cb_calc_exit(call: CallbackQuery, state: FSMContext):
-    # Format: calc_exit:SYM:ENTRY:SIZE:LEV:IS_LONG
-    _, sym, entry, size, lev, is_long = call.data.split(":")
+    # Format: calc_exit:SYM:ENTRY:SIZE:LEV:IS_LONG:LIQ
+    parts = call.data.split(":")
+    sym = parts[1]
+    entry = float(parts[2])
+    size = float(parts[3])
+    lev = float(parts[4])
+    is_long = parts[5] == "True"
+    liq_px = float(parts[6]) if len(parts) > 6 else 0.0
+    
     lang = await db.get_lang(call.message.chat.id)
     
     await state.update_data(
         mode="perp",
-        side="long" if is_long == "True" else "short",
-        entry=float(entry),
+        side="long" if is_long else "short",
+        entry=entry,
+        size=size,
+        lev=lev,
+        is_exit=True,
+        symbol=sym,
+        liq_px=liq_px,
         # We don't know the user's total balance easily here, 
         # but we can derive it from size/lev for the calc to work
-        balance= (float(size) * float(entry)) / float(lev)
+        balance= (size * entry) / lev if lev > 0 else size * entry
     )
     
     msg = _t(lang, "exit_calc_title", sym=sym) + _t(lang, "calc_sl")
@@ -1854,21 +1863,29 @@ async def calc_set_tp(message: Message, state: FSMContext):
         # For now support single TP for simple logic, but store as float
         val = float(message.text.replace(",", "."))
         await state.update_data(tp=val)
-        await message.answer(_t(lang, "calc_risk"), parse_mode="HTML")
-        await state.set_state(CalcStates.risk)
+        
+        data = await state.get_data()
+        if data.get("is_exit"):
+            await calc_finish_internal(message, state, data)
+        else:
+            await message.answer(_t(lang, "calc_risk"), parse_mode="HTML")
+            await state.set_state(CalcStates.risk)
     except ValueError:
         await message.answer(_t(lang, "calc_error"))
 
 @router.message(CalcStates.risk)
-async def calc_finish(message: Message, state: FSMContext):
+async def calc_set_risk(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
     try:
         risk = float(message.text.replace(",", "."))
+        await state.update_data(risk=risk)
+        data = await state.get_data()
+        await calc_finish_internal(message, state, data)
     except ValueError:
         await message.answer(_t(lang, "calc_error"))
-        return
 
-    data = await state.get_data()
+async def calc_finish_internal(message: Message, state: FSMContext, data: dict):
+    lang = await db.get_lang(message.chat.id)
     await state.clear()
     
     mode = data["mode"]
@@ -1877,6 +1894,8 @@ async def calc_finish(message: Message, state: FSMContext):
     entry = data["entry"]
     sl = data["sl"]
     tp = data["tp"]
+    is_exit = data.get("is_exit", False)
+    sym = data.get("symbol", "???")
     
     if entry == sl:
         await message.answer("❌ Entry == SL")
@@ -1891,26 +1910,45 @@ async def calc_finish(message: Message, state: FSMContext):
     sl_pct = (dist_sl / entry) * 100
     tp_pct = (dist_tp / entry) * 100
     
-    # 2. Position Size
-    # Risk = Size_Coins * Dist_SL -> Size_Coins = Risk / Dist_SL
-    size_coins = risk / dist_sl
-    size_usd = size_coins * entry
+    # 2. Position Size & Risk
+    if is_exit:
+        size_coins = data["size"]
+        size_usd = size_coins * entry
+        risk = dist_sl * size_coins
+        leverage = data.get("lev", size_usd / balance if balance > 0 else 0)
+    else:
+        risk = data.get("risk", 0.0)
+        size_coins = risk / dist_sl
+        size_usd = size_coins * entry
+        leverage = size_usd / balance if balance > 0 else 0
     
-    # 3. Leverage
-    leverage = size_usd / balance if balance > 0 else 0
-    
+    # 3. Funding & Market Info
+    funding_row = ""
+    if is_perp:
+        try:
+            ctx = await get_perps_context()
+            universe = ctx[0].get("universe", [])
+            asset_ctxs = ctx[1]
+            idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
+            if idx != -1:
+                f_rate = float(asset_ctxs[idx].get("funding", 0))
+                apr = f_rate * 24 * 365 * 100
+                f_icon = "⏳" if abs(apr) < 10 else ("🟢" if (apr > 0 and not is_long) or (apr < 0 and is_long) else "🔴")
+                funding_row = _t(lang, "calc_funding_row", icon=f_icon, f_rate=f"{f_rate*100:.4f}", apr=f"{apr:+.1f}")
+        except:
+            pass
+
     # 4. Fees (Hyperliquid: Taker 0.035%)
-    # Open fee + Close fee
     fee_rate = 0.00035 
     fees = size_usd * fee_rate * 2
     
-    # 5. Liquidation (Isolated approximation)
-    # Maintenance margin ~0.5% on HL for small accounts, but let's use standard formula
-    # Long: Liq = Entry * (1 - 1/Lev + MM)
-    # Short: Liq = Entry * (1 + 1/Lev - MM)
+    # 5. Liquidation (Isolated approximation or pulled from API)
     mm = 0.005 # 0.5%
     liq_px = 0.0
-    if is_perp and leverage > 0:
+    
+    if is_exit and data.get("liq_px"):
+        liq_px = data["liq_px"]
+    elif is_perp and leverage > 0:
         if is_long:
             liq_px = entry * (1 - (1/leverage) + mm)
         else:
@@ -1923,11 +1961,7 @@ async def calc_finish(message: Message, state: FSMContext):
     total_loss = risk + fees
     
     # 7. Scaling (50/50)
-    # TP1 at 50% of the way to TP (conservative) or just 50% size at target?
-    # User usually means: 50% size at TP1, 50% size at TP2.
-    # Let's show: Profit if we close 50% at current TP, and 50% if it goes further?
-    # Actually, simpler scaling: Profit if TP hit with 50% size.
-    p50 = (gross_profit * 0.5) - (fees * 0.75) # Half closing fee saved? No, same fee usually.
+    p50 = (gross_profit * 0.5) - (fees * 0.75)
     p100 = total_profit
     
     # Result formatting
@@ -1964,6 +1998,8 @@ async def calc_finish(message: Message, state: FSMContext):
         p100=f"{p100:.2f}"
     )
     
+    res += funding_row
+
     # Warnings
     warnings = ""
     if is_perp:

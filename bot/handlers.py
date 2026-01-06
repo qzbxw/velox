@@ -613,7 +613,26 @@ async def cb_balance(call: CallbackQuery):
                 val = amount * px
                 wallet_total += val
                 
+                # Calculate Avg Entry and PnL%
+                entry = extract_avg_entry_from_balance(b)
+                if not entry or entry <= 0:
+                    try:
+                        coin_fills = await db.get_fills_by_coin(wallet, coin_id)
+                        from bot.services import calc_avg_entry_from_fills
+                        entry = calc_avg_entry_from_fills(coin_fills)
+                    except:
+                        entry = 0.0
+
+                pnl_str = ""
+                if entry > 0 and px > 0:
+                    pnl_pct = ((px / entry) - 1) * 100
+                    pnl_icon = "🟢" if pnl_pct >= 0 else "🔴"
+                    pnl_str = f" | {pnl_icon} {pnl_pct:+.1f}%"
+
                 line = f"▫️ <b>{coin_name}</b>: {amount:.4f} (${pretty_float(val, 0)})"
+                if entry > 0:
+                    line += f"\n     └ {_t(lang, 'avg_lbl')}: ${pretty_float(entry)}{pnl_str}"
+                
                 if hold > 0:
                     line += f" (🔒 {hold:.4f})"
                 wallet_lines.append(line)

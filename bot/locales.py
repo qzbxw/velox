@@ -50,6 +50,8 @@ EN = {
     "prox_alert_to_fill": "To fill",
     "prox_alert_diff": "Diff",
     "prox_alert_dist": "USD dist",
+    "avg_lbl": "Avg",
+    "pnl_lbl": "PnL",
     
     "fill_alert_title": "⚡ <b>Order Fill</b>",
     "fill_alert_liq": "💀 <b>LIQUIDATION</b>",
@@ -282,6 +284,8 @@ RU = {
     "prox_alert_to_fill": "До исполнения",
     "prox_alert_diff": "Отклонение",
     "prox_alert_dist": "USD дист.",
+    "avg_lbl": "Вход",
+    "pnl_lbl": "PnL",
     
     "fill_alert_title": "⚡ <b>Исполнение Ордера</b>",
     "fill_alert_liq": "💀 <b>ЛИКВИДАЦИЯ</b>",

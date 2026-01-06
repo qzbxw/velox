@@ -361,15 +361,31 @@ class WSManager:
         )
 
     def _is_known_coin(self, coin: str | None) -> bool:
-        coin = self._resolve_coin_symbol(coin)
         if not coin:
             return False
-        if not self.all_coins:
-            return True
+            
+        # 1. Direct match (raw name from universe or ID)
         if coin in self.all_coins:
             return True
-        if coin.startswith("U") and coin[1:] in self.all_coins:
+            
+        # 2. Normalized match
+        norm = self._resolve_coin_symbol(coin)
+        if norm in self.all_coins:
             return True
+            
+        # 3. Handle resolved name or common names
+        c_upper = str(coin).upper()
+        if "/" in c_upper or c_upper in ("BTC", "ETH", "SOL", "HYPE", "USDC"):
+            return True
+            
+        # 4. Check if it's a known resolved name from cache
+        try:
+            from bot.services import _SYMBOL_CACHE
+            if coin in _SYMBOL_CACHE["spot"].values() or coin in _SYMBOL_CACHE["perp"].values():
+                return True
+        except:
+            pass
+            
         return False
 
     def track_wallet(self, wallet: str):
@@ -778,20 +794,21 @@ class WSManager:
 
                 diff = abs(current_px - limit_px)
                 pct_diff = (diff / limit_px) if limit_px else 0.0
-                usd_diff = diff * sz if sz else 0.0
+                # Use price difference for USD proximity
+                price_dist = diff
 
                 hit_pct = pct_diff <= pct_thresh if pct_thresh else False
-                hit_usd = usd_diff <= settings.PROXIMITY_USD_THRESHOLD if (settings.PROXIMITY_USD_THRESHOLD and sz) else False
+                hit_usd = price_dist <= settings.PROXIMITY_USD_THRESHOLD if settings.PROXIMITY_USD_THRESHOLD else False
 
-                # If the deviation is > 0.5%, we shouldn't trigger a proximity alert just because the position size is small (USD dist)
-                if hit_usd and pct_diff > 0.005:
+                # If the deviation is > 1.0%, we shouldn't trigger a proximity alert just because it's < $5 away (for high priced assets)
+                if hit_usd and pct_diff > 0.01:
                     hit_usd = False
 
                 if hit_pct or hit_usd:
                     oid = self._extract_order_id(order)
-                    await self.trigger_proximity_alert(wallet, coin, limit_px, current_px, oid, side, sz, pct_diff, usd_diff)
+                    await self.trigger_proximity_alert(wallet, coin, limit_px, current_px, oid, side, sz, pct_diff, price_dist)
 
-    async def trigger_proximity_alert(self, wallet, coin, limit_px, current_px, oid=None, side="", sz=0.0, pct_diff=0.0, usd_diff=0.0):
+    async def trigger_proximity_alert(self, wallet, coin, limit_px, current_px, oid=None, side="", sz=0.0, pct_diff=0.0, price_dist=0.0):
         key = (wallet, coin, oid or "")
         last_alert = self.alert_cooldowns.get(key, 0)
         if time.time() - last_alert < settings.ALERT_COOLDOWN:
@@ -814,7 +831,7 @@ class WSManager:
             if side == "buy" and not user_prox_pct: eff_thresh = settings.BUY_PROXIMITY_THRESHOLD
             elif side == "sell" and not user_prox_pct: eff_thresh = settings.SELL_PROXIMITY_THRESHOLD
             
-            if pct_diff > eff_thresh and (usd_diff > settings.PROXIMITY_USD_THRESHOLD if sz else True):
+            if pct_diff > eff_thresh and (price_dist > settings.PROXIMITY_USD_THRESHOLD):
                 # If both failed (pct too high AND usd too high), skip
                 continue
 
@@ -838,7 +855,6 @@ class WSManager:
                 dir_txt = ""
 
             # Check for "dust" orders triggering USD alert while being far away
-            # If the deviation is > 10%, we shouldn't trigger a proximity alert just because the position size is small
             if pct_diff > 0.10:
                 return
 
@@ -855,8 +871,7 @@ class WSManager:
             msg += f"{_t(lang, 'prox_alert_to_fill')}: {fill_pct_fmt}\n"
             msg += f"{_t(lang, 'prox_alert_diff')}: {diff_pct_fmt}\n"
             
-            if sz:
-                msg += f"{_t(lang, 'prox_alert_dist')}: ${usd_diff:.2f} (thr ${settings.PROXIMITY_USD_THRESHOLD:.2f})\n"
+            msg += f"{_t(lang, 'prox_alert_dist')}: <b>${price_dist:.2f}</b> (thr ${settings.PROXIMITY_USD_THRESHOLD:.2f})\n"
                 
             msg += f"Wallet: <code>{wallet[:6]}...{wallet[-4:]}</code>"
             try:
@@ -911,7 +926,8 @@ class WSManager:
                 
                 logger.info(f"Resolved sym_name: {sym_name} (is_spot_guess: {is_spot_guess})")
                 
-                if not self._is_known_coin(sym_name):
+                # Fix: Check the original coin ID instead of resolved name
+                if not self._is_known_coin(coin):
                     logger.warning(f"Skipping unknown coin: {sym_name} (original: {coin})")
                     continue
                 

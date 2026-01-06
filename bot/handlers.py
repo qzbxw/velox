@@ -13,7 +13,13 @@ from bot.services import (
     extract_avg_entry_from_balance, get_user_fills, get_hlp_info,
     get_user_vault_equities, get_user_funding, get_user_ledger
 )
-from bot.analytics import generate_pnl_chart, format_funding_heatmap, generate_pnl_card, calculate_trade_stats, generate_flex_pnl_card
+from bot.analytics import (
+    generate_pnl_chart, format_funding_heatmap, generate_pnl_card, 
+    calculate_trade_stats, generate_flex_pnl_card,
+    prepare_terminal_dashboard_data_clean, prepare_positions_table_data,
+    prepare_orders_table_data
+)
+from bot.renderer import render_html_to_image
 import logging
 import time
 import html
@@ -43,6 +49,8 @@ async def smart_edit(call: CallbackQuery, text: str, reply_markup: InlineKeyboar
 
 def _main_menu_kb(lang):
     kb = InlineKeyboardBuilder()
+    # Row 0: Terminal
+    kb.row(InlineKeyboardButton(text="🖥️ Terminal", callback_data="cb_terminal"))
     # Row 1: Portfolio & Trading
     kb.row(
         InlineKeyboardButton(text=_t(lang, "cat_portfolio"), callback_data="sub:portfolio"),
@@ -57,21 +65,42 @@ def _main_menu_kb(lang):
 
 def _portfolio_kb(lang):
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_balance"), callback_data="cb_balance"))
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_pnl"), callback_data="cb_pnl"))
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_balance"), callback_data="cb_balance:portfolio"),
+        InlineKeyboardButton(text=_t(lang, "btn_pnl"), callback_data="cb_pnl")
+    )
+    # Cross-link to Trading
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_positions"), callback_data="cb_positions:portfolio:0"),
+        InlineKeyboardButton(text=_t(lang, "btn_orders"), callback_data="cb_orders:portfolio:0")
+    )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
 
 def _trading_kb(lang):
     kb = InlineKeyboardBuilder()
+    # Row 0: Balance (Full Width)
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_balance"), callback_data="cb_balance:trading"))
+    
+    # Row 1: Positions & Orders
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_positions"), callback_data="cb_positions:0"),
-        InlineKeyboardButton(text=_t(lang, "btn_orders"), callback_data="cb_orders:0")
+        InlineKeyboardButton(text=_t(lang, "btn_positions"), callback_data="cb_positions:trading:0"),
+        InlineKeyboardButton(text=_t(lang, "btn_orders"), callback_data="cb_orders:trading:0")
     )
+    
+    # Row 2: History & Stats
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_stats"), callback_data="cb_stats"),
-        InlineKeyboardButton(text=_t(lang, "calc_btn"), callback_data="calc_start")
+        InlineKeyboardButton(text=_t(lang, "btn_history"), callback_data="cb_fills"),
+        InlineKeyboardButton(text=_t(lang, "btn_stats"), callback_data="cb_stats:trading")
     )
+    
+    # Row 3: Calculator & Risk Check
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "calc_btn"), callback_data="calc_start"),
+        InlineKeyboardButton(text=_t(lang, "btn_risk_check"), callback_data="cb_risk_check")
+    )
+    
+    # Row 4: Back
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
 
@@ -81,7 +110,10 @@ def _market_kb(lang):
         InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data="cb_market"),
         InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data="cb_whales")
     )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_alerts"))
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_alerts"),
+        InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data="cb_alerts")
+    )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
 
@@ -92,17 +124,28 @@ def _back_kb(lang, target="cb_menu"):
 
 def _settings_kb(lang):
     kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_wallets"), callback_data="cb_wallets_menu"))
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_alerts"), callback_data="cb_alerts"))
+    # Row 1: Wallets & Flex
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_export"), callback_data="cb_export"),
+        InlineKeyboardButton(text=_t(lang, "btn_wallets"), callback_data="cb_wallets_menu"),
         InlineKeyboardButton(text=_t(lang, "btn_flex"), callback_data="cb_flex_menu")
     )
+    # Row 2: Export & Language
     kb.row(
-        InlineKeyboardButton(text="⚡ Prox Alert %", callback_data="set_prox_prompt"),
-        InlineKeyboardButton(text="🌊 Vol Alert %", callback_data="set_vol_prompt")
+        InlineKeyboardButton(text=_t(lang, "btn_export"), callback_data="cb_export"),
+        InlineKeyboardButton(text=_t(lang, "btn_lang"), callback_data="cb_lang_menu")
     )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_lang"), callback_data="cb_lang_menu"))
+    # Row 3: Alert Types (Funding/OI)
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_funding_alert"), callback_data="cb_funding_alert_prompt"),
+        InlineKeyboardButton(text=_t(lang, "btn_oi_alert"), callback_data="cb_oi_alert_prompt")
+    )
+    # Row 4: Thresholds
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_prox"), callback_data="set_prox_prompt"),
+        InlineKeyboardButton(text=_t(lang, "btn_vol"), callback_data="set_vol_prompt"),
+        InlineKeyboardButton(text=_t(lang, "btn_whale"), callback_data="set_whale_prompt")
+    )
+    # Row 5: Back
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
 
@@ -123,7 +166,12 @@ def _pagination_kb(lang: str, current_page: int, total_pages: int, callback_pref
     
     # Extra buttons for Positions
     if "cb_positions" in callback_prefix:
-        kb.row(InlineKeyboardButton(text=_t(lang, "btn_share"), callback_data="cb_share_pnl_menu"))
+        kb.row(
+            InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data=f"{callback_prefix}:{current_page}"),
+            InlineKeyboardButton(text=_t(lang, "btn_share"), callback_data="cb_share_pnl_menu")
+        )
+    elif "cb_orders" in callback_prefix:
+        kb.row(InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data=f"{callback_prefix}:{current_page}"))
         
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     return kb.as_markup()
@@ -554,13 +602,24 @@ async def cb_sub_market(call: CallbackQuery):
 async def cb_noop(call: CallbackQuery):
     await call.answer()
 
-@router.callback_query(F.data == "cb_balance")
+@router.callback_query(F.data.startswith("cb_balance"))
 async def cb_balance(call: CallbackQuery):
     await call.answer("Loading...")
+    
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) > 1 else "portfolio"
+    
+    # Determine back target
+    back_target = "sub:portfolio"
+    if context == "trading":
+        back_target = "sub:trading"
+    elif context == "portfolio":
+        back_target = "sub:portfolio"
+        
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:portfolio"))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
 
     msg_parts = []
@@ -689,8 +748,9 @@ async def cb_balance(call: CallbackQuery):
     text = _t(lang, "balance_title") + "\n\n" + "\n\n".join(msg_parts)
     
     kb = InlineKeyboardBuilder()
+    kb.button(text=_t(lang, "btn_refresh"), callback_data=f"cb_balance:{context}")
     kb.button(text="📊 Portfolio Chart", callback_data="cb_portfolio_chart")
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:portfolio")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     
     await smart_edit(call, text, reply_markup=kb.as_markup())
@@ -757,17 +817,30 @@ async def cb_portfolio_chart(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("cb_positions"))
 async def cb_positions(call: CallbackQuery):
-    # Parse page
-    try:
-        page = int(call.data.split(":")[1])
-    except IndexError:
+    # Parse data: cb_positions:context:page OR cb_positions:page (legacy)
+    parts = call.data.split(":")
+    if len(parts) == 3:
+        context = parts[1]
+        try: page = int(parts[2])
+        except: page = 0
+    elif len(parts) == 2:
+        context = "trading"
+        try: page = int(parts[1])
+        except: page = 0
+    else:
+        context = "trading"
         page = 0
+
+    # Determine back target
+    back_target = "sub:trading"
+    if context == "portfolio":
+        back_target = "sub:portfolio"
 
     await call.answer("Loading...")
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
 
     # Gather ALL positions first
@@ -811,8 +884,8 @@ async def cb_positions(call: CallbackQuery):
             })
 
     if not all_positions_data:
-        text = _t(lang, "positions_title") + "\n\n📭 No open positions."
-        await smart_edit(call, text, reply_markup=_back_kb(lang, "sub:trading"))
+        text = _t(lang, "positions_title") + "\n\n" + _t(lang, "no_open_positions")
+        await smart_edit(call, text, reply_markup=_back_kb(lang, back_target))
         return
 
     # Pagination Logic
@@ -845,7 +918,7 @@ async def cb_positions(call: CallbackQuery):
         
     text = f"{_t(lang, 'positions_title')} ({page+1}/{total_pages})\n\n" + "\n\n".join(msg_parts)
     
-    kb = _pagination_kb(lang, page, total_pages, "cb_positions", back_target="sub:trading")
+    kb = _pagination_kb(lang, page, total_pages, f"cb_positions:{context}", back_target=back_target)
     
     # Add Exit Calc buttons for the current page items
     for i, item in enumerate(page_items):
@@ -1018,16 +1091,30 @@ async def cb_share_pnl(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("cb_orders"))
 async def cb_orders(call: CallbackQuery):
-    try:
-        page = int(call.data.split(":")[1])
-    except IndexError:
+    # Parse data: cb_orders:context:page OR cb_orders:page
+    parts = call.data.split(":")
+    if len(parts) == 3:
+        context = parts[1]
+        try: page = int(parts[2])
+        except: page = 0
+    elif len(parts) == 2:
+        context = "trading"
+        try: page = int(parts[1])
+        except: page = 0
+    else:
+        context = "trading"
         page = 0
+
+    # Determine back target
+    back_target = "sub:trading"
+    if context == "portfolio":
+        back_target = "sub:portfolio"
         
     await call.answer("Loading...")
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang))
+        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
 
     all_orders = []
@@ -1048,8 +1135,8 @@ async def cb_orders(call: CallbackQuery):
             all_orders.append(o)
             
     if not all_orders:
-        text = _t(lang, "orders_title") + "\n\n📭 No open orders."
-        await smart_edit(call, text, reply_markup=_back_kb(lang, "sub:trading"))
+        text = _t(lang, "orders_title") + "\n\n" + _t(lang, "no_open_orders")
+        await smart_edit(call, text, reply_markup=_back_kb(lang, back_target))
         return
 
     # Pagination
@@ -1075,7 +1162,7 @@ async def cb_orders(call: CallbackQuery):
         
         sz = float(o.get("sz", 0))
         px = float(o.get("limitPx", 0))
-        side = str(o.get("side")).lower()
+        side = str(o.get("side", "")).lower()
         is_buy = side.startswith("b")
         
         # Calculate distance
@@ -1124,14 +1211,14 @@ async def cb_orders(call: CallbackQuery):
                     profit_pct = ((avg_entry / px) - 1) * 100
                 
                 p_color = "🟢" if profit_usd >= 0 else "🔴"
-                profit_line = f"\n   " + _t(lang, "profit_if_filled", val=f"{p_color}${pretty_float(profit_usd, 2)}", pct=f"{profit_pct:+.1f}")
+                profit_line = f"\n   " + _t(lang, "profit_if_filled", val=f"{p_color}\"${pretty_float(profit_usd, 2)}", pct=f"{profit_pct:+.1f}")
         else: # BUY order
             if avg_entry > 0:
                 if not is_spot and current_sz < 0: # Closing a short
                     profit_usd = (avg_entry - px) * sz
                     profit_pct = ((avg_entry / px) - 1) * 100
                     p_color = "🟢" if profit_usd >= 0 else "🔴"
-                    profit_line = f"\n   " + _t(lang, "profit_if_filled", val=f"{p_color}${pretty_float(profit_usd, 2)}", pct=f"{profit_pct:+.1f}")
+                    profit_line = f"\n   " + _t(lang, "profit_if_filled", val=f"{p_color}\"${pretty_float(profit_usd, 2)}", pct=f"{profit_pct:+.1f}")
                 elif current_sz > 0: # Increasing long
                     new_sz = current_sz + sz
                     new_avg = ((current_sz * avg_entry) + (sz * px)) / new_sz
@@ -1140,14 +1227,16 @@ async def cb_orders(call: CallbackQuery):
 
         item_text = (
             f"{icon} <b>{sym}</b> [{market_type}]\n"
-            f"   {side_label}: {sz} @ ${pretty_float(px)} (~${pretty_float(val_usd, 2)})\n"
+            f"   {side_label}: {sz} @ \"${pretty_float(px)}\" (~${pretty_float(val_usd, 2)})\n"
             f"   Цена: ${pretty_float(current_px)} | До входа: {dist_str} [{w_short}]"
             f"{profit_line}"
         )
         msg_parts.append(item_text)
 
     text = f"{_t(lang, 'orders_title')} ({page+1}/{total_pages})\n\n" + "\n\n".join(msg_parts)
-    kb = _pagination_kb(lang, page, total_pages, "cb_orders", back_target="sub:trading")
+    
+    kb = _pagination_kb(lang, page, total_pages, f"cb_orders:{context}", back_target=back_target)
+    
     await smart_edit(call, text, reply_markup=kb)
 
 @router.callback_query(F.data == "cb_settings")
@@ -1179,8 +1268,8 @@ async def cb_alerts(call: CallbackQuery):
     ts = time.strftime("%H:%M:%S")
     
     if not alerts:
-        text = f"{_t(lang, 'settings_title')} > <b>Alerts</b>\n\n{_t(lang, 'no_alerts')}\n{_t(lang, 'alert_usage')}\n\n<i>Last update: {ts}</i>"
-        await smart_edit(call, text, reply_markup=_settings_kb(lang))
+        text = f"{_t(lang, 'market_title')} > <b>{_t(lang, 'btn_price_alerts')}</b>\n\n{_t(lang, 'no_alerts')}\n{_t(lang, 'alert_usage')}\n\n<i>Last update: {ts}</i>"
+        await smart_edit(call, text, reply_markup=_back_kb(lang, "sub:market"))
         return
 
     kb = InlineKeyboardBuilder()
@@ -1189,7 +1278,7 @@ async def cb_alerts(call: CallbackQuery):
     for a in alerts:
         aid = str(a["_id"])
         s = str(a.get("symbol", "???"))
-        p = pretty_float(a.get("price", 0))
+        p = pretty_float(a.get("target", 0))
         d = "📈" if a.get("direction") == "above" else "📉"
         
         # Plain text format
@@ -1197,7 +1286,7 @@ async def cb_alerts(call: CallbackQuery):
         kb.button(text=f"❌ Del {s}", callback_data=f"del_alert:{aid}")
         
     kb.button(text="🗑️ Clear All", callback_data="clear_all_alerts")
-    kb.button(text=_t(lang, "btn_back"), callback_data="cb_settings")
+    kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
     kb.adjust(1)
     
     text += f"\n\n<i>Last update: {ts}</i>"
@@ -1359,8 +1448,13 @@ async def cb_market(call: CallbackQuery):
         apr = funding_rate * 24 * 365 * 100
         vol_str = f"{volume/1_000_000:.1f}M" if volume > 1_000_000 else f"{volume/1000:.0f}K"
         
+        # 24h Change
+        prev_day = float(ac.get("prevDayPx", 0) or price)
+        change_24h = ((price - prev_day) / prev_day) * 100 if prev_day > 0 else 0.0
+        change_icon = "🟢" if change_24h >= 0 else "🔴"
+        
         lines.append(
-            f"🔹 <b>{sym}</b>: ${pretty_float(price, 4)}\n"
+            f"🔹 <b>{sym}</b>: ${pretty_float(price, 4)} ({change_icon} {change_24h:+.2f}%)\n"
             f"   F: {funding_rate*100:.4f}% ({apr:.1f}% APR) | Vol: ${vol_str}"
         )
     
@@ -1378,7 +1472,7 @@ async def cb_market(call: CallbackQuery):
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
 @router.callback_query(F.data == "cb_market_overview")
-async def cb_market_overview(call: CallbackQuery):
+async def cb_market_overview(call: CallbackQuery, state: FSMContext):
     await call.answer("Generating Market Insights...")
     lang = await db.get_lang(call.message.chat.id)
     
@@ -1414,17 +1508,34 @@ async def cb_market_overview(call: CallbackQuery):
         buf_heat = await render_html_to_image("funding_heatmap.html", data_alpha)
         buf_prices = await render_html_to_image("coin_prices.html", data_prices)
         
-        # Build watchlist text
+        # 1. Get detailed info for Majors
+        majors_text = ""
+        major_symbols = ["BTC", "ETH", "SOL", "HYPE"]
+        for sym in major_symbols:
+            idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
+            if idx != -1:
+                ac = asset_ctxs[idx]
+                price = float(ac.get("markPx", 0))
+                prev_day = float(ac.get("prevDayPx", 0) or price)
+                change = ((price - prev_day) / prev_day) * 100 if prev_day > 0 else 0.0
+                funding = float(ac.get("funding", 0)) * 24 * 365 * 100
+                oi = float(ac.get("openInterest", 0)) * price / 1e6
+                vol = float(ac.get("dayNtlVlm", 0)) / 1e6
+                
+                icon = "🟢" if change >= 0 else "🔴"
+                majors_text += (
+                    f"🔹 <b>{sym}</b>: ${pretty_float(price)} ({icon} {change:+.2f}%)\n"
+                    f"   ├ F: <code>{funding:+.1f}% APR</code>\n"
+                    f"   └ OI: <b>${oi:.1f}M</b> | Vol: <b>${vol:.1f}M</b>\n\n"
+                )
+
+        # 2. Build watchlist text
         watchlist = await db.get_watchlist(call.message.chat.id)
         watchlist_lines = []
         if watchlist:
             for sym in watchlist:
-                idx = -1
-                for i, u in enumerate(universe):
-                    u_name = u["name"] if isinstance(u, dict) else u
-                    if u_name == sym:
-                        idx = i
-                        break
+                if sym in major_symbols: continue
+                idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
                 if idx != -1:
                     ac = asset_ctxs[idx]
                     price = float(ac.get("markPx", 0))
@@ -1435,51 +1546,53 @@ async def cb_market_overview(call: CallbackQuery):
         
         watchlist_text = ""
         if watchlist_lines:
-            watchlist_text = f"{_t(lang, 'market_report_watchlist')}:\n" + "\n".join(watchlist_lines) + "\n\n"
+            watchlist_text = f"⭐ <b>{_t(lang, 'market_report_watchlist')}</b>:\n" + "\n".join(watchlist_lines) + "\n\n"
 
         now_utc = time.strftime("%H:%M")
         text_report = (
-            f"📊 🔔 {_t(lang, 'market_alerts_title')}\n\n"
+            f"📊 <b>{_t(lang, 'market_alerts_title')}</b>\n\n"
+            f"<b>{_t(lang, 'market_report_global')}</b>\n"
+            f"• Vol 24h: <b>${data_alpha['global_volume']}</b>\n"
+            f"• Total OI: <b>${data_alpha['total_oi']}</b>\n"
+            f"• Sentiment: <code>{data_alpha['sentiment_label']}</code>\n\n"
+            f"<b>{_t(lang, 'market_report_majors')}</b>\n"
+            f"{majors_text}"
             f"{watchlist_text}"
-            f"{_t(lang, 'market_report_global')}:\n"
-            f"• {_t(lang, 'market_report_vol')}: ${data_alpha['global_volume']}\n"
-            f"• {_t(lang, 'market_report_oi')}: ${data_alpha['total_oi']}\n"
-            f"• {_t(lang, 'market_report_sentiment')}: {data_alpha['sentiment_label']}\n\n"
-            f"{_t(lang, 'market_report_top_gainers')}:\n"
+            f"🕒 <i>{_t(lang, 'market_report_footer', time=now_utc + ' UTC')}</i>"
         )
-        
-        for asset in data_alpha['gainers'][:3]:
-            text_report += f"• {asset['name']}: ${asset['price']} ({asset['change']:+.2f}%)\n"
-            
-        text_report += f"\n{_t(lang, 'market_report_top_losers')}:\n"
-        for asset in data_alpha['losers'][:3]:
-            text_report += f"• {asset['name']}: ${asset['price']} ({asset['change']:+.2f}%)\n"
-
-        text_report += f"\n{_t(lang, 'market_report_efficiency')}:\n"
-        for asset in data_alpha['efficiency'][:3]:
-            text_report += f"• {asset['name']}: {asset['ratio']:.1f}x\n"
-
-        text_report += f"\n{_t(lang, 'market_report_funding')}:\n"
-        high_f = sorted(data_alpha['funding_map'], key=lambda x: x['apr'], reverse=True)[:3]
-        for f in high_f:
-            text_report += f"• {f['name']}: {f['apr']:+.1f}% APR\n"
-            
-        text_report += f"\n{_t(lang, 'market_report_footer', time=now_utc + ' UTC')}"
 
         media = [
-            InputMediaPhoto(media=BufferedInputFile(buf_prices.read(), filename="insights_1.png"), caption=text_report, parse_mode="HTML"),
+            InputMediaPhoto(media=BufferedInputFile(buf_prices.read(), filename="insights_1.png")),
             InputMediaPhoto(media=BufferedInputFile(buf_heat.read(), filename="insights_2.png")),
             InputMediaPhoto(media=BufferedInputFile(buf_alpha.read(), filename="insights_3.png")),
             InputMediaPhoto(media=BufferedInputFile(buf_liq.read(), filename="insights_4.png"))
         ]
         
         await call.message.delete()
-        await call.message.answer_media_group(media)
-        await call.message.answer("<i>Use the menu below to go back or refresh.</i>", reply_markup=_back_kb(lang, "sub:market"), parse_mode="HTML")
+        media_msgs = await call.message.answer_media_group(media)
+        # Store message IDs for cleanup
+        await state.update_data(market_media_ids=[m.message_id for m in media_msgs])
+        
+        kb = InlineKeyboardBuilder()
+        kb.button(text=_t(lang, "btn_back"), callback_data="cb_market_cleanup")
+        
+        await call.message.answer(text_report, reply_markup=kb.as_markup(), parse_mode="HTML")
         
     except Exception as e:
         logger.error(f"Error generating images: {e}")
         await call.message.answer("❌ Error generating images.")
+
+@router.callback_query(F.data == "cb_market_cleanup")
+async def cb_market_cleanup(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    mids = data.get("market_media_ids", [])
+    for mid in mids:
+        try:
+            await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
+        except:
+            pass
+    await state.update_data(market_media_ids=None)
+    await cb_sub_market(call)
 
 @router.callback_query(F.data.startswith("cb_heatmap_sort:"))
 async def cb_heatmap_sort(call: CallbackQuery):
@@ -1523,13 +1636,23 @@ async def cmd_set_vol(message: Message):
     except:
         await message.answer(_t(lang, "invalid_number"))
 
-@router.callback_query(F.data == "cb_pnl")
+@router.callback_query(F.data.startswith("cb_pnl"))
 async def cb_pnl(call: CallbackQuery):
     await call.answer("Loading...")
+    
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) > 1 else "portfolio"
+    
+    back_target = "sub:portfolio"
+    if context == "trading":
+        back_target = "sub:trading"
+    elif context == "stats": # If we ever use stats specific context
+        back_target = "cb_stats" # Return to stats?
+        
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
 
     ws = getattr(call.message.bot, "ws_manager", None)
@@ -1674,7 +1797,7 @@ async def cb_pnl(call: CallbackQuery):
     
     kb = InlineKeyboardBuilder()
     kb.button(text=_t(lang, "btn_graph"), callback_data="cb_pnl_graph")
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:portfolio")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     
     await smart_edit(call, text, reply_markup=kb.as_markup())
@@ -1754,6 +1877,15 @@ class CalcStates(StatesGroup):
     tp = State()
     risk = State()
 
+class AlertStates(StatesGroup):
+    waiting_for_symbol = State()
+    waiting_for_target = State()
+
+class SettingsStates(StatesGroup):
+    waiting_for_prox = State()
+    waiting_for_vol = State()
+    waiting_for_whale = State()
+
 class MarketAlertStates(StatesGroup):
     waiting_for_time = State()
     waiting_for_type = State()
@@ -1787,7 +1919,7 @@ async def cb_market_alerts(call: CallbackQuery):
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
     kb.adjust(1)
     
-    text += f"\n\n<i>{repeat_label if alert_times else ''} 🔄 Daily | 📍 Once</i>\n<i>Last update: {ts}</i>"
+    text += f"\n\n<i>{repeat_label if alert_times else ''} {_t(lang, 'daily')} | {_t(lang, 'once')}</i>\n<i>{_t(lang, 'last_update')}: {ts}</i>"
     
     try:
         await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
@@ -1832,12 +1964,12 @@ async def process_market_alert_time(message: Message, state: FSMContext):
         pass
     
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 Каждый день", callback_data="ma_type:daily")
-    kb.button(text="📍 Один раз", callback_data="ma_type:once")
+    kb.button(text="🔄 " + _t(lang, "daily"), callback_data="ma_type:daily")
+    kb.button(text="📍 " + _t(lang, "once"), callback_data="ma_type:once")
     kb.button(text=_t(lang, "btn_back"), callback_data="cb_market_alerts")
     kb.adjust(1)
     
-    text = f"⏰ Time: <b>{time_str} UTC</b>\n\nВыберите частоту уведомлений:"
+    text = f"⏰ Time: <b>{time_str} UTC</b>\n\nChoose frequency:"
     
     if msg_id:
         try:
@@ -1904,15 +2036,122 @@ async def cb_del_market_alert(call: CallbackQuery):
         
     await cb_market_alerts(call)
 
+@router.callback_query(F.data == "cb_funding_alert_prompt")
+async def cb_funding_alert_prompt(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_lang(call.message.chat.id)
+    await state.update_data(alert_type="funding", menu_msg_id=call.message.message_id)
+    await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.set_state(AlertStates.waiting_for_symbol)
+    await call.answer()
+
+@router.callback_query(F.data == "cb_oi_alert_prompt")
+async def cb_oi_alert_prompt(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_lang(call.message.chat.id)
+    await state.update_data(alert_type="oi", menu_msg_id=call.message.message_id)
+    await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.set_state(AlertStates.waiting_for_symbol)
+    await call.answer()
+
+@router.message(AlertStates.waiting_for_symbol)
+async def process_alert_symbol(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    symbol = message.text.strip().upper()
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
+    
+    # Basic validation
+    if len(symbol) > 10 or not symbol.isalnum():
+        await message.answer(_t(lang, "watch_invalid"))
+        return
+
+    await state.update_data(symbol=symbol)
+    a_type = data.get("alert_type")
+    
+    prompt = _t(lang, "prompt_target_funding") if a_type == "funding" else _t(lang, "prompt_target_oi")
+    
+    try: await message.delete()
+    except: pass
+
+    if msg_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                text=prompt,
+                reply_markup=_back_kb(lang, "cb_settings"),
+                parse_mode="HTML"
+            )
+        except:
+            await message.answer(prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    else:
+        await message.answer(prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+        
+    await state.set_state(AlertStates.waiting_for_target)
+
+@router.message(AlertStates.waiting_for_target)
+async def process_alert_target(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    try:
+        target = float(message.text.replace(",", "."))
+    except:
+        await message.answer(_t(lang, "invalid_number"))
+        return
+        
+    data = await state.get_data()
+    symbol = data.get("symbol")
+    a_type = data.get("alert_type")
+    msg_id = data.get("menu_msg_id")
+    
+    # Determine direction
+    ctx = await get_perps_context()
+    universe = ctx[0].get("universe", [])
+    asset_ctxs = ctx[1]
+    
+    idx = next((i for i, u in enumerate(universe) if u["name"] == symbol), -1)
+    current_val = 0.0
+    
+    if idx != -1 and idx < len(asset_ctxs):
+        if a_type == "funding":
+            current_val = float(asset_ctxs[idx].get("funding", 0)) * 24 * 365 * 100
+        else:
+            current_val = float(asset_ctxs[idx].get("openInterest", 0)) * float(asset_ctxs[idx].get("markPx", 0)) / 1e6
+            
+    direction = "above" if target > current_val else "below"
+    await db.add_alert(message.chat.id, symbol, target, direction, a_type)
+    
+    dir_icon = "📈" if direction == "above" else "📉"
+    success_msg = _t(lang, "funding_alert_set" if a_type == "funding" else "oi_alert_set", symbol=symbol, dir=dir_icon, val=target)
+    
+    try: await message.delete()
+    except: pass
+
+    if msg_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                text=success_msg,
+                reply_markup=_settings_kb(lang),
+                parse_mode="HTML"
+            )
+        except:
+            await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
+    else:
+        await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        
+    await state.clear()
+
 @router.callback_query(F.data == "calc_start")
 async def calc_start(call: CallbackQuery, state: FSMContext):
     lang = await db.get_lang(call.message.chat.id)
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "calc_spot"), callback_data="calc_mode:spot")
-    kb.button(text=_t(lang, "calc_perp"), callback_data="calc_mode:perp")
+    kb.button(text=_t(lang, "calc_spot_btn"), callback_data="calc_mode:spot")
+    kb.button(text=_t(lang, "calc_perp_btn"), callback_data="calc_mode:perp")
+    kb.button(text=_t(lang, "calc_reverse"), callback_data="calc_mode:reverse")
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:trading")
-    kb.adjust(2, 1)
+    kb.adjust(2, 1, 1)
     
+    await state.update_data(menu_msg_id=call.message.message_id)
     await call.message.edit_text(_t(lang, "calc_mode"), reply_markup=kb.as_markup(), parse_mode="HTML")
     await state.set_state(CalcStates.mode)
 
@@ -1921,18 +2160,23 @@ async def calc_set_mode(call: CallbackQuery, state: FSMContext):
     mode = call.data.split(":")[1]
     await state.update_data(mode=mode)
     lang = await db.get_lang(call.message.chat.id)
+    kb = _back_kb(lang, "calc_start")
     
     if mode == "spot":
         await state.update_data(side="long")
-        await call.message.edit_text(_t(lang, "calc_balance"), parse_mode="HTML")
+        await call.message.edit_text(_t(lang, "calc_balance"), reply_markup=kb, parse_mode="HTML")
         await state.set_state(CalcStates.balance)
+    elif mode == "reverse":
+        await call.message.edit_text("🛡️ <b>Reverse Risk Calculator</b>\n\nEnter <b>Entry Price</b>:", reply_markup=kb, parse_mode="HTML")
+        await state.set_state(CalcStates.entry)
     else:
-        kb = InlineKeyboardBuilder()
-        kb.button(text=_t(lang, "calc_long"), callback_data="calc_side:long")
-        kb.button(text=_t(lang, "calc_short"), callback_data="calc_side:short")
-        kb.adjust(2)
+        kb_side = InlineKeyboardBuilder()
+        kb_side.button(text=_t(lang, "calc_long"), callback_data="calc_side:long")
+        kb_side.button(text=_t(lang, "calc_short"), callback_data="calc_side:short")
+        kb_side.button(text=_t(lang, "btn_back"), callback_data="calc_start")
+        kb_side.adjust(2, 1)
         
-        await call.message.edit_text(_t(lang, "calc_side_msg"), reply_markup=kb.as_markup(), parse_mode="HTML")
+        await call.message.edit_text(_t(lang, "calc_side_msg"), reply_markup=kb_side.as_markup(), parse_mode="HTML")
         await state.set_state(CalcStates.side)
     
     await call.answer()
@@ -1942,17 +2186,25 @@ async def calc_set_side(call: CallbackQuery, state: FSMContext):
     side = call.data.split(":")[1]
     await state.update_data(side=side)
     lang = await db.get_lang(call.message.chat.id)
-    await call.message.answer(_t(lang, "calc_balance"), parse_mode="HTML")
+    await call.message.edit_text(_t(lang, "calc_balance"), reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
     await state.set_state(CalcStates.balance)
     await call.answer()
 
 @router.message(CalcStates.balance)
 async def calc_set_balance(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
     try:
         val = float(message.text.replace(",", "."))
         await state.update_data(balance=val)
-        await message.answer(_t(lang, "calc_entry"), parse_mode="HTML")
+        prompt = _t(lang, "calc_entry")
+        try: await message.delete()
+        except: pass
+        if msg_id:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
+        else:
+            await message.answer(prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
         await state.set_state(CalcStates.entry)
     except ValueError:
         await message.answer(_t(lang, "calc_error"))
@@ -1960,10 +2212,18 @@ async def calc_set_balance(message: Message, state: FSMContext):
 @router.message(CalcStates.entry)
 async def calc_set_entry(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
     try:
         val = float(message.text.replace(",", "."))
         await state.update_data(entry=val)
-        await message.answer(_t(lang, "calc_sl"), parse_mode="HTML")
+        prompt = _t(lang, "calc_sl")
+        try: await message.delete()
+        except: pass
+        if msg_id:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
+        else:
+            await message.answer(prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
         await state.set_state(CalcStates.sl)
     except ValueError:
         await message.answer(_t(lang, "calc_error"))
@@ -1971,10 +2231,23 @@ async def calc_set_entry(message: Message, state: FSMContext):
 @router.message(CalcStates.sl)
 async def calc_set_sl(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
     try:
         val = float(message.text.replace(",", "."))
         await state.update_data(sl=val)
-        await message.answer(_t(lang, "calc_tp"), parse_mode="HTML")
+        
+        prompt = _t(lang, "calc_tp")
+        if data.get("mode") == "reverse":
+            prompt = "💰 Enter <b>Risk Amount ($)</b> (e.g. 50):"
+            
+        try: await message.delete()
+        except: pass
+        
+        if msg_id:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
+        else:
+            await message.answer(prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
         await state.set_state(CalcStates.tp)
     except ValueError:
         await message.answer(_t(lang, "calc_error"))
@@ -1982,163 +2255,135 @@ async def calc_set_sl(message: Message, state: FSMContext):
 @router.message(CalcStates.tp)
 async def calc_set_tp(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
     try:
-        # For now support single TP for simple logic, but store as float
         val = float(message.text.replace(",", "."))
         await state.update_data(tp=val)
         
-        data = await state.get_data()
-        if data.get("is_exit"):
-            await calc_finish_internal(message, state, data)
+        try: await message.delete()
+        except: pass
+        
+        if data.get("mode") == "reverse":
+            # Direct calculation for reverse mode here
+            entry = float(data.get("entry", 0))
+            sl = float(data.get("sl", 0))
+            risk_amt = val
+            
+            if entry <= 0 or sl <= 0 or risk_amt <= 0 or entry == sl:
+                await message.answer("❌ Invalid inputs. Entry != SL and > 0.")
+                await state.clear()
+                return
+            
+            dist_pct = abs(entry - sl) / entry
+            size_usd = risk_amt / dist_pct
+            side = "LONG" if entry > sl else "SHORT"
+            
+            res = (
+                f"🛡️ <b>Risk Calculation Result</b>\n\n"
+                f"Risk: <b>${risk_amt}</b>\n"
+                f"Entry: ${entry}\n"
+                f"Stop Loss: ${sl} ({side})\n"
+                f"Distance: {dist_pct*100:.2f}%\n\n"
+                f"👉 <b>Position Size: \${pretty_float(size_usd, 2)}</b>\n"
+                f"(Qty: {size_usd/entry:.4f})"
+            )
+            kb = InlineKeyboardBuilder()
+            kb.button(text=_t(lang, "btn_back"), callback_data="calc_start")
+            
+            if msg_id:
+                try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=res, reply_markup=kb.as_markup(), parse_mode="HTML")
+                except: await message.answer(res, reply_markup=kb.as_markup(), parse_mode="HTML")
+            else:
+                await message.answer(res, reply_markup=kb.as_markup(), parse_mode="HTML")
+            await state.clear()
+            return
+
+        prompt = _t(lang, "calc_risk")
+        if msg_id:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
         else:
-            await message.answer(_t(lang, "calc_risk"), parse_mode="HTML")
-            await state.set_state(CalcStates.risk)
+            await message.answer(prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
+        await state.set_state(CalcStates.risk)
     except ValueError:
         await message.answer(_t(lang, "calc_error"))
 
 @router.message(CalcStates.risk)
-async def calc_set_risk(message: Message, state: FSMContext):
+async def calc_calculate(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
     try:
-        risk = float(message.text.replace(",", "."))
-        await state.update_data(risk=risk)
-        data = await state.get_data()
-        await calc_finish_internal(message, state, data)
+        risk_val = float(message.text.replace(",", "."))
+        await state.clear()
+        
+        mode = data.get("mode")
+        balance = data.get("balance", 0)
+        entry = data.get("entry", 0)
+        sl = data.get("sl", 0)
+        tp = data.get("tp", 0)
+        side = data.get("side")
+        
+        if (side == "long" and sl >= entry) or (side == "short" and sl <= entry):
+             await message.answer(_t(lang, "calc_side_wrong"), parse_mode="HTML")
+             return
+             
+        risk_per_coin = abs(entry - sl)
+        if risk_per_coin == 0:
+            await message.answer(_t(lang, "calc_error"))
+            return
+            
+        position_coins = risk_val / risk_per_coin
+        position_usd = position_coins * entry
+        fees = position_usd * 0.00035 * 2
+        lev = position_usd / balance if balance > 0 else 1.0
+            
+        reward_per_coin = abs(tp - entry)
+        rr = reward_per_coin / risk_per_coin if risk_per_coin else 0
+        
+        liq_px = 0
+        if lev > 1:
+            if side == "long": liq_px = entry * (1 - (1/lev) + 0.01)
+            else: liq_px = entry * (1 + (1/lev) - 0.01)
+        
+        liq_warning = ""
+        if lev > 1:
+             if (side == "long" and liq_px > sl) or (side == "short" and liq_px < sl):
+                 liq_warning = _t(lang, "calc_liq_warn")
+        
+        sl_pct = ((sl - entry) / entry) * 100
+        tp_pct = ((tp - entry) / entry) * 100
+        total_loss = risk_val + fees
+        total_profit = (position_coins * reward_per_coin) - fees
+        p50 = (total_profit / 2)
+        
+        lev_row = _t(lang, "calc_lev_lbl", lev=f"{lev:.1f}") if lev > 1 else ""
+        liq_row = _t(lang, "calc_liq_lbl", liq=pretty_float(liq_px)) if liq_px > 0 else ""
+
+        msg = _t(lang, "calc_result",
+            side=side.upper(), mode="PERP" if lev > 1 else "SPOT", balance=pretty_float(balance),
+            risk=pretty_float(risk_val), entry=pretty_float(entry), sl=pretty_float(sl),
+            sl_pct=f"{sl_pct:+.2f}", tp=pretty_float(tp), tp_pct=f"{tp_pct:+.2f}",
+            rr=f"{rr:.2f}", lev_row=lev_row, liq_row=liq_row,
+            size_usd=pretty_float(position_usd), size_coins=pretty_float(position_coins, 4),
+            fees=pretty_float(fees), total_loss=pretty_float(total_loss),
+            total_profit=pretty_float(total_profit), p50=pretty_float(p50), p100=pretty_float(total_profit)
+        ) + liq_warning
+        
+        try: await message.delete()
+        except: pass
+        
+        kb = InlineKeyboardBuilder()
+        kb.button(text=_t(lang, "btn_back"), callback_data="sub:trading")
+        
+        if msg_id:
+            try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+            except: await message.answer(msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+        else:
+            await message.answer(msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+        
     except ValueError:
         await message.answer(_t(lang, "calc_error"))
-
-async def calc_finish_internal(message: Message, state: FSMContext, data: dict):
-    lang = await db.get_lang(message.chat.id)
-    await state.clear()
-    
-    mode = data["mode"]
-    side = data["side"]
-    balance = data["balance"]
-    entry = data["entry"]
-    sl = data["sl"]
-    tp = data["tp"]
-    is_exit = data.get("is_exit", False)
-    sym = data.get("symbol", "???")
-    
-    if entry == sl:
-        await message.answer("❌ Entry == SL")
-        return
-        
-    is_long = (side == "long")
-    is_perp = (mode == "perp")
-    
-    # 1. Distances
-    dist_sl = abs(entry - sl)
-    dist_tp = abs(entry - tp)
-    sl_pct = (dist_sl / entry) * 100
-    tp_pct = (dist_tp / entry) * 100
-    
-    # 2. Position Size & Risk
-    if is_exit:
-        size_coins = data["size"]
-        size_usd = size_coins * entry
-        risk = dist_sl * size_coins
-        leverage = data.get("lev", size_usd / balance if balance > 0 else 0)
-    else:
-        risk = data.get("risk", 0.0)
-        size_coins = risk / dist_sl
-        size_usd = size_coins * entry
-        leverage = size_usd / balance if balance > 0 else 0
-    
-    # 3. Funding & Market Info
-    funding_row = ""
-    if is_perp:
-        try:
-            ctx = await get_perps_context()
-            universe = ctx[0].get("universe", [])
-            asset_ctxs = ctx[1]
-            idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
-            if idx != -1:
-                f_rate = float(asset_ctxs[idx].get("funding", 0))
-                apr = f_rate * 24 * 365 * 100
-                f_icon = "⏳" if abs(apr) < 10 else ("🟢" if (apr > 0 and not is_long) or (apr < 0 and is_long) else "🔴")
-                funding_row = _t(lang, "calc_funding_row", icon=f_icon, f_rate=f"{f_rate*100:.4f}", apr=f"{apr:+.1f}")
-        except:
-            pass
-
-    # 4. Fees (Hyperliquid: Taker 0.035%)
-    fee_rate = 0.00035 
-    fees = size_usd * fee_rate * 2
-    
-    # 5. Liquidation (Isolated approximation or pulled from API)
-    mm = 0.005 # 0.5%
-    liq_px = 0.0
-    
-    if is_exit and data.get("liq_px"):
-        liq_px = data["liq_px"]
-    elif is_perp and leverage > 0:
-        if is_long:
-            liq_px = entry * (1 - (1/leverage) + mm)
-        else:
-            liq_px = entry * (1 + (1/leverage) - mm)
-    
-    # 6. PnL with Fees
-    rr = dist_tp / dist_sl
-    gross_profit = risk * rr
-    total_profit = gross_profit - fees
-    total_loss = risk + fees
-    
-    # 7. Scaling (50/50)
-    p50 = (gross_profit * 0.5) - (fees * 0.75)
-    p100 = total_profit
-    
-    # Result formatting
-    liq_str = f"{liq_px:.2f}" if liq_px > 0 else _t(lang, "calc_none")
-    
-    lev_row = ""
-    liq_row = ""
-    if is_perp:
-        lev_row = _t(lang, "calc_lev_lbl", lev=f"{leverage:.1f}")
-        liq_row = _t(lang, "calc_liq_lbl", liq=liq_str)
-
-    mode_label = _t(lang, "calc_spot") if mode == "spot" else _t(lang, "calc_perp")
-    side_label = _t(lang, "calc_long") if is_long else _t(lang, "calc_short")
-
-    res = _t(lang, "calc_result").format(
-        side=side_label,
-        mode=mode_label,
-        balance=pretty_float(balance, 2),
-        risk=pretty_float(risk, 2),
-        entry=pretty_float(entry),
-        sl=pretty_float(sl),
-        sl_pct=f"{sl_pct:.2f}",
-        tp=pretty_float(tp),
-        tp_pct=f"{tp_pct:.2f}",
-        rr=f"{rr:.2f}",
-        lev_row=lev_row,
-        liq_row=liq_row,
-        size_usd=pretty_float(size_usd, 2),
-        size_coins=pretty_float(size_coins, 4),
-        fees=f"{fees:.2f}",
-        total_loss=f"{total_loss:.2f}",
-        total_profit=f"{total_profit:.2f}",
-        p50=f"{p50:.2f}",
-        p100=f"{p100:.2f}"
-    )
-    
-    res += funding_row
-
-    # Warnings
-    warnings = ""
-    if is_perp:
-        if is_long and liq_px > sl:
-            warnings += _t(lang, "calc_liq_warn")
-        if not is_long and liq_px < sl and liq_px > 0:
-            warnings += _t(lang, "calc_liq_warn")
-            
-    if mode == "spot" and leverage > 1.05:
-         warnings += _t(lang, "calc_low_bal", need=pretty_float(size_usd, 0))
-         
-    # Direction check
-    if is_long and sl > entry: warnings += _t(lang, "calc_side_wrong")
-    if not is_long and sl < entry: warnings += _t(lang, "calc_side_wrong")
-    
-    await message.answer(res + warnings, reply_markup=_back_kb(lang, "sub:trading"), parse_mode="HTML")
 
 # --- INLINE MODE ---
 
@@ -2186,13 +2431,21 @@ async def inline_query_handler(query: InlineQuery):
 
 # --- NEW HANDLERS ---
 
-@router.callback_query(F.data == "cb_stats")
+@router.callback_query(F.data.startswith("cb_stats"))
 async def cb_stats(call: CallbackQuery):
+    # Parse context: cb_stats:context
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) > 1 else "trading"
+    
+    back_target = "sub:trading"
+    if context == "portfolio":
+        back_target = "sub:portfolio"
+
     await call.answer("Calculating Stats...")
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
         
     # Aggregate stats
@@ -2216,9 +2469,9 @@ async def cb_stats(call: CallbackQuery):
     net_pnl = total_gp - total_gl
     
     text = f"{_t(lang, 'stats_title')}\n\n"
-    text += f"{_t(lang, 'total_trades')}: <b>{total_trades}</b>\n"
-    text += f"{_t(lang, 'win_rate')}: <b>{win_rate:.1f}%</b>\n"
-    text += f"{_t(lang, 'profit_factor')}: <b>{pf:.2f}</b>\n\n"
+    text += f"{_t(lang, 'stats_trades')}: <b>{total_trades}</b>\n"
+    text += f"{_t(lang, 'stats_winrate')}: <b>{win_rate:.1f}%</b>\n"
+    text += f"{_t(lang, 'stats_pf')}: <b>{pf:.2f}</b>\n\n"
     text += f"{_t(lang, 'gross_profit')}: 🟢 <b>${pretty_float(total_gp, 2)}</b>\n"
     text += f"{_t(lang, 'gross_loss')}: 🔴 <b>${pretty_float(total_gl, 2)}</b>\n"
     
@@ -2227,8 +2480,8 @@ async def cb_stats(call: CallbackQuery):
     
     # Check PnL History for graph
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_pnl"), callback_data="cb_pnl")
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:trading")
+    kb.button(text=_t(lang, "btn_pnl"), callback_data=f"cb_pnl:{context}")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     
     await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
@@ -2239,17 +2492,17 @@ async def cb_whales(call: CallbackQuery):
     user_settings = await db.get_user_settings(call.message.chat.id)
     
     is_on = user_settings.get("whale_alerts", False)
-    threshold = user_settings.get("whale_threshold", 100_000)
+    threshold = user_settings.get("whale_threshold", 50_000)
     wl_only = user_settings.get("whale_watchlist_only", False)
     
     status = _t(lang, "whale_alerts_on") if is_on else _t(lang, "whale_alerts_off")
-    wl_status = "👁️ Watchlist Only: ON" if wl_only else "🌐 All Assets"
+    wl_status = f"👁️ Watchlist Only: ON" if wl_only else _t(lang, "whales_all_assets")
     
     text = f"{_t(lang, 'whales_title')}\n\n"
     text += _t(lang, "whale_intro") + "\n\n"
     text += f"{status}\n"
     text += f"{wl_status}\n"
-    text += f"Min Value: <b>${pretty_float(threshold, 0)}</b>"
+    text += f"{_t(lang, 'min_val')}: <b>${pretty_float(threshold, 0)}</b>"
     
     kb = InlineKeyboardBuilder()
     
@@ -2300,16 +2553,103 @@ async def cmd_set_whale(message: Message):
         await message.answer(_t(lang, "invalid_number"))
 
 @router.callback_query(F.data == "set_prox_prompt")
-async def cb_set_prox_prompt(call: CallbackQuery):
+async def cb_set_prox_prompt(call: CallbackQuery, state: FSMContext):
     lang = await db.get_lang(call.message.chat.id)
-    await call.message.answer(_t(lang, "prox_input"), parse_mode="HTML")
+    await state.update_data(menu_msg_id=call.message.message_id)
+    await call.message.edit_text(_t(lang, "prox_input"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.set_state(SettingsStates.waiting_for_prox)
     await call.answer()
 
 @router.callback_query(F.data == "set_vol_prompt")
-async def cb_set_vol_prompt(call: CallbackQuery):
+async def cb_set_vol_prompt(call: CallbackQuery, state: FSMContext):
     lang = await db.get_lang(call.message.chat.id)
-    await call.message.answer(_t(lang, "vol_input"), parse_mode="HTML")
+    await state.update_data(menu_msg_id=call.message.message_id)
+    await call.message.edit_text(_t(lang, "vol_input"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.set_state(SettingsStates.waiting_for_vol)
     await call.answer()
+
+@router.callback_query(F.data == "set_whale_prompt")
+async def cb_set_whale_prompt(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_lang(call.message.chat.id)
+    await state.update_data(menu_msg_id=call.message.message_id)
+    await call.message.edit_text(_t(lang, "whale_input"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.set_state(SettingsStates.waiting_for_whale)
+    await call.answer()
+
+@router.message(SettingsStates.waiting_for_prox)
+async def process_set_prox_state(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
+    
+    res_text = ""
+    try:
+        val = float(message.text.replace(",", ".")) / 100.0
+        await db.update_user_settings(message.chat.id, {"prox_alert_pct": val})
+        res_text = "✅ " + _t(lang, "prox_set", val=val*100)
+    except:
+        res_text = "❌ " + _t(lang, "invalid_number")
+    
+    await state.clear()
+    try: await message.delete()
+    except: pass
+    
+    final_text = f"{res_text}\n\n{_t(lang, 'settings_title')}"
+    if msg_id:
+        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        except: await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+    else:
+        await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+
+@router.message(SettingsStates.waiting_for_vol)
+async def process_set_vol_state(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
+    
+    res_text = ""
+    try:
+        val = float(message.text.replace(",", ".")) / 100.0
+        await db.update_user_settings(message.chat.id, {"watch_alert_pct": val})
+        res_text = "✅ " + _t(lang, "vol_set", val=val*100)
+    except:
+        res_text = "❌ " + _t(lang, "invalid_number")
+    
+    await state.clear()
+    try: await message.delete()
+    except: pass
+    
+    final_text = f"{res_text}\n\n{_t(lang, 'settings_title')}"
+    if msg_id:
+        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        except: await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+    else:
+        await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+
+@router.message(SettingsStates.waiting_for_whale)
+async def process_set_whale_state(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
+    
+    res_text = ""
+    try:
+        val = float(message.text.replace(",", "."))
+        await db.update_user_settings(message.chat.id, {"whale_threshold": val})
+        res_text = "✅ " + _t(lang, "whale_set", val=pretty_float(val))
+    except:
+        res_text = "❌ " + _t(lang, "invalid_number")
+    
+    await state.clear()
+    try: await message.delete()
+    except: pass
+    
+    final_text = f"{res_text}\n\n{_t(lang, 'settings_title')}"
+    if msg_id:
+        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        except: await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+    else:
+        await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
 
 @router.message(Command("set_prox"))
 async def cmd_set_prox(message: Message):
@@ -2488,3 +2828,414 @@ async def cb_flex_gen(call: CallbackQuery):
     except Exception as e:
         logger.error(f"Error rendering account flex: {e}")
         await call.message.answer("❌ Error generating image.")
+
+@router.callback_query(F.data == "cb_terminal")
+async def cb_terminal(call: CallbackQuery):
+    await call.answer("Loading Terminal...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
+    if not wallets:
+        await call.message.answer("No wallet tracked.")
+        return
+
+    ws = getattr(call.message.bot, "ws_manager", None)
+    
+    total_equity = 0.0
+    total_upnl = 0.0
+    total_margin_used = 0.0
+    total_withdrawable = 0.0
+    total_ntl = 0.0
+    
+    combined_assets = [] 
+    combined_positions = [] 
+    
+    for wallet in wallets:
+        spot_bals = await get_spot_balances(wallet)
+        perps_state = await get_perps_state(wallet)
+        
+        if spot_bals:
+            for b in spot_bals:
+                coin_id = b.get("coin")
+                name = await get_symbol_name(coin_id, is_spot=True)
+                amount = float(b.get("total", 0) or 0)
+                if amount <= 0: continue
+                
+                px = 0.0
+                if ws: px = ws.get_price(name, coin_id)
+                if not px: px = await get_mid_price(name, coin_id)
+                
+                val = amount * px
+                total_equity += val
+                
+                entry = extract_avg_entry_from_balance(b)
+                if not entry or entry <= 0:
+                    try:
+                        coin_fills = await db.get_fills_by_coin(wallet, coin_id)
+                        from bot.services import calc_avg_entry_from_fills
+                        entry = calc_avg_entry_from_fills(coin_fills)
+                    except:
+                        entry = 0.0
+                
+                if entry > 0 and px > 0:
+                    spot_pnl = (px - entry) * amount
+                    total_upnl += spot_pnl
+                    
+                    roi = ((px / entry) - 1) * 100
+                    combined_positions.append({
+                        "symbol": name,
+                        "side": "SPOT",
+                        "leverage": "SPOT",
+                        "size_usd": abs(val),
+                        "entry": entry,
+                        "mark": px,
+                        "liq": 0.0,
+                        "pnl": spot_pnl,
+                        "roi": roi
+                    })
+
+                if val > 5:
+                    combined_assets.append({"name": name, "value": val})
+
+        if perps_state:
+             if "marginSummary" in perps_state:
+                 ms = perps_state["marginSummary"]
+                 p_eq = float(ms.get("accountValue", 0) or 0)
+                 m_used = float(ms.get("totalMarginUsed", 0) or 0)
+                 ntl = float(ms.get("totalNtlPos", 0) or 0)
+                 
+                 total_equity += p_eq
+                 total_margin_used += m_used
+                 total_ntl += ntl
+                 
+             total_withdrawable += float(perps_state.get("withdrawable", 0) or 0)
+             
+             for p in perps_state.get("assetPositions", []):
+                pos = p.get("position", {})
+                szi = float(pos.get("szi", 0))
+                if szi == 0: continue
+                
+                coin_id = pos.get("coin")
+                sym = await get_symbol_name(coin_id, is_spot=False)
+                entry = float(pos.get("entryPx", 0))
+                leverage = float(pos.get("leverage", {}).get("value", 0))
+                liq = float(pos.get("liquidationPx", 0) or 0)
+                
+                mark = 0.0
+                if ws: mark = ws.get_price(sym, coin_id)
+                if not mark: mark = await get_mid_price(sym, coin_id)
+                
+                pnl = (mark - entry) * szi if mark else 0.0
+                total_upnl += pnl
+                
+                roi = 0.0
+                if leverage and szi and entry:
+                     roi = (pnl / (abs(szi) * entry / leverage)) * 100
+                     
+                combined_positions.append({
+                    "symbol": sym,
+                    "side": "LONG" if szi > 0 else "SHORT",
+                    "leverage": leverage,
+                    "size_usd": abs(szi * mark),
+                    "entry": entry,
+                    "mark": mark,
+                    "liq": liq,
+                    "pnl": pnl,
+                    "roi": roi
+                })
+
+    margin_pct = (total_margin_used / total_equity * 100) if total_equity > 0 else 0.0
+    effective_leverage = (total_ntl / total_equity) if total_equity > 0 else 0.0
+    
+    wallet_label = wallets[0] if len(wallets) == 1 else "Total Portfolio"
+    
+    data = prepare_terminal_dashboard_data_clean(
+        wallet_label=wallet_label if len(wallets) > 1 else "Personal Wallet",
+        wallet_address=wallets[0],
+        total_equity=total_equity,
+        upnl=total_upnl,
+        margin_usage=margin_pct,
+        leverage=effective_leverage,
+        withdrawable=total_withdrawable,
+        assets=combined_assets,
+        positions=combined_positions
+    )
+    
+    try:
+        buf = await render_html_to_image("terminal_dashboard.html", data, width=1000, height=600)
+        photo = BufferedInputFile(buf.read(), filename="terminal.png")
+        
+        caption = "🖥️ <b>Velox Terminal</b>"
+        if len(wallets) > 1: caption += f" ({len(wallets)} wallets)"
+        
+        await call.message.delete()
+        await call.message.answer_photo(
+            photo, 
+            caption=caption,
+            reply_markup=_main_menu_kb(lang),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error rendering terminal: {e}")
+        await call.message.answer("❌ Error generating terminal.")
+
+@router.callback_query(F.data == "cb_positions_img")
+async def cb_positions_img(call: CallbackQuery):
+    await call.answer("Generating Table...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
+    if not wallets: return
+
+    ws = getattr(call.message.bot, "ws_manager", None)
+    combined_positions = []
+    
+    for wallet in wallets:
+        state = await get_perps_state(wallet)
+        spot_bals = await get_spot_balances(wallet)
+        
+        if state:
+            positions = state.get("assetPositions", [])
+            for p in positions:
+                pos = p.get("position", {})
+                szi = float(pos.get("szi", 0))
+                if szi == 0: continue
+                
+                coin_id = pos.get("coin")
+                sym = await get_symbol_name(coin_id, is_spot=False)
+                entry = float(pos.get("entryPx", 0))
+                leverage = float(pos.get("leverage", {}).get("value", 0))
+                liq = float(pos.get("liquidationPx", 0) or 0)
+                
+                mark = 0.0
+                if ws: mark = ws.get_price(sym, coin_id)
+                if not mark: mark = await get_mid_price(sym, coin_id)
+                
+                pnl = (mark - entry) * szi if mark else 0.0
+                roi = 0.0
+                if leverage and szi and entry:
+                     roi = (pnl / (abs(szi) * entry / leverage)) * 100
+                     
+                combined_positions.append({
+                    "symbol": sym,
+                    "side": "LONG" if szi > 0 else "SHORT",
+                    "leverage": leverage,
+                    "size_usd": abs(szi * mark),
+                    "entry": entry,
+                    "mark": mark,
+                    "liq": liq,
+                    "pnl": pnl,
+                    "roi": roi
+                })
+
+        if spot_bals:
+            for b in spot_bals:
+                coin_id = b.get("coin")
+                if coin_id == "USDC": continue
+                
+                amount = float(b.get("total", 0) or 0)
+                sym = await get_symbol_name(coin_id, is_spot=True)
+                
+                px = 0.0
+                if ws: px = ws.get_price(sym, coin_id)
+                if not px: px = await get_mid_price(sym, coin_id)
+                
+                if amount * px < 5: continue
+                
+                entry = extract_avg_entry_from_balance(b)
+                if not entry or entry <= 0:
+                    try:
+                        coin_fills = await db.get_fills_by_coin(wallet, coin_id)
+                        from bot.services import calc_avg_entry_from_fills
+                        entry = calc_avg_entry_from_fills(coin_fills)
+                    except:
+                        entry = 0.0
+                
+                upnl = 0.0
+                roi = 0.0
+                if entry > 0 and px > 0:
+                    upnl = (px - entry) * amount
+                    roi = ((px / entry) - 1) * 100
+                
+                combined_positions.append({
+                    "symbol": sym,
+                    "side": "SPOT",
+                    "leverage": "SPOT",
+                    "size_usd": abs(amount * px),
+                    "entry": entry,
+                    "mark": px,
+                    "liq": 0.0,
+                    "pnl": upnl,
+                    "roi": roi
+                })
+
+    data = prepare_positions_table_data(
+        wallet_label=wallets[0] if len(wallets) == 1 else "Total Portfolio",
+        positions=combined_positions
+    )
+    
+    try:
+        h = 150 + (len(combined_positions) * 55)
+        h = max(400, min(h, 2000))
+        
+        buf = await render_html_to_image("positions_table.html", data, width=800, height=h)
+        photo = BufferedInputFile(buf.read(), filename="positions.png")
+        
+        await call.message.delete()
+        await call.message.answer_photo(
+            photo, 
+            caption="📸 <b>Active Positions</b>",
+            reply_markup=_back_kb(lang, "sub:trading"),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error rendering table: {e}")
+        await call.message.answer("❌ Error generating table.")
+
+@router.callback_query(F.data == "cb_fills")
+async def cb_fills(call: CallbackQuery):
+    await call.answer("Fetching history...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
+    if not wallets:
+        await call.message.answer(_t(lang, "need_wallet"))
+        return
+
+    lines = []
+    lines.append(f"📜 <b>Recent Trades (Last 10)</b>")
+    
+    all_fills = []
+    for wallet in wallets:
+        fills = await get_user_fills(wallet)
+        for f in fills: 
+            f['wallet'] = wallet
+        all_fills.extend(fills)
+        
+    all_fills.sort(key=lambda x: x.get("time", 0), reverse=True)
+    
+    for f in all_fills[:10]:
+        coin = f.get("coin", "???")
+        if coin.startswith("@"):
+             try: coin = await get_symbol_name(coin, is_spot=True)
+             except: pass
+        
+        side = f.get("side", "")
+        if f.get("dir"): 
+             side = f.get("dir")
+             
+        px = float(f.get("px", 0))
+        sz = float(f.get("sz", 0))
+        val = px * sz
+        pnl = float(f.get("closedPnl", 0) or 0)
+        
+        ts = f.get("time", 0)
+        dt = datetime.datetime.fromtimestamp(ts/1000).strftime("%H:%M")
+        
+        icon = "🟢" if side == "B" else "🔴"
+        side_text = _t(lang, "hist_buy") if side == "B" else _t(lang, "hist_sell")
+        
+        pnl_str = ""
+        if pnl != 0:
+            pnl_str = f" | PnL: {'+' if pnl>0 else ''}{pretty_float(pnl, 2)}"
+            
+        lines.append(
+            f"{icon} <b>{coin}</b> {side_text} ${pretty_float(px)}\n"
+            f"   <i>{dt} | Sz: {sz} (${pretty_float(val, 0)}){pnl_str}</i>"
+        )
+        
+    if not all_fills:
+        lines.append("\n<i>No recent trades found.</i>")
+        
+    await smart_edit(call, "\n".join(lines), reply_markup=_back_kb(lang, "sub:trading"))
+
+@router.callback_query(F.data == "cb_risk_check")
+async def cb_risk_check(call: CallbackQuery):
+    await call.answer("Scanning for risks...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
+    if not wallets: return
+
+    ws = getattr(call.message.bot, "ws_manager", None)
+    risky_positions = []
+    
+    for wallet in wallets:
+        state = await get_perps_state(wallet)
+        if not state: continue
+        
+        if "marginSummary" in state:
+            ms = state["marginSummary"]
+            m_used = float(ms.get("totalMarginUsed", 0))
+            eq = float(ms.get("accountValue", 0))
+            if eq > 0:
+                util = (m_used / eq) * 100
+                if util > 70:
+                    risky_positions.append(f"⚠️ <b>Wallet {wallet[:6]}...</b> Margin Usage: {util:.1f}%")
+
+        for p in state.get("assetPositions", []):
+            pos = p.get("position", {})
+            szi = float(pos.get("szi", 0))
+            if szi == 0: continue
+            
+            coin_id = pos.get("coin")
+            sym = await get_symbol_name(coin_id, is_spot=False)
+            liq = float(pos.get("liquidationPx", 0) or 0)
+            
+            if liq <= 0: continue
+            
+            mark = 0.0
+            if ws: mark = ws.get_price(sym, coin_id)
+            if not mark: mark = await get_mid_price(sym, coin_id)
+            
+            if mark > 0:
+                dist_pct = abs(mark - liq) / mark * 100
+                if dist_pct < 10:
+                    side = "LONG" if szi > 0 else "SHORT"
+                    risky_positions.append(
+                        f"🚨 <b>{sym}</b> {side} [{wallet[:4]}..]\n"
+                        f"   Price: {pretty_float(mark)} | Liq: {pretty_float(liq)}\n"
+                        f"   Buffer: <b>{dist_pct:.2f}%</b>"
+                    )
+
+    if not risky_positions:
+        await smart_edit(call, _t(lang, "risk_healthy"), reply_markup=_back_kb(lang, "sub:trading"))
+    else:
+        text = _t(lang, "risk_warning") + "\n\n" + "\n\n".join(risky_positions)
+        await smart_edit(call, text, reply_markup=_back_kb(lang, "sub:trading"))
+
+@router.callback_query(F.data == "cb_manual_digest")
+async def cb_manual_digest(call: CallbackQuery):
+    await call.answer("Generating Digest...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
+    if not wallets:
+        await call.message.answer("No wallet tracked.")
+        return
+        
+    wallet = wallets[0]
+    portf = await get_user_portfolio(wallet)
+    if not portf or not isinstance(portf, dict):
+        await call.message.answer("No data available.")
+        return
+        
+    data = portf.get("data", {})
+    history = data.get("accountValueHistory", [])
+    if not history:
+        await call.message.answer("No history available.")
+        return
+    
+    history.sort(key=lambda x: x[0])
+    current_val = float(history[-1][1])
+    target_ms = history[-1][0] - 86400000
+    
+    closest = min(history, key=lambda x: abs(x[0] - target_ms))
+    start_val = float(closest[1])
+        
+    diff = current_val - start_val
+    pct = (diff / start_val) * 100 if start_val > 0 else 0.0
+    icon = "🟢" if diff >= 0 else "🔴"
+    
+    msg = (
+        f"☀️ <b>Daily Digest (Preview)</b>\n"
+        f"Wallet: <code>{wallet[:6]}...{wallet[-4:]}</code>\n\n"
+        f"💰 Equity: <b>${pretty_float(current_val, 2)}</b>\n"
+        f"📅 24h Change: {icon} <b>${pretty_float(diff, 2)}</b> ({pct:+.2f}%)"
+    )
+    await call.message.answer(msg, parse_mode="HTML")

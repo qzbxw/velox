@@ -561,7 +561,13 @@ class WSManager:
                         direction=direction,
                         unit=unit
                     )
-                    await self.bot.send_message(user_id, msg, parse_mode="HTML")
+                    
+                    from aiogram.utils.keyboard import InlineKeyboardBuilder
+                    from aiogram.types import InlineKeyboardButton
+                    kb = InlineKeyboardBuilder()
+                    kb.row(InlineKeyboardButton(text=_t(lang, "btn_main_menu"), callback_data="cb_menu"))
+                    
+                    await self.bot.send_message(user_id, msg, reply_markup=kb.as_markup(), parse_mode="HTML")
                 except: pass
 
     async def _check_custom_alerts(self):
@@ -572,7 +578,7 @@ class WSManager:
                 continue
                 
             symbol = alert.get("symbol")
-            target = alert.get("price")
+            target = alert.get("target")
             direction = alert.get("direction") # above / below
             user_id = alert.get("user_id")
             
@@ -608,8 +614,15 @@ class WSManager:
         except:
             lang = "en"
 
-        # Build detailed text
-        msg = f"🔔 <b>{_t(lang, 'custom_alert_title')}</b>\n\n"
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from aiogram.types import InlineKeyboardButton
+        
+        kb = InlineKeyboardBuilder()
+        kb.row(InlineKeyboardButton(text=_t(lang, "btn_main_menu"), callback_data="cb_menu"))
+        markup = kb.as_markup()
+
+        # Build detailed text (Removed duplicate bell as it is in the locale)
+        msg = f"<b>{_t(lang, 'custom_alert_title')}</b>\n\n"
         msg += f"<b>{symbol}</b> hit <b>${pretty_float(current_price)}</b>\n"
         msg += f"(Target: {direction} {pretty_float(target)})\n\n"
         
@@ -654,13 +667,15 @@ class WSManager:
                     InputMediaPhoto(media=BufferedInputFile(buf_liq.read(), filename="liquidity.png"))
                 ]
                 await self.bot.send_media_group(user_id, media)
+                # Send button after media group
+                await self.bot.send_message(user_id, _t(lang, "btn_main_menu"), reply_markup=markup)
                 return
         except Exception as e:
             logger.error(f"Error generating rich alert: {e}")
 
         # Fallback to plain text if image generation fails
         try:
-            await self.bot.send_message(user_id, msg, parse_mode="HTML")
+            await self.bot.send_message(user_id, msg, reply_markup=markup, parse_mode="HTML")
         except Exception as e:
             logger.error(f"Failed to send alert to {user_id}: {e}")
 

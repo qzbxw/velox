@@ -932,7 +932,8 @@ def pretty_float(x: float, max_decimals: int = 6) -> str:
     """Duplicate helper for analytics standalone usage."""
     try:
         v = float(x)
-    except: return "0"
+    except:
+        return "0"
     s = f"{v:.{max_decimals}f}"
     if "." in s:
         s = s.rstrip("0").rstrip(".")
@@ -981,3 +982,150 @@ def prepare_coin_prices_data(assets_ctx: list, universe: list) -> dict:
         "coins": coins
     }
 
+def prepare_terminal_dashboard_data_clean(
+    wallet_label: str,
+    wallet_address: str,
+    total_equity: float,
+    upnl: float,
+    margin_usage: float,
+    leverage: float,
+    withdrawable: float,
+    assets: list,
+    positions: list
+) -> dict:
+    """
+    Pure data formatter for terminal_dashboard.html
+    """
+    from datetime import datetime
+    
+    # Sort positions by size (USD)
+    positions.sort(key=lambda x: abs(float(x.get("size_usd", 0))), reverse=True)
+    top_pos = positions[:5]
+    
+    # Format Assets
+    total_assets_val = sum(a["value"] for a in assets)
+    fmt_assets = []
+    for a in assets:
+        pct = (a["value"] / total_assets_val * 100) if total_assets_val > 0 else 0
+        if pct > 1:
+            fmt_assets.append({"name": a["name"], "percent": f"{pct:.1f}"})
+    
+    # Format Positions
+    fmt_positions = []
+    for p in top_pos:
+        sz = float(p.get("size_usd", 0))
+        pnl = float(p.get("pnl", 0))
+        fmt_positions.append({
+            "symbol": p.get("symbol"),
+            "side": p.get("side"),
+            "leverage": p.get("leverage"),
+            "size": f"{abs(sz):,.0f}",
+            "entry": pretty_float(p.get("entry")),
+            "mark": pretty_float(p.get("mark")),
+            "liq": pretty_float(p.get("liq")) if p.get("liq") else "N/A",
+            "pnl": f"{pnl:+.2f}",
+            "roi": f"{p.get('roi', 0):+.1f}",
+            "pnl_pos": pnl >= 0
+        })
+
+    return {
+        "wallet_name": wallet_label,
+        "wallet_address": f"{wallet_address[:6]}...{wallet_address[-4:]}",
+        "total_equity": f"{total_equity:,.2f}",
+        "upnl": f"{abs(upnl):,.2f}",
+        "upnl_sign": "+" if upnl >= 0 else "-",
+        "upnl_is_pos": upnl >= 0,
+        "upnl_pct": f"{(upnl/total_equity*100):+.2f}" if total_equity > 0 else "0.00",
+        "margin_usage": round(margin_usage, 1),
+        "leverage": f"{leverage:.1f}",
+        "withdrawable": f"{withdrawable:,.2f}",
+        "assets": fmt_assets,
+        "positions": fmt_positions,
+        "date": datetime.now().strftime("%d %b %H:%M UTC")
+    }
+
+def prepare_positions_table_data(
+    wallet_label: str,
+    positions: list
+) -> dict:
+    """
+    Pure data formatter for positions_table.html
+    """
+    from datetime import datetime
+    
+    # Sort by Symbol
+    positions.sort(key=lambda x: x.get("symbol", ""))
+    
+    fmt_positions = []
+    total_upnl = 0.0
+    
+    for p in positions:
+        sz = float(p.get("size_usd", 0))
+        pnl = float(p.get("pnl", 0))
+        total_upnl += pnl
+        
+        fmt_positions.append({
+            "symbol": p.get("symbol"),
+            "side": p.get("side"),
+            "leverage": p.get("leverage"),
+            "size": f"{abs(sz):,.0f}",
+            "entry": pretty_float(p.get("entry")),
+            "mark": pretty_float(p.get("mark")),
+            "liq": pretty_float(p.get("liq")) if p.get("liq") else "-",
+            "pnl": f"{pnl:+.2f}",
+            "roi": f"{p.get('roi', 0):+.1f}",
+            "pnl_pos": pnl >= 0
+        })
+
+    return {
+        "wallet_label": wallet_label,
+        "positions": fmt_positions,
+        "total_upnl": f"{total_upnl:+.2f}",
+        "date": datetime.now().strftime("%d %b %H:%M")
+    }
+
+def prepare_orders_table_data(
+    wallet_label: str,
+    orders: list
+) -> dict:
+    """
+    Pure data formatter for orders_table.html
+    """
+    from datetime import datetime
+    
+    fmt_orders = []
+    total_val = 0.0
+    
+    for o in orders:
+        sz = float(o.get("sz", 0))
+        limit_px = float(o.get("limitPx", 0))
+        val = sz * limit_px
+        total_val += val
+        
+        mark_px = float(o.get("mark_px", 0)) 
+        is_buy = o.get("side", "").startswith("B")
+        
+        dist = 0.0
+        if mark_px > 0:
+            dist = ((limit_px - mark_px) / mark_px) * 100
+        
+        fmt_orders.append({
+            "symbol": o.get("symbol"),
+            "is_spot": o.get("is_spot"),
+            "is_buy": is_buy,
+            "size": f"{sz:g}", 
+            "limit_px": pretty_float(limit_px),
+            "mark_px": pretty_float(mark_px),
+            "dist_pct": f"{dist:+.2f}",
+            "dist_pct_abs": abs(dist),
+            "value": f"{val:,.0f}"
+        })
+        
+    fmt_orders.sort(key=lambda x: x["dist_pct_abs"])
+    
+    return {
+        "wallet_label": wallet_label,
+        "orders": fmt_orders,
+        "total_value": f"{total_val:,.0f}",
+        "date": datetime.now().strftime("%d %b %H:%M")
+    }

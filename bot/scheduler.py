@@ -106,17 +106,34 @@ async def send_market_reports(bot):
         chat_id = user["user_id"]
         lang = user.get("lang", "en")
         
-        # Build watchlist text
+        # 1. Get detailed info for Majors
+        majors_text = ""
+        major_symbols = ["BTC", "ETH", "SOL", "HYPE"]
+        for sym in major_symbols:
+            idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
+            if idx != -1:
+                ac = asset_ctxs[idx]
+                price = float(ac.get("markPx", 0))
+                prev_day = float(ac.get("prevDayPx", 0) or price)
+                change = ((price - prev_day) / prev_day) * 100 if prev_day > 0 else 0.0
+                funding = float(ac.get("funding", 0)) * 24 * 365 * 100
+                oi = float(ac.get("openInterest", 0)) * price / 1e6
+                vol = float(ac.get("dayNtlVlm", 0)) / 1e6
+                
+                icon = "🟢" if change >= 0 else "🔴"
+                majors_text += (
+                    f"🔹 <b>{sym}</b>: ${pretty_float(price)} ({icon} {change:+.2f}%)\n"
+                    f"   ├ F: <code>{funding:+.1f}% APR</code>\n"
+                    f"   └ OI: <b>${oi:.1f}M</b> | Vol: <b>${vol:.1f}M</b>\n\n"
+                )
+
+        # 2. Build watchlist text
         watchlist = await db.get_watchlist(chat_id)
         watchlist_lines = []
         if watchlist:
             for sym in watchlist:
-                idx = -1
-                for i, u in enumerate(universe):
-                    u_name = u["name"] if isinstance(u, dict) else u
-                    if u_name == sym:
-                        idx = i
-                        break
+                if sym in major_symbols: continue
+                idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
                 if idx != -1:
                     ac = asset_ctxs[idx]
                     price = float(ac.get("markPx", 0))
@@ -127,47 +144,37 @@ async def send_market_reports(bot):
         
         watchlist_text = ""
         if watchlist_lines:
-            watchlist_text = f"{_t(lang, 'market_report_watchlist')}:\n" + "\n".join(watchlist_lines) + "\n\n"
+            watchlist_text = f"⭐ <b>{_t(lang, 'market_report_watchlist')}</b>:\n" + "\n".join(watchlist_lines) + "\n\n"
 
         # Build beautiful text report
         text_report = (
-            f"📊 🔔 {_t(lang, 'market_alerts_title')}\n\n"
+            f"📊 <b>{_t(lang, 'market_alerts_title')}</b>\n\n"
+            f"<b>{_t(lang, 'market_report_global')}</b>\n"
+            f"• Vol 24h: <b>${data_alpha['global_volume']}</b>\n"
+            f"• Total OI: <b>${data_alpha['total_oi']}</b>\n"
+            f"• Sentiment: <code>{data_alpha['sentiment_label']}</code>\n\n"
+            f"<b>{_t(lang, 'market_report_majors')}</b>\n"
+            f"{majors_text}"
             f"{watchlist_text}"
-            f"{_t(lang, 'market_report_global')}:\n"
-            f"• {_t(lang, 'market_report_vol')}: ${data_alpha['global_volume']}\n"
-            f"• {_t(lang, 'market_report_oi')}: ${data_alpha['total_oi']}\n"
-            f"• {_t(lang, 'market_report_sentiment')}: {data_alpha['sentiment_label']}\n\n"
-            f"{_t(lang, 'market_report_top_gainers')}:\n"
+            f"🕒 <i>{_t(lang, 'market_report_footer', time=now_utc + ' UTC')}</i>"
         )
         
-        for asset in data_alpha['gainers'][:3]:
-            text_report += f"• {asset['name']}: ${asset['price']} ({asset['change']:+.2f}%)\n"
-            
-        text_report += f"\n{_t(lang, 'market_report_top_losers')}:\n"
-        for asset in data_alpha['losers'][:3]:
-            text_report += f"• {asset['name']}: ${asset['price']} ({asset['change']:+.2f}%)\n"
-
-        text_report += f"\n{_t(lang, 'market_report_efficiency')}:\n"
-        for asset in data_alpha['efficiency'][:3]:
-            text_report += f"• {asset['name']}: {asset['ratio']:.1f}x\n"
-
-        text_report += f"\n{_t(lang, 'market_report_funding')}:\n"
-        high_f = sorted(data_alpha['funding_map'], key=lambda x: x['apr'], reverse=True)[:3]
-        for f in high_f:
-            text_report += f"• {f['name']}: {f['apr']:+.1f}% APR\n"
-            
-        text_report += f"\n{_t(lang, 'market_report_footer', time=now_utc + ' UTC')}"
-        
         try:
+            from aiogram.types import InlineKeyboardButton
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            kb = InlineKeyboardBuilder()
+            kb.row(InlineKeyboardButton(text=_t(lang, "btn_main_menu"), callback_data="cb_menu"))
+
             media = [
-                InputMediaPhoto(media=BufferedInputFile(img_prices, filename="prices.png"), caption=text_report, parse_mode="HTML"),
+                InputMediaPhoto(media=BufferedInputFile(img_prices, filename="prices.png")),
                 InputMediaPhoto(media=BufferedInputFile(img_heat, filename="heatmap.png")),
                 InputMediaPhoto(media=BufferedInputFile(img_alpha, filename="alpha.png")),
                 InputMediaPhoto(media=BufferedInputFile(img_liq, filename="liquidity.png"))
             ]
             await bot.send_media_group(chat_id, media)
+            await bot.send_message(chat_id, text_report, reply_markup=kb.as_markup(), parse_mode="HTML")
         except Exception as e:
-            logger.error(f"Failed to send market media group to {chat_id}: {e}")
+            logger.error(f"Failed to send market report to {chat_id}: {e}")
 
 async def send_daily_digest(bot):
     """Generate and send daily digest (Equity PnL) to all users."""

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #05070a; color: white;
+            /* Auto-height logic will be handled by Playwright, but we set a min-width */
+            width: 800px; padding: 40px; min-height: 400px;
+            margin: 0; display: flex; flex-direction: column;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass {
+            background: rgba(255, 255, 255, 0.03); 
+            border: 1px solid rgba(255, 255, 255, 0.08); 
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        .label { color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 16px; font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,0.05); }
+        td { padding: 14px 16px; font-size: 13px; font-weight: 600; color: #cbd5e1; border-bottom: 1px solid rgba(255,255,255,0.02); }
+        tr:last-child td { border-bottom: none; }
+        tr:nth-child(even) { background: rgba(255,255,255,0.01); }
+    </style>
+</head>
+<body>
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <h1 class="text-xl font-black uppercase tracking-tight flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Active Positions
+            </h1>
+            <p class="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">{{ wallet_label }} • {{ date }}</p>
+        </div>
+        <div class="text-right">
+             <div class="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">t.me/veloxhlbot</div>
+        </div>
+    </div>
+
+    <div class="glass">
+        <table>
+            <thead>
+                <tr>
+                    <th>Market</th>
+                    <th class="text-right">Size</th>
+                    <th class="text-right">Entry</th>
+                    <th class="text-right">Mark</th>
+                    <th class="text-right">Liq</th>
+                    <th class="text-right">uPnL</th>
+                    <th class="text-right">ROI</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in positions %}
+                <tr>
+                    <td>
+                        <div class="flex flex-col">
+                            <div class="flex items-center gap-2">
+                                <span class="mono font-bold text-white">{{ p.symbol }}</span>
+                                <span class="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-slate-400 font-bold">{{ p.leverage }}x</span>
+                            </div>
+                            <span class="text-[10px] font-bold mt-1 {{ 'text-emerald-500' if p.side == 'LONG' else 'text-rose-500' }}">{{ p.side }}</span>
+                        </div>
+                    </td>
+                    <td class="text-right mono text-slate-300">${{ p.size }}</td>
+                    <td class="text-right mono text-slate-500">${{ p.entry }}</td>
+                    <td class="text-right mono text-slate-400">${{ p.mark }}</td>
+                    <td class="text-right mono text-orange-400/70">${{ p.liq }}</td>
+                    <td class="text-right mono {{ 'text-emerald-400' if p.pnl_pos else 'text-rose-400' }} font-bold">${{ p.pnl }}</td>
+                    <td class="text-right mono {{ 'text-emerald-400' if p.pnl_pos else 'text-rose-400' }} font-bold">{{ p.roi }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        {% if not positions %}
+        <div class="p-10 text-center text-slate-600 font-bold uppercase text-sm tracking-widest">
+            No Open Positions
+        </div>
+        {% endif %}
+    </div>
+    
+    <div class="mt-4 flex gap-4 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+        <div>Total uPnL: <span class="text-white ml-1 mono">${{ total_upnl }}</span></div>
+        <div>Count: <span class="text-white ml-1 mono">{{ positions|length }}</span></div>
+    </div>
+</body>
+</html>

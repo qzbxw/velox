@@ -54,6 +54,7 @@ EN = {
     "fill_alert_title": "⚡ <b>Order Fill</b>",
     "fill_alert_liq": "💀 <b>LIQUIDATION</b>",
     "fill_alert_msg": "{side_icon} {side} {sz} <b>{symbol}</b> @ ${px}\nValue: <b>${val}</b>\nWallet: {wallet}",
+    "order_placed_title": "Order Placed",
     
     "liq_risk_title": "⚠️ <b>DANGER: High Liquidation Risk!</b>",
     "liq_risk_msg": "Wallet: {wallet}\nMargin Ratio: <b>{ratio}%</b>\nEquity: ${equity}\n\n<i>Consider adding collateral or reducing positions!</i>",
@@ -153,6 +154,16 @@ EN = {
     "market_alert_removed": "🗑️ Alert for <b>{time}</b> removed.",
     "no_market_alerts": "📭 No scheduled market reports.",
     "btn_add_time": "➕ Add Time",
+
+    "market_report_global": "🌍 <b>Global Market Pulse</b>",
+    "market_report_vol": "24h Volume",
+    "market_report_oi": "Open Interest",
+    "market_report_sentiment": "Sentiment",
+    "market_report_top_gainers": "🚀 <b>Top Gainers</b>",
+    "market_report_top_losers": "📉 <b>Top Losers</b>",
+    "market_report_efficiency": "⚡ <b>Capital Efficiency (Vol/OI)</b>",
+    "market_report_funding": "💰 <b>High Funding (APR)</b>",
+    "market_report_footer": "<i>Updated: {time} • Velox Intelligence</i>",
     
     # Buttons
     "btn_balance": "🏦 Balance",
@@ -178,7 +189,7 @@ EN = {
     "menu_trading": "⚡ <b>Trading Menu</b>",
     "menu_market": "🌊 <b>Market Data</b>",
 
-    "btn_heatmap": "🔥 Heatmap",
+    "btn_market_overview": "📊 Market Insights",
     "btn_share": "🖼️ Share PnL",
     "btn_wallets": "👛 Wallets",
     "btn_refresh": "🔄 Refresh",
@@ -226,6 +237,14 @@ EN = {
     "whale_alerts_on": "🔔 Whale Alerts: <b>ON</b>",
     "whale_alerts_off": "🔕 Whale Alerts: <b>OFF</b>",
     "whale_intro": "Tracking large trades > $100k globally.",
+    "funding_alert_set": "✅ Funding alert set for <b>{symbol}</b>: {dir} <b>{val}% APR</b>",
+    "oi_alert_set": "✅ OI alert set for <b>{symbol}</b>: {dir} <b>${val}M</b>",
+    "new_listing_msg": "🚀 <b>New Asset Listed on Hyperliquid!</b>\n\nSymbol: <b>${sym}</b>\n\n<i>Trading is now available. Use /watch {sym} to monitor volatility.</i>",
+    "funding_alert_msg": "💰 <b>FUNDING Alert: {sym}</b>\n\nCurrent: <b>{current}{unit}</b>\nTarget: {direction} <b>{target}{unit}</b>",
+    "oi_alert_msg": "📊 <b>OI Alert: {sym}</b>\n\nCurrent: <b>{current}{unit}</b>\nTarget: {direction} <b>{target}{unit}</b>",
+    "vaults_lbl": "Vaults",
+    "calc_exit_btn": "🧮 Calc Exit {sym}",
+    "exit_calc_title": "📊 <b>Exit Calculator: {sym}</b>\nPre-filled from position.\n\n",
 }
 
 # --- RUSSIAN ---
@@ -266,6 +285,7 @@ RU = {
     "fill_alert_title": "⚡ <b>Исполнение Ордера</b>",
     "fill_alert_liq": "💀 <b>ЛИКВИДАЦИЯ</b>",
     "fill_alert_msg": "{side_icon} {side} {sz} <b>{symbol}</b> по ${px}\nОбъем: <b>${val}</b>\nКошелёк: {wallet}",
+    "order_placed_title": "Ордер Размещен",
     
     "liq_risk_title": "⚠️ <b>ОПАСНОСТЬ: Риск Ликвидации!</b>",
     "liq_risk_msg": "Кошелёк: {wallet}\nMargin Ratio: <b>{ratio}%</b>\nEquity: ${equity}\n\n<i>Рассмотрите добавление маржи или сокращение позиций!</i>",
@@ -278,6 +298,7 @@ RU = {
     "settings_title": "⚙️ <b>Настройки</b>",
     "lang_title": "🌍 <b>Язык / Language</b>",
     "pnl_title": "🧮 <b>PnL Анализ</b>",
+    "stats_title": "📈 <b>Статистика торговли</b>",
     "whales_title": "🐋 <b>Whale Watch</b>",
 
     # Calculator
@@ -364,6 +385,16 @@ RU = {
     "market_alert_removed": "🗑️ Отчет на <b>{time}</b> удален.",
     "no_market_alerts": "📭 У вас нет запланированных отчетов.",
     "btn_add_time": "➕ Добавить время",
+
+    "market_report_global": "🌍 <b>Пульс Рынка</b>",
+    "market_report_vol": "Объем 24ч",
+    "market_report_oi": "Откр. интерес",
+    "market_report_sentiment": "Настроение",
+    "market_report_top_gainers": "🚀 <b>Лидеры роста (24ч)</b>",
+    "market_report_top_losers": "📉 <b>Лидеры падения (24ч)</b>",
+    "market_report_efficiency": "⚡ <b>Эффективность капитала (Vol/OI)</b>",
+    "market_report_funding": "💰 <b>Высокий Фандинг (APR)</b>",
+    "market_report_footer": "<i>Обновлено: {time} • Velox Intelligence</i>",
     
     # Buttons
     "btn_balance": "🏦 Баланс",
@@ -389,7 +420,7 @@ RU = {
     "menu_trading": "⚡ <b>Меню: Торговля</b>",
     "menu_market": "🌊 <b>Меню: Рынок</b>",
 
-    "btn_heatmap": "🔥 Heatmap",
+    "btn_market_overview": "📊 Обзор Рынка",
     "btn_share": "🖼️ Share PnL",
     "btn_wallets": "👛 Кошельки",
     "btn_refresh": "🔄 Обновить",
@@ -436,5 +467,14 @@ RU = {
     # Whales
     "whale_alerts_on": "🔔 Алерты Китов: <b>ВКЛ</b>",
     "whale_alerts_off": "🔕 Алерты Китов: <b>ВЫКЛ</b>",
-    "whale_intro": "Отслеживание сделок > $100k по всему рынку.",
-}
+        "whale_intro": "Отслеживание сделок >     00k по всему рынку.",
+            "funding_alert_set": "✅ Алерт на фандинг установлен: <b>{symbol}</b> {dir} <b>{val}% APR</b>",
+            "oi_alert_set": "✅ Алерт на OI установлен: <b>{symbol}</b> {dir} <b>${val}M</b>",
+            "new_listing_msg": "🚀 <b>Новый актив на Hyperliquid!</b>\n\nСимвол: <b>${sym}</b>\n\n<i>Торговля уже доступна. Используй /watch {sym} для отслеживания волатильности.</i>",
+            "funding_alert_msg": "💰 <b>Алерт: Фандинг {sym}</b>\n\nТекущий: <b>{current}{unit}</b>\nЦель: {direction} <b>{target}{unit}</b>",
+            "oi_alert_msg": "📊 <b>Алерт: Open Interest {sym}</b>\n\nТекущий: <b>{current}{unit}</b>\nЦель: {direction} <b>{target}{unit}</b>",
+            "vaults_lbl": "Ваулты",
+            "calc_exit_btn": "🧮 Выход {sym}",
+            "exit_calc_title": "📊 <b>Калькулятор выхода: {sym}</b>\nДанные подтянуты из позиции.\n\n",
+        }
+        

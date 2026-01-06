@@ -8,14 +8,15 @@ logger = logging.getLogger(__name__)
 
 # Cache for symbol mappings (ID -> Name)
 _SYMBOL_CACHE = {
-    "map": {},  # id (int/str) -> name (str)
+    "spot": {},  # id (int/str) -> name (str)
+    "perp": {},  # id (int/str) -> name (str)
     "last_update": 0
 }
 
 async def ensure_symbol_mapping():
     """Ensures the symbol mapping cache is populated and up-to-date."""
     now = time.time()
-    if now - _SYMBOL_CACHE["last_update"] < 300 and _SYMBOL_CACHE["map"]:
+    if now - _SYMBOL_CACHE["last_update"] < 300 and _SYMBOL_CACHE["spot"]:
         return
 
     # Fetch both Spot and Perps meta
@@ -25,34 +26,45 @@ async def ensure_symbol_mapping():
         return_exceptions=True
     )
 
-    new_map = {}
+    new_spot = {}
+    new_perp = {}
 
     # Process Spot Meta
     if isinstance(spot_meta, dict):
-        # Universe mapping (Index -> Name)
-        universe = spot_meta.get("universe", [])
-        for idx, token in enumerate(universe):
-            if isinstance(token, dict) and "name" in token:
-                 new_map[str(token.get("index", idx))] = token["name"]
-                 new_map[f"@{idx}"] = token["name"] # Handle potential @ID format
-            elif isinstance(token, str): # Sometimes universe is just strings? (Rare in HL spot)
-                 new_map[str(idx)] = token
-
-        # Token ID mapping
-        tokens = spot_meta.get("tokens", [])
-        for t in tokens:
+        # 1. Map tokens by their index first
+        tokens_map = {} # token_idx -> name
+        tokens_list = spot_meta.get("tokens", [])
+        for t in tokens_list:
             if isinstance(t, dict):
-                tid = t.get("tokenId")
-                name = t.get("name")
-                if tid is not None and name:
-                    # Do not overwrite existing keys (Universe index priority for Spot)
-                    s_tid = str(tid)
-                    if s_tid not in new_map:
-                        new_map[s_tid] = name
-                    
-                    at_tid = f"@{tid}"
-                    if at_tid not in new_map:
-                        new_map[at_tid] = name
+                t_idx = t.get("index")
+                t_name = t.get("name")
+                if t_idx is not None and t_name:
+                    tokens_map[t_idx] = t_name
+                    # Also map tokenId for direct lookups
+                    tid = t.get("tokenId")
+                    if tid:
+                        new_spot[str(tid)] = t_name
+
+        # 2. Process Universe (Markets)
+        universe = spot_meta.get("universe", [])
+        for idx, market in enumerate(universe):
+            if isinstance(market, dict):
+                m_name = market.get("name")
+                m_idx = market.get("index", idx)
+                
+                # If name is like @1, try to resolve from tokens
+                if m_name and m_name.startswith("@") and "tokens" in market:
+                    m_tokens = market["tokens"]
+                    if len(m_tokens) >= 2:
+                        base_idx = m_tokens[0]
+                        base_name = tokens_map.get(base_idx)
+                        if base_name:
+                            m_name = f"{base_name}/USDC"
+
+                if m_name:
+                    new_spot[str(m_idx)] = m_name
+                    new_spot[f"@{m_idx}"] = m_name
+                    new_spot[m_name] = m_name
 
     # Process Perps Meta
     if isinstance(perps_meta, dict):
@@ -60,50 +72,48 @@ async def ensure_symbol_mapping():
         for idx, asset in enumerate(universe):
             name = asset.get("name")
             if name:
-                # Perps often reference by index in the universe array
-                new_map[str(idx)] = name
-                new_map[f"@{idx}"] = name 
-                # Also map the name to itself for safety
-                new_map[name] = name
+                new_perp[str(idx)] = name
+                new_perp[name] = name
 
-    _SYMBOL_CACHE["map"] = new_map
+    _SYMBOL_CACHE["spot"] = new_spot
+    _SYMBOL_CACHE["perp"] = new_perp
     _SYMBOL_CACHE["last_update"] = now
-    logger.info(f"Refreshed symbol mapping. Total keys: {len(new_map)}")
+    logger.info(f"Refreshed symbol mapping. Spot: {len(new_spot)}, Perp: {len(new_perp)}")
 
-async def get_symbol_name(token_id: str | int) -> str:
+async def get_symbol_name(token_id: str | int, is_spot: bool = False) -> str:
     """Resolves a token ID (or index) to its symbol name."""
     await ensure_symbol_mapping()
     
     s_id = str(token_id)
     
-    # Hardcoded overrides for canonical Perps
-    if s_id == "0": return "BTC"
-    if s_id == "1": return "ETH"
+    # Auto-detect spot if it starts with @
+    if s_id.startswith("@"):
+        is_spot = True
+        
+    cache = _SYMBOL_CACHE["spot"] if is_spot else _SYMBOL_CACHE["perp"]
     
-    # Common symbols bypass (Safety)
+    # Check exact match in relevant cache
+    if s_id in cache:
+        return cache[s_id]
+    
+    # Handle @ID format specifically for spot if it wasn't in cache
+    if is_spot and not s_id.startswith("@") and s_id.isdigit():
+        at_id = f"@{s_id}"
+        if at_id in cache:
+            return cache[at_id]
+
+    # Hardcoded overrides for canonical Perps (only if not spot)
+    if not is_spot:
+        if s_id == "0": return "BTC"
+        if s_id == "1": return "ETH"
+    
+    # Check other cache as fallback? No, better be strict to avoid bugs.
+    # But for safety with common names:
     if s_id in ("BTC", "ETH", "SOL", "HYPE", "USDC"):
         return s_id
-    
-    # If the input is already a known symbol name (e.g. "BTC", "ETH"), return it directly
-    # This prevents weird double lookups or failures if the ID is actually a name
-    if s_id in _SYMBOL_CACHE["map"].values():
-        return s_id
-
-    # Check exact match
-    if s_id in _SYMBOL_CACHE["map"]:
-        return _SYMBOL_CACHE["map"][s_id]
-    
-    # Check @ID format
-    if not s_id.startswith("@"):
-        at_id = f"@{s_id}"
-        if at_id in _SYMBOL_CACHE["map"]:
-            return _SYMBOL_CACHE["map"][at_id]
-            
-    # Fallback: if it looks like a standard name (not an ID), return it
-    if not s_id.isdigit() and not s_id.startswith("@"):
-        return s_id
         
-    return f"@{s_id}"
+    return s_id
+
 
 def normalize_spot_coin(coin: str | None) -> str:
     if not coin:
@@ -112,10 +122,42 @@ def normalize_spot_coin(coin: str | None) -> str:
     if c == "USDC":
         return c
     # If it starts with U and followed by letters (e.g. UPURR), it might be internal name
-    # But often spot coins are just "PURR" or "@123"
     if c.startswith("U") and len(c) > 1 and not c[1].isdigit():
          return c[1:]
     return c
+
+def _is_buy(side: str) -> bool:
+    s = side.lower()
+    return s in ("buy", "bid", "b")
+
+def calc_avg_entry_from_fills(fills: list[dict]) -> float:
+    """Calculates weighted average entry price from a list of fills."""
+    if not fills:
+        return 0.0
+
+    fills_sorted = sorted(fills, key=lambda x: float(x.get("time", 0)))
+    qty = 0.0
+    cost = 0.0
+    for f in fills_sorted:
+        sz = float(f.get("sz", 0) or 0)
+        px = float(f.get("px", 0) or 0)
+        side = str(f.get("side", ""))
+        
+        if _is_buy(side):
+            qty += sz
+            cost += sz * px
+        else:
+            if qty <= 0:
+                continue
+            # Weighted average reduction
+            sell_sz = min(sz, qty)
+            avg_cost = cost / qty if qty > 0 else 0.0
+            qty -= sell_sz
+            cost -= avg_cost * sell_sz
+
+    if qty > 0 and cost > 0:
+        return cost / qty
+    return 0.0
 
 def pretty_float(x: float, max_decimals: int = 6) -> str:
     """Human-friendly float: trim trailing zeros while keeping up to max_decimals."""
@@ -144,7 +186,19 @@ def extract_avg_entry_from_balance(balance: dict) -> float:
         except (ValueError, TypeError):
             pass
 
-    # Spot fields
+    # Spot fields from spotClearinghouseState (entryNtl / total)
+    entry_ntl = balance.get("entryNtl")
+    total = balance.get("total")
+    if entry_ntl is not None and total is not None:
+        try:
+            e = float(entry_ntl)
+            t = float(total)
+            if t > 0:
+                return e / t
+        except (ValueError, TypeError):
+            pass
+
+    # Other potential fields
     for k in ("avgPx", "avg_px", "avgPrice", "avgEntry"):
         v = balance.get(k)
         if v is not None:
@@ -250,23 +304,40 @@ async def get_open_orders(wallet_address: str):
             logger.error(f"Error fetching openOrders: {resp.status}")
             return None
 
+_MIDS_CACHE = {
+    "data": {},
+    "last_update": 0
+}
+
 async def get_all_mids():
+    now = time.time()
+    if now - _MIDS_CACHE["last_update"] < 10 and _MIDS_CACHE["data"]:
+        return _MIDS_CACHE["data"]
+
     url = f"{settings.HYPERLIQUID_API_URL}/info"
     payload = {"type": "allMids"}
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                if isinstance(data, dict):
-                    mids = data.get("mids")
-                    if isinstance(mids, dict):
-                        return mids
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, dict):
+                        # Hyperliquid returns a flat dict for allMids, not {"mids": ...}
+                        # If it does have a 'mids' key, use it, otherwise use root.
+                        mids = data.get("mids") if "mids" in data else data
+                        if isinstance(mids, dict):
+                            _MIDS_CACHE["data"] = mids
+                            _MIDS_CACHE["last_update"] = now
+                            return mids
+                    return None
+                logger.error(f"Error fetching allMids: {resp.status}")
                 return None
-            logger.error(f"Error fetching allMids: {resp.status}")
-            return None
+    except Exception as e:
+        logger.error(f"Exception in get_all_mids: {e}")
+        return None
 
-async def get_mid_price(symbol: str) -> float:
+async def get_mid_price(symbol: str, original_id: str | None = None) -> float:
     if not symbol:
         return 0.0
     sym = symbol.upper()
@@ -277,16 +348,29 @@ async def get_mid_price(symbol: str) -> float:
     if not mids:
         return 0.0
 
-    # Try direct match
+    # 1. Try original ID (e.g. "@1")
+    if original_id and str(original_id) in mids:
+        try:
+            return float(mids[str(original_id)])
+        except:
+            pass
+
+    # 2. Try symbol name (e.g. "PURR/USDC" or "BTC")
     if sym in mids:
         try:
             return float(mids[sym])
         except:
             pass
             
-    # Try handling generic names if internal name differs
-    # (Simplified: logic usually requires mapping back to universe)
-    
+    # 3. Special case for Spot: if symbol is "PURR", allMids might have "PURR/USDC"
+    if "/" not in sym:
+        alt_sym = f"{sym}/USDC"
+        if alt_sym in mids:
+            try:
+                return float(mids[alt_sym])
+            except:
+                pass
+
     return 0.0
 
 async def get_user_portfolio(wallet_address: str):
@@ -323,17 +407,27 @@ async def get_user_fills(wallet_address: str):
             logger.error(f"Error fetching fills: {resp.status}")
             return []
 
-async def get_hlp_info():
-    """Fetch HLP vault details."""
+async def get_user_vault_equities(wallet_address: str):
+    """Fetch user's equity in all vaults they participate in."""
     url = f"{settings.HYPERLIQUID_API_URL}/info"
-    # HLP Vault address is standard
     payload = {
-        "type": "vaultDetails",
-        "vaultAddress": "0xdf13098394e1832014b0df3f91285497",
-        "user": "0x0000000000000000000000000000000000000000"
+        "type": "userVaultEquities",
+        "user": wallet_address
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
-            return None
+            return []
+
+async def get_all_assets_meta():
+    """Fetch both spot and perps meta in one go."""
+    spot, perps = await asyncio.gather(
+        get_spot_meta(),
+        get_perps_meta(),
+        return_exceptions=True
+    )
+    return {
+        "spot": spot if not isinstance(spot, Exception) else None,
+        "perps": perps if not isinstance(perps, Exception) else None
+    }

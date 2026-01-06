@@ -20,7 +20,8 @@ services:
       - WATCH_ALERT_WINDOW_SEC=${WATCH_ALERT_WINDOW_SEC}
       - WATCH_ALERT_COOLDOWN=${WATCH_ALERT_COOLDOWN}
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     networks:
       - bot_net
 
@@ -30,6 +31,11 @@ services:
     restart: always
     volumes:
       - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - bot_net
 

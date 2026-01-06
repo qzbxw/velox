@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&family=JetBrains+Mono:wght@700&display=swap');
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #05070a; color: white;
+            width: 800px; height: 800px; padding: 40px;
+            margin: 0; display: flex; flex-direction: column; overflow: hidden;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass {
+            background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 24px; padding: 20px;
+        }
+        .label { color: #64748b; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; }
+    </style>
+</head>
+<body>
+    <div class="flex justify-between items-start mb-6">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center">
+                <span class="text-2xl font-black">V</span>
+            </div>
+            <div>
+                <h1 class="text-2xl font-black tracking-tighter uppercase leading-none">Velox <span class="text-indigo-500">Market</span></h1>
+                <p class="text-slate-500 font-bold text-[8px] tracking-[0.3em] uppercase mt-1">Institutional Intelligence</p>
+            </div>
+        </div>
+        <div class="text-right">
+            <div class="text-lg font-black mono text-slate-200">{{ date }}</div>
+            <div class="text-indigo-400 font-bold text-[9px] uppercase tracking-widest mt-1">t.me/veloxhlbot</div>
+        </div>
+    </div>
+    <div class="glass mb-4 flex justify-between items-center bg-gradient-to-br from-indigo-900/20 to-transparent">
+        <div>
+            <div class="label mb-2">Sentiment</div>
+            <div class="text-4xl font-black">{{ sentiment_label }}</div>
+        </div>
+        <div class="flex gap-8 text-right">
+            <div>
+                <div class="label mb-1">AVG FUNDING</div>
+                <div class="text-xl font-bold mono {{ 'text-emerald-400' if avg_funding > 0 else 'text-rose-400' }}">{{ avg_funding }}%</div>
+            </div>
+            <div>
+                <div class="label mb-1">AVG BASIS</div>
+                <div class="text-xl font-bold mono text-indigo-400">{{ avg_basis }}%</div>
+            </div>
+        </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-4">
+        <div class="glass">
+            <h3 class="label mb-3 flex items-center gap-2">🚀 Gainers</h3>
+            <div class="space-y-3">
+                {% for g in gainers[:4] %}
+                <div class="flex justify-between items-center text-sm">
+                    <span class="font-black uppercase">{{ g.name }}</span>
+                    <span class="text-emerald-400 font-bold mono">+{{ g.change }}%</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="glass">
+            <h3 class="label mb-3 flex items-center gap-2">🔻 Losers</h3>
+            <div class="space-y-3">
+                {% for l in losers[:4] %}
+                <div class="flex justify-between items-center text-sm">
+                    <span class="font-black uppercase">{{ l.name }}</span>
+                    <span class="text-rose-400 font-bold mono">{{ l.change }}%</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="glass mb-4">
+        <div class="flex justify-between items-center mb-3 text-[10px]">
+            <h3 class="label">Efficiency & Flow</h3>
+            <div class="text-indigo-400 font-black mono">${{ global_volume }} VOL</div>
+        </div>
+        <div class="grid grid-cols-2 gap-x-8 gap-y-2">
+            {% for e in efficiency[:4] %}
+            <div class="space-y-1">
+                <div class="flex justify-between text-[9px] font-bold uppercase tracking-widest">
+                    <span>{{ e.name }}</span>
+                    <span class="text-indigo-400">{{ e.ratio }}x</span>
+                </div>
+                <div class="h-1 bg-white/5 rounded-full overflow-hidden">
+                    <div class="h-full bg-indigo-500" style="width: {{ e.percent }}%"></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="glass flex items-center justify-between border-l-4 border-emerald-500 bg-emerald-950/10 mt-auto">
+        <div class="text-xl font-black uppercase">HLP Vault</div>
+        <div class="flex gap-8 text-right">
+            <div class="text-slate-500 font-bold text-[8px] uppercase tracking-widest mr-4 self-center">t.me/veloxhlbot</div>
+            <div>
+                <div class="label mb-1">APR</div>
+                <div class="text-xl font-black mono text-emerald-400">{{ hlp_apr }}%</div>
+            </div>
+            <div>
+                <div class="label mb-1">PRICE</div>
+                <div class="text-xl font-black mono text-slate-200">${{ hlp_price }}</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

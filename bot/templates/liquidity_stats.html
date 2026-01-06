@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@700&display=swap');
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #05070a; color: white;
+            width: 800px; height: 800px; padding: 40px;
+            margin: 0; display: flex; flex-direction: column; overflow: hidden;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass {
+            background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 24px; padding: 24px;
+        }
+        .label { color: #64748b; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; }
+    </style>
+</head>
+<body>
+    <div class="flex justify-between items-start mb-8">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center">
+                <span class="text-2xl font-black">V</span>
+            </div>
+            <div>
+                <h1 class="text-2xl font-black tracking-tighter uppercase leading-none">Velox <span class="text-blue-500">Depth</span></h1>
+                <p class="text-slate-500 font-bold text-[8px] tracking-[0.3em] uppercase mt-1">Execution Quality</p>
+            </div>
+        </div>
+        <div class="text-right">
+            <div class="label mb-1">Total OI</div>
+            <div class="text-2xl font-black mono text-blue-400 tracking-tighter">${{total_oi}}</div>
+            <div class="text-slate-500 font-bold text-[9px] uppercase tracking-widest mt-1">t.me/veloxhlbot</div>
+        </div>
+    </div>
+    <div class="glass mb-6">
+        <div class="label mb-4 flex items-center gap-2">
+            <span class="w-1 h-1 rounded-full bg-blue-500"></span> Market Depth ($100k Impact)
+        </div>
+        <div class="space-y-4">
+            {% for asset in slippage_data[:5] %}
+            <div>
+                <div class="flex justify-between text-base mb-1">
+                    <span class="font-bold uppercase">{{ asset.name }}</span>
+                    <span class="mono {{ 'text-emerald-400' if asset.slippage < 0.05 else 'text-yellow-400' if asset.slippage < 0.2 else 'text-rose-400' }}">{{ asset.slippage }}%</span>
+                </div>
+                <div class="w-full bg-white/5 h-2 rounded-full overflow-hidden">
+                    <div class="bg-blue-500 h-full" style="width: {{ asset.bar_width }}%"></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="grid grid-cols-2 gap-4 mb-6">
+        <div class="glass">
+            <div class="label mb-4">1h Volatility</div>
+            <div class="space-y-3">
+                {% for asset in vol_data[:4] %}
+                <div class="flex justify-between items-center text-sm">
+                    <span class="font-bold uppercase">{{ asset.name }}</span>
+                    <span class="mono text-orange-400 font-bold">{{ asset.vol }}%</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="glass">
+            <div class="label mb-4">OI Concentration</div>
+            <div class="space-y-3">
+                {% for asset in oi_data[:4] %}
+                <div class="flex justify-between items-center text-sm">
+                    <span class="font-bold uppercase">{{ asset.name }}</span>
+                    <span class="mono text-purple-400 font-bold">${{ asset.oi }}M</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="glass bg-blue-900/10 border-blue-500/20 mt-auto">
+        <div class="label mb-2 text-blue-400">Execution Advice</div>
+        <p class="text-base text-slate-300 leading-tight font-medium">
+            Best liquidity: <b class="text-white">{{ best_execution }}</b>. Powered by <b class="text-blue-400 font-bold">Velox L1 Sentinel</b> • t.me/veloxhlbot
+        </p>
+    </div>
+</body>
+</html>

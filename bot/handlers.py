@@ -1,3 +1,4 @@
+import asyncio
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -9,7 +10,7 @@ from bot.locales import _t
 from bot.services import (
     get_symbol_name, get_mid_price, get_open_orders, get_spot_balances, 
     get_perps_state, pretty_float, get_user_portfolio, get_perps_context,
-    extract_avg_entry_from_balance, get_user_fills
+    extract_avg_entry_from_balance, get_user_fills, get_hlp_info
 )
 from bot.analytics import generate_pnl_chart, format_funding_heatmap, generate_pnl_card, calculate_trade_stats, generate_flex_pnl_card
 import logging
@@ -22,6 +23,20 @@ import datetime
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+async def smart_edit(call: CallbackQuery, text: str, reply_markup: InlineKeyboardMarkup = None):
+    """Edits text message or deletes photo and sends new text message."""
+    try:
+        if call.message.photo or call.message.document:
+            try:
+                await call.message.delete()
+            except:
+                pass
+            return await call.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            return await call.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception:
+        return await call.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
 
 # --- UI Helpers ---
 
@@ -213,6 +228,68 @@ async def cmd_alert(message: Message):
     dir_icon = "📈" if direction == "above" else "📉"
     msg = _t(lang, "alert_added").format(symbol=symbol, dir=dir_icon, price=pretty_float(target))
     await message.answer(msg, parse_mode="HTML")
+
+@router.message(Command("f_alert"))
+async def cmd_f_alert(message: Message):
+    lang = await db.get_lang(message.chat.id)
+    args = message.text.split()
+    if len(args) < 3:
+        await message.answer("⚠️ Usage: <code>/f_alert ETH 50</code> (Alert if APR > 50% or < -20%)", parse_mode="HTML")
+        return
+    
+    symbol = args[1].upper()
+    try:
+        target = float(args[2])
+    except:
+        await message.answer(_t(lang, "invalid_number"))
+        return
+
+    # Determine direction automatically based on current funding
+    ctx = await get_perps_context()
+    universe = ctx[0].get("universe", [])
+    asset_ctxs = ctx[1]
+    idx = next((i for i, u in enumerate(universe) if u["name"] == symbol), -1)
+    
+    current_apr = 0.0
+    if idx != -1:
+        current_apr = float(asset_ctxs[idx].get("funding", 0)) * 24 * 365 * 100
+    
+    direction = "above" if target > current_apr else "below"
+    await db.add_alert(message.chat.id, symbol, target, direction, "funding")
+    
+    dir_icon = "📈" if direction == "above" else "📉"
+    await message.answer(_t(lang, "funding_alert_set", symbol=symbol, dir=dir_icon, val=target), parse_mode="HTML")
+
+@router.message(Command("oi_alert"))
+async def cmd_oi_alert(message: Message):
+    lang = await db.get_lang(message.chat.id)
+    args = message.text.split()
+    if len(args) < 3:
+        await message.answer("⚠️ Usage: <code>/oi_alert ETH 100</code> (Alert if OI > $100M)", parse_mode="HTML")
+        return
+    
+    symbol = args[1].upper()
+    try:
+        target = float(args[2]) # In Millions USD
+    except:
+        await message.answer(_t(lang, "invalid_number"))
+        return
+
+    # Determine direction
+    ctx = await get_perps_context()
+    universe = ctx[0].get("universe", [])
+    asset_ctxs = ctx[1]
+    idx = next((i for i, u in enumerate(universe) if u["name"] == symbol), -1)
+    
+    current_oi = 0.0
+    if idx != -1:
+        current_oi = float(asset_ctxs[idx].get("openInterest", 0)) * float(asset_ctxs[idx].get("markPx", 0)) / 1e6
+    
+    direction = "above" if target > current_oi else "below"
+    await db.add_alert(message.chat.id, symbol, target, direction, "oi")
+    
+    dir_icon = "📈" if direction == "above" else "📉"
+    await message.answer(_t(lang, "oi_alert_set", symbol=symbol, dir=dir_icon, val=target), parse_mode="HTML")
 
 @router.message(Command("export"))
 async def cmd_export(message: Message):
@@ -460,25 +537,25 @@ async def cb_menu(call: CallbackQuery):
     if wallets:
         text += "\n\n" + _t(lang, "tracking").format(wallet=f"{wallets[0][:6]}...{wallets[0][-4:]}")
     
-    await call.message.edit_text(text, reply_markup=_main_menu_kb(lang), parse_mode="HTML")
+    await smart_edit(call, text, reply_markup=_main_menu_kb(lang))
     await call.answer()
 
 @router.callback_query(F.data == "sub:portfolio")
 async def cb_sub_portfolio(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
-    await call.message.edit_text(_t(lang, "menu_portfolio"), reply_markup=_portfolio_kb(lang), parse_mode="HTML")
+    await smart_edit(call, _t(lang, "menu_portfolio"), reply_markup=_portfolio_kb(lang))
     await call.answer()
 
 @router.callback_query(F.data == "sub:trading")
 async def cb_sub_trading(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
-    await call.message.edit_text(_t(lang, "menu_trading"), reply_markup=_trading_kb(lang), parse_mode="HTML")
+    await smart_edit(call, _t(lang, "menu_trading"), reply_markup=_trading_kb(lang))
     await call.answer()
 
 @router.callback_query(F.data == "sub:market")
 async def cb_sub_market(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
-    await call.message.edit_text(_t(lang, "menu_market"), reply_markup=_market_kb(lang), parse_mode="HTML")
+    await smart_edit(call, _t(lang, "menu_market"), reply_markup=_market_kb(lang))
     await call.answer()
 
 @router.callback_query(F.data == "noop")
@@ -491,7 +568,7 @@ async def cb_balance(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:portfolio"), parse_mode="HTML")
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:portfolio"))
         return
 
     msg_parts = []
@@ -500,22 +577,46 @@ async def cb_balance(call: CallbackQuery):
     for wallet in wallets:
         spot_bals = await get_spot_balances(wallet)
         perps_state = await get_perps_state(wallet)
+        vault_equities = await get_user_vault_equities(wallet)
         
         wallet_lines = []
         wallet_total = 0.0
         
+        # ... (rest of spot logic) ...
+        
+        # Vaults logic
+        vault_total = 0.0
+        vault_lines = []
+        if vault_equities:
+            for v in vault_equities:
+                v_name = v.get("vaultAddress")
+                v_equity = float(v.get("equity", 0))
+                if v_equity > 1:
+                    vault_total += v_equity
+                    # Try to get human name if it's HLP
+                    disp_name = "HLP" if "df13098394e1832014b0df3f91285497" in v_name.lower() else f"Vault {v_name[:6]}"
+                    vault_lines.append(f"🏛 <b>{disp_name}</b>: ${pretty_float(v_equity, 2)}")
+
+        # ... (rest of header/body assembly) ...
+        header = f"👛 <b>{wallet[:6]}...{wallet[-4:]}</b>"
+        body = ""
+        if wallet_lines:
+            body += f"\n   <b>Spot:</b> ${pretty_float(wallet_total, 2)}\n   " + "\n   ".join(wallet_lines)
+        if vault_lines:
+            body += f"\n   <b>{_t(lang, 'vaults_lbl')}:</b> ${pretty_float(vault_total, 2)}\n   " + "\n   ".join(vault_lines)
+        
         if spot_bals:
             for b in spot_bals:
                 coin_id = b.get("coin")
-                coin_name = await get_symbol_name(coin_id)
+                coin_name = await get_symbol_name(coin_id, is_spot=True)
                 amount = float(b.get("total", 0) or 0)
                 hold = float(b.get("hold", 0) or 0)
                 
                 if amount <= 0: continue
                 
                 px = 0.0
-                if ws: px = ws.get_price(coin_name)
-                if not px: px = await get_mid_price(coin_name)
+                if ws: px = ws.get_price(coin_name, coin_id)
+                if not px: px = await get_mid_price(coin_name, coin_id)
                 
                 val = amount * px
                 wallet_total += val
@@ -552,10 +653,10 @@ async def cb_balance(call: CallbackQuery):
                 
                 if szi == 0: continue
                 
-                sym = await get_symbol_name(coin_id)
+                sym = await get_symbol_name(coin_id, is_spot=False)
                 mark_px = 0.0
-                if ws: mark_px = ws.get_price(sym)
-                if not mark_px: mark_px = await get_mid_price(sym)
+                if ws: mark_px = ws.get_price(sym, coin_id)
+                if not mark_px: mark_px = await get_mid_price(sym, coin_id)
                 
                 if mark_px:
                      total_upnl += (mark_px - entry_px) * szi
@@ -581,7 +682,73 @@ async def cb_balance(call: CallbackQuery):
         msg_parts.append(header + body)
 
     text = _t(lang, "balance_title") + "\n\n" + "\n\n".join(msg_parts)
-    await call.message.edit_text(text, reply_markup=_back_kb(lang, "sub:portfolio"), parse_mode="HTML")
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📊 Portfolio Chart", callback_data="cb_portfolio_chart")
+    kb.button(text=_t(lang, "btn_back"), callback_data="sub:portfolio")
+    kb.adjust(1)
+    
+    await smart_edit(call, text, reply_markup=kb.as_markup())
+
+@router.callback_query(F.data == "cb_portfolio_chart")
+async def cb_portfolio_chart(call: CallbackQuery):
+    await call.answer("Analyzing portfolio composition...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
+    if not wallets: return
+    
+    ws = getattr(call.message.bot, "ws_manager", None)
+    
+    # Aggregate all assets
+    assets_map = {} # sym -> usd_value
+    
+    for wallet in wallets:
+        # Spot
+        spot_bals = await get_spot_balances(wallet)
+        if spot_bals:
+            for b in spot_bals:
+                coin_id = b.get("coin")
+                name = await get_symbol_name(coin_id, is_spot=True)
+                amount = float(b.get("total", 0) or 0)
+                if amount <= 0: continue
+                
+                px = 0.0
+                if ws: px = ws.get_price(name, coin_id)
+                if not px: px = await get_mid_price(name, coin_id)
+                
+                val = amount * px
+                assets_map[name] = assets_map.get(name, 0) + val
+                
+        # Perps Equity
+        perps_state = await get_perps_state(wallet)
+        if perps_state and "marginSummary" in perps_state:
+             val = float(perps_state["marginSummary"].get("accountValue", 0) or 0)
+             assets_map["USDC (Margin)"] = assets_map.get("USDC (Margin)", 0) + val
+
+    if not assets_map:
+        await call.answer("No assets found.", show_alert=True)
+        return
+        
+    assets_list = [{"name": k, "value": v} for k, v in assets_map.items() if v > 1]
+    
+    from bot.analytics import prepare_portfolio_composition_data
+    from bot.renderer import render_html_to_image
+    
+    comp_data = prepare_portfolio_composition_data(assets_list)
+    
+    try:
+        buf = await render_html_to_image("portfolio_composition.html", comp_data)
+        photo = BufferedInputFile(buf.read(), filename="portfolio.png")
+        await call.message.delete()
+        await call.message.answer_photo(
+            photo, 
+            caption="📊 <b>Portfolio Composition</b>", 
+            reply_markup=_back_kb(lang, "cb_balance"),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error rendering portfolio composition: {e}")
+        await call.message.answer("❌ Error generating image.")
 
 @router.callback_query(F.data.startswith("cb_positions"))
 async def cb_positions(call: CallbackQuery):
@@ -595,7 +762,7 @@ async def cb_positions(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang), parse_mode="HTML")
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang))
         return
 
     # Gather ALL positions first
@@ -613,14 +780,14 @@ async def cb_positions(call: CallbackQuery):
             
             # Enrich data
             coin_id = pos.get("coin")
-            sym = await get_symbol_name(coin_id)
+            sym = await get_symbol_name(coin_id, is_spot=False)
             entry_px = float(pos.get("entryPx", 0))
             leverage = float(pos.get("leverage", {}).get("value", 0))
             liq_px = float(pos.get("liquidationPx", 0) or 0)
             
             mark_px = 0.0
-            if ws: mark_px = ws.get_price(sym)
-            if not mark_px: mark_px = await get_mid_price(sym)
+            if ws: mark_px = ws.get_price(sym, coin_id)
+            if not mark_px: mark_px = await get_mid_price(sym, coin_id)
             
             upnl = (mark_px - entry_px) * szi if mark_px else 0.0
             roi = 0.0
@@ -640,7 +807,7 @@ async def cb_positions(call: CallbackQuery):
 
     if not all_positions_data:
         text = _t(lang, "positions_title") + "\n\n📭 No open positions."
-        await call.message.edit_text(text, reply_markup=_back_kb(lang, "sub:trading"), parse_mode="HTML")
+        await smart_edit(call, text, reply_markup=_back_kb(lang, "sub:trading"))
         return
 
     # Pagination Logic
@@ -666,11 +833,42 @@ async def cb_positions(call: CallbackQuery):
             f"   Liq: ${pretty_float(item['liq'])} | uPnL: <b>${pretty_float(item['upnl'], 2)}</b> ({item['roi']:+.0f}%)"
         )
         msg_parts.append(line)
-
+        
+        # Add Exit Calc button for the last item in the list for this demo/logic 
+        # (Usually better to have one per item if they were separate messages, 
+        # but here we'll add a specific callback for the first one for simplicity or adjust kb)
+        
     text = f"{_t(lang, 'positions_title')} ({page+1}/{total_pages})\n\n" + "\n\n".join(msg_parts)
     
     kb = _pagination_kb(lang, page, total_pages, "cb_positions", back_target="sub:trading")
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    
+    # Add Exit Calc buttons for the current page items
+    for i, item in enumerate(page_items):
+        btn_label = _t(lang, "calc_exit_btn", sym=item['sym'])
+        # Store data in callback_data is size limited, so we use a shorthand or state
+        kb.inline_keyboard.insert(-1, [InlineKeyboardButton(text=btn_label, callback_data=f"calc_exit:{item['sym']}:{item['entry']}:{abs(item['szi'])}:{item['lev']}:{item['szi']>0}")])
+
+    await smart_edit(call, text, reply_markup=kb)
+
+@router.callback_query(F.data.startswith("calc_exit:"))
+async def cb_calc_exit(call: CallbackQuery, state: FSMContext):
+    # Format: calc_exit:SYM:ENTRY:SIZE:LEV:IS_LONG
+    _, sym, entry, size, lev, is_long = call.data.split(":")
+    lang = await db.get_lang(call.message.chat.id)
+    
+    await state.update_data(
+        mode="perp",
+        side="long" if is_long == "True" else "short",
+        entry=float(entry),
+        # We don't know the user's total balance easily here, 
+        # but we can derive it from size/lev for the calc to work
+        balance= (float(size) * float(entry)) / float(lev)
+    )
+    
+    msg = _t(lang, "exit_calc_title", sym=sym) + _t(lang, "calc_sl")
+    await call.message.answer(msg, parse_mode="HTML")
+    await state.set_state(CalcStates.sl)
+    await call.answer()
 
 @router.callback_query(F.data == "cb_share_pnl_menu")
 async def cb_share_pnl_menu(call: CallbackQuery):
@@ -697,11 +895,11 @@ async def cb_share_pnl_menu(call: CallbackQuery):
             has_pos = True
             
             coin_id = pos.get("coin")
-            sym = await get_symbol_name(coin_id)
+            sym = await get_symbol_name(coin_id, is_spot=False)
             entry = float(pos.get("entryPx", 0))
             mark = 0.0
             if ws: mark = ws.get_price(sym)
-            if not mark: mark = await get_mid_price(sym)
+            if not mark: mark = await get_mid_price(sym, coin_id)
             
             upnl = (mark - entry) * szi if mark else 0.0
             
@@ -718,7 +916,7 @@ async def cb_share_pnl_menu(call: CallbackQuery):
     kb.button(text=_t(lang, "btn_back"), callback_data="cb_positions:0")
     kb.adjust(2) # 2 per row
     
-    await call.message.edit_text(_t(lang, "select_pos"), reply_markup=kb.as_markup())
+    await smart_edit(call, _t(lang, "select_pos"), reply_markup=kb.as_markup())
 
 @router.callback_query(F.data.startswith("cb_share_pnl:"))
 async def cb_share_pnl(call: CallbackQuery):
@@ -739,7 +937,7 @@ async def cb_share_pnl(call: CallbackQuery):
         for p in positions:
             pos = p.get("position", {})
             coin_id = pos.get("coin")
-            sym_name = await get_symbol_name(coin_id)
+            sym_name = await get_symbol_name(coin_id, is_spot=False)
             if sym_name == symbol:
                 szi = float(pos.get("szi", 0))
                 if szi == 0: continue
@@ -777,12 +975,23 @@ async def cb_share_pnl(call: CallbackQuery):
         "pnl": upnl
     }
     
-    buf = generate_pnl_card(data)
-    if buf:
-        photo = BufferedInputFile(buf.read(), filename=f"pnl_{symbol}.png")
-        await call.message.answer_photo(photo)
-    else:
-        await call.message.answer(_t(lang, "card_error"))
+    from bot.analytics import prepare_pnl_card_data
+    from bot.renderer import render_html_to_image
+    
+    pnl_data = prepare_pnl_card_data(data)
+    try:
+        buf = await render_html_to_image("pnl_card.html", pnl_data)
+        photo = BufferedInputFile(buf.read(), filename=f"pnl_{data['symbol']}.png")
+        await call.message.delete()
+        await call.message.answer_photo(
+            photo, 
+            caption=f"🚀 <b>{data['symbol']} Position</b>", 
+            reply_markup=_back_kb(lang, "cb_positions:0"),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error rendering PnL card: {e}")
+        await call.message.answer("❌ Error generating image.")
 
 @router.callback_query(F.data.startswith("cb_orders"))
 async def cb_orders(call: CallbackQuery):
@@ -810,7 +1019,7 @@ async def cb_orders(call: CallbackQuery):
             
     if not all_orders:
         text = _t(lang, "orders_title") + "\n\n📭 No open orders."
-        await call.message.edit_text(text, reply_markup=_back_kb(lang, "sub:trading"), parse_mode="HTML")
+        await smart_edit(call, text, reply_markup=_back_kb(lang, "sub:trading"))
         return
 
     # Pagination
@@ -827,26 +1036,46 @@ async def cb_orders(call: CallbackQuery):
     for o in page_items:
         # Resolve coin name
         coin_raw = o.get("coin")
-        sym = await get_symbol_name(coin_raw)
+        is_spot = str(coin_raw).startswith("@")
+        sym = await get_symbol_name(coin_raw, is_spot=is_spot)
+        
+        # Determine market type label
+        market_type = "Spot" if is_spot else "Perp"
         
         sz = float(o.get("sz", 0))
         px = float(o.get("limitPx", 0))
         side = o.get("side")
         
+        # Calculate distance
+        current_px = await get_mid_price(sym, coin_raw)
+        dist_str = "n/a"
+        if current_px > 0 and px > 0:
+            # How many percent from current price to entry?
+            # If current is 110 and buy limit is 100, we need -9.09% move.
+            diff = ((px - current_px) / current_px) * 100
+            dist_str = f"<b>{diff:+.2f}%</b>"
+            
         icon = "🟢" if str(side).lower().startswith("b") else "🔴"
+        side_label = "BUY" if str(side).lower().startswith("b") else "SELL"
         w_short = f"{o['wallet'][:4]}..{o['wallet'][-3:]}"
         
-        val_usd = math.floor(sz * px)
-        msg_parts.append(f"{icon} <b>{sym}</b>: {sz} (${val_usd}) по ${pretty_float(px)} [{w_short}]")
+        val_usd = sz * px
+        
+        item_text = (
+            f"{icon} <b>{sym}</b> [{market_type}]\n"
+            f"   {side_label}: {sz} @ ${pretty_float(px)} (~${pretty_float(val_usd, 2)})\n"
+            f"   Цена: ${pretty_float(current_px)} | До входа: {dist_str} [{w_short}]"
+        )
+        msg_parts.append(item_text)
 
     text = f"{_t(lang, 'orders_title')} ({page+1}/{total_pages})\n\n" + "\n\n".join(msg_parts)
     kb = _pagination_kb(lang, page, total_pages, "cb_orders", back_target="sub:trading")
-    await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    await smart_edit(call, text, reply_markup=kb)
 
 @router.callback_query(F.data == "cb_settings")
 async def cb_settings(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
-    await call.message.edit_text(_t(lang, "settings_title"), reply_markup=_settings_kb(lang), parse_mode="HTML")
+    await smart_edit(call, _t(lang, "settings_title"), reply_markup=_settings_kb(lang))
     await call.answer()
 
 @router.callback_query(F.data == "cb_lang_menu")
@@ -857,7 +1086,7 @@ async def cb_lang_menu(call: CallbackQuery):
     kb.button(text="🇬🇧 English", callback_data="lang:en")
     kb.button(text=_t(lang, "btn_back"), callback_data="cb_settings")
     kb.adjust(2, 1)
-    await call.message.edit_text(_t(lang, "lang_title"), reply_markup=kb.as_markup(), parse_mode="HTML")
+    await smart_edit(call, _t(lang, "lang_title"), reply_markup=kb.as_markup())
 
 @router.callback_query(F.data.startswith("lang:"))
 async def cb_set_lang(call: CallbackQuery):
@@ -869,13 +1098,11 @@ async def cb_set_lang(call: CallbackQuery):
 async def cb_alerts(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     alerts = await db.get_user_alerts(call.message.chat.id)
+    ts = time.strftime("%H:%M:%S")
     
     if not alerts:
-        await call.message.edit_text(
-            f"{_t(lang, 'settings_title')} > <b>Alerts</b>\n\n{_t(lang, 'no_alerts')}\n{_t(lang, 'alert_usage')}",
-            reply_markup=_settings_kb(lang),
-            parse_mode="HTML"
-        )
+        text = f"{_t(lang, 'settings_title')} > <b>Alerts</b>\n\n{_t(lang, 'no_alerts')}\n{_t(lang, 'alert_usage')}\n\n<i>Last update: {ts}</i>"
+        await smart_edit(call, text, reply_markup=_settings_kb(lang))
         return
 
     kb = InlineKeyboardBuilder()
@@ -895,8 +1122,9 @@ async def cb_alerts(call: CallbackQuery):
     kb.button(text=_t(lang, "btn_back"), callback_data="cb_settings")
     kb.adjust(1)
     
-    # Send as plain text to be safe
-    await call.message.edit_text(text, reply_markup=kb.as_markup())
+    text += f"\n\n<i>Last update: {ts}</i>"
+    
+    await smart_edit(call, text, reply_markup=kb.as_markup())
 
 @router.callback_query(F.data == "cb_wallets_menu")
 async def cb_wallets_menu(call: CallbackQuery):
@@ -938,15 +1166,23 @@ async def cb_del_wallet(call: CallbackQuery):
 
 @router.callback_query(F.data == "clear_all_alerts")
 async def cb_clear_all_alerts(call: CallbackQuery):
-    alerts = await db.get_user_alerts(call.message.chat.id)
-    for a in alerts:
-        await db.delete_alert(str(a["_id"]))
+    await db.delete_all_user_alerts(call.message.chat.id)
+    lang = await db.get_lang(call.message.chat.id)
+    await call.answer(_t(lang, "deleted"))
     await cb_alerts(call)
 
 @router.callback_query(F.data.startswith("del_alert:"))
 async def cb_del_alert(call: CallbackQuery):
     aid = call.data.split(":")[1]
-    await db.delete_alert(aid)
+    lang = await db.get_lang(call.message.chat.id)
+    success = await db.delete_alert(aid)
+    
+    if success:
+        await call.answer(_t(lang, "deleted"))
+    else:
+        # If it failed, maybe it was already deleted (race condition)
+        await call.answer("🗑️ Alert already removed or error")
+        
     await cb_alerts(call)
 
 @router.message(Command("watch"))
@@ -1056,51 +1292,61 @@ async def cb_market(call: CallbackQuery):
     text += "\n\nℹ️ <i>/watch SYM | /unwatch SYM</i>"
     
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_heatmap"), callback_data="cb_heatmap")
+    kb.button(text=_t(lang, "btn_market_overview"), callback_data="cb_market_overview")
     kb.button(text=_t(lang, "btn_refresh"), callback_data="cb_market")
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
     kb.adjust(1)
     
-    try:
-        await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
-    except Exception:
-        await call.message.delete()
-        await call.message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await smart_edit(call, text, reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "cb_heatmap")
-async def cb_heatmap(call: CallbackQuery):
-    await call.answer("Generating Market Overview...")
+@router.callback_query(F.data == "cb_market_overview")
+async def cb_market_overview(call: CallbackQuery):
+    await call.answer("Generating Market Insights...")
     lang = await db.get_lang(call.message.chat.id)
     
-    ctx = await get_perps_context()
-    if not ctx or not isinstance(ctx, list) or len(ctx) != 2:
+    # Fetch market data
+    ctx, hlp_info = await asyncio.gather(
+        get_perps_context(),
+        get_hlp_info(),
+        return_exceptions=True
+    )
+    
+    if isinstance(ctx, Exception) or not ctx or not isinstance(ctx, list) or len(ctx) != 2:
         await call.message.answer("❌ Error fetching market data.")
         return
         
+    if isinstance(hlp_info, Exception):
+        hlp_info = None
+
     universe = ctx[0].get("universe", [])
     asset_ctxs = ctx[1]
     
-    # Generate Image
-    from bot.analytics import generate_market_overview_image
+    from bot.analytics import prepare_modern_market_data, prepare_liquidity_data
+    from bot.renderer import render_html_to_image
     
-    # Default sort by Volume
-    buf = generate_market_overview_image(asset_ctxs, universe, sort_by="vol")
+    # Prepare data
+    data_alpha = prepare_modern_market_data(asset_ctxs, universe, hlp_info)
+    data_liq = prepare_liquidity_data(asset_ctxs, universe)
     
-    kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "sort_funding"), callback_data="cb_heatmap_sort:funding")
-    kb.button(text=_t(lang, "sort_oi"), callback_data="cb_heatmap_sort:oi")
-    kb.button(text=_t(lang, "sort_change"), callback_data="cb_heatmap_sort:change")
-    kb.button(text=_t(lang, "btn_back"), callback_data="cb_market")
-    kb.adjust(2, 2)
-    
-    if buf:
-        photo = BufferedInputFile(buf.read(), filename="market_overview.png")
-        # If editing a text message, we must delete and send photo, or send photo new.
-        # Can't edit text into photo.
+    try:
+        # Render all images
+        buf_alpha = await render_html_to_image("market_stats.html", data_alpha)
+        buf_liq = await render_html_to_image("liquidity_stats.html", data_liq)
+        buf_heat = await render_html_to_image("funding_heatmap.html", data_alpha)
+        
+        media = [
+            InputMediaPhoto(media=BufferedInputFile(buf_heat.read(), filename="insights_1.png"), caption="📊 <b>Funding & Basis Map</b>", parse_mode="HTML"),
+            InputMediaPhoto(media=BufferedInputFile(buf_alpha.read(), filename="insights_2.png"), caption="📈 <b>Market Alpha & Sentiment</b>", parse_mode="HTML"),
+            InputMediaPhoto(media=BufferedInputFile(buf_liq.read(), filename="insights_3.png"), caption="🌊 <b>Liquidity & Depth</b>", parse_mode="HTML")
+        ]
+        
         await call.message.delete()
-        await call.message.answer_photo(photo, caption="📊 <b>Market Fundamentals</b>", reply_markup=kb.as_markup(), parse_mode="HTML")
-    else:
-        await call.message.answer("❌ Error generating image.")
+        await call.message.answer_media_group(media)
+        await call.message.answer("<i>Use the menu below to go back or refresh.</i>", reply_markup=_back_kb(lang, "sub:market"), parse_mode="HTML")
+        
+    except Exception as e:
+        logger.error(f"Error generating images: {e}")
+        await call.message.answer("❌ Error generating images.")
 
 @router.callback_query(F.data.startswith("cb_heatmap_sort:"))
 async def cb_heatmap_sort(call: CallbackQuery):
@@ -1150,7 +1396,7 @@ async def cb_pnl(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang), parse_mode="HTML")
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang))
         return
 
     ws = getattr(call.message.bot, "ws_manager", None)
@@ -1176,16 +1422,25 @@ async def cb_pnl(call: CallbackQuery):
                 if amount <= 0: continue
                 
                 # Get Price
-                sym = await get_symbol_name(coin)
+                sym = await get_symbol_name(coin, is_spot=True)
                 px = 0.0
-                if ws: px = ws.get_price(sym)
-                if not px: px = await get_mid_price(sym)
+                if ws: px = ws.get_price(sym, coin)
+                if not px: px = await get_mid_price(sym, coin)
                 
                 val = amount * px
                 w_spot_eq += val
                 
                 # uPnL for Spot (Approximate)
                 entry = extract_avg_entry_from_balance(b)
+                if not entry or entry <= 0:
+                    # Fallback to stored fills in DB
+                    try:
+                        coin_fills = await db.get_fills_by_coin(wallet, coin)
+                        from .services import calc_avg_entry_from_fills
+                        entry = calc_avg_entry_from_fills(coin_fills)
+                    except Exception:
+                        entry = 0.0
+
                 if entry > 0 and px > 0:
                      w_spot_upnl += (px - entry) * amount
                 
@@ -1206,10 +1461,10 @@ async def cb_pnl(call: CallbackQuery):
                 entry_px = float(pos.get("entryPx", 0))
                 coin_id = pos.get("coin")
                 if szi != 0:
-                    sym = await get_symbol_name(coin_id)
+                    sym = await get_symbol_name(coin_id, is_spot=False)
                     mark = 0.0
-                    if ws: mark = ws.get_price(sym)
-                    if not mark: mark = await get_mid_price(sym)
+                    if ws: mark = ws.get_price(sym, coin_id)
+                    if not mark: mark = await get_mid_price(sym, coin_id)
                     if mark:
                         w_perps_upnl += (mark - entry_px) * szi
 
@@ -1289,53 +1544,69 @@ async def cb_pnl(call: CallbackQuery):
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:portfolio")
     kb.adjust(1)
     
-    await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await smart_edit(call, text, reply_markup=kb.as_markup())
 
 @router.callback_query(F.data == "cb_pnl_graph")
 async def cb_pnl_graph(call: CallbackQuery):
     await call.answer("Generating graph...")
+    lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang))
         return
         
-    # Generate for the first wallet for now (or loop/select)
-    # Simple v1: just first wallet
-    wallet = wallets[0]
-    portf = await get_user_portfolio(wallet)
+    # Aggregate history from all wallets
+    aggregated_history = {} # {ts: total_equity}
     
-    if not portf:
-        await call.message.answer("❌ Error fetching history.")
-        return
+    for wallet in wallets:
+        portf = await get_user_portfolio(wallet)
+        if not portf:
+            continue
 
-    history = []
-    # Handle list response: [["day", {...}], ["week", {...}], ...]
-    if isinstance(portf, list):
-        # Prefer "allTime" or "month" or "week", else first
-        target_data = {}
-        for item in portf:
-            if isinstance(item, list) and len(item) == 2:
-                period, p_data = item
-                if period == "allTime":
-                    target_data = p_data
-                    break
-        
-        if not target_data and portf and isinstance(portf[0], list) and len(portf[0]) == 2:
-             target_data = portf[0][1]
-             
-        history = target_data.get("accountValueHistory", [])
-    elif isinstance(portf, dict):
-        # Fallback for old/unexpected dict structure
-        data = portf.get("data", {})
-        history = data.get("accountValueHistory", [])
-    
-    if not history:
+        history_data = []
+        if isinstance(portf, list):
+            target_data = {}
+            for item in portf:
+                if isinstance(item, list) and len(item) == 2:
+                    period, p_data = item
+                    if period == "allTime":
+                        target_data = p_data
+                        break
+            
+            if not target_data and portf and isinstance(portf[0], list) and len(portf[0]) == 2:
+                 target_data = portf[0][1]
+                 
+            history_data = target_data.get("accountValueHistory", [])
+        elif isinstance(portf, dict):
+            data = portf.get("data", {})
+            history_data = data.get("accountValueHistory", [])
+            
+        for ts, equity in history_data:
+            # We use floor to nearest 5 min or hour if needed to align points, 
+            # but usually HL returns same snapshots for all users if it's daily.
+            # If timestamps differ slightly, we might need a better merge.
+            # For now, let's assume they align or we just sum them as is.
+            aggregated_history[ts] = aggregated_history.get(ts, 0.0) + float(equity)
+
+    if not aggregated_history:
         await call.message.answer("📭 No history data for graph.")
         return
         
-    buf = generate_pnl_chart(history, wallet)
+    # Sort and convert back to list of lists
+    sorted_history = [[ts, val] for ts, val in sorted(aggregated_history.items())]
+    
+    label = "Total Portfolio" if len(wallets) > 1 else wallets[0]
+    buf = generate_pnl_chart(sorted_history, label)
+    
     if buf:
         photo = BufferedInputFile(buf.read(), filename="chart.png")
-        await call.message.answer_photo(photo, caption=f"📈 PnL Curve: {wallet}")
+        await call.message.delete()
+        await call.message.answer_photo(
+            photo, 
+            caption=f"📈 PnL Curve: <b>{label}</b>",
+            reply_markup=_back_kb(lang, "cb_pnl"),
+            parse_mode="HTML"
+        )
     else:
         await call.message.answer("❌ Error generating chart.")
 
@@ -1352,12 +1623,14 @@ class CalcStates(StatesGroup):
 
 class MarketAlertStates(StatesGroup):
     waiting_for_time = State()
+    waiting_for_type = State()
 
 @router.callback_query(F.data == "cb_market_alerts")
 async def cb_market_alerts(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     user_settings = await db.get_user_settings(call.message.chat.id)
     alert_times = user_settings.get("market_alert_times", [])
+    ts = time.strftime("%H:%M:%S")
     
     text = f"{_t(lang, 'market_alerts_title')}\n\n{_t(lang, 'market_alerts_msg')}\n\n"
     
@@ -1365,20 +1638,38 @@ async def cb_market_alerts(call: CallbackQuery):
     if not alert_times:
         text += f"<i>{_t(lang, 'no_market_alerts')}</i>"
     else:
-        for t in sorted(alert_times):
-            text += f"⏰ <b>{t} UTC</b>\n"
+        for t_entry in sorted(alert_times, key=lambda x: x["t"] if isinstance(x, dict) else x):
+            if isinstance(t_entry, dict):
+                t = t_entry["t"]
+                is_repeat = t_entry.get("r", True)
+            else:
+                t = t_entry
+                is_repeat = True
+                
+            repeat_label = "🔄" if is_repeat else "📍"
+            text += f"{repeat_label} <b>{t} UTC</b>\n"
             kb.button(text=f"❌ {t}", callback_data=f"del_market_alert:{t}")
     
     kb.button(text=_t(lang, "btn_add_time"), callback_data="cb_add_market_alert_time")
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
     kb.adjust(1)
     
-    await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    text += f"\n\n<i>{repeat_label if alert_times else ''} 🔄 Daily | 📍 Once</i>\n<i>Last update: {ts}</i>"
+    
+    try:
+        await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    except:
+        pass
 
 @router.callback_query(F.data == "cb_add_market_alert_time")
 async def cb_add_market_alert_time(call: CallbackQuery, state: FSMContext):
     lang = await db.get_lang(call.message.chat.id)
-    await call.message.answer(_t(lang, "add_time_prompt"), parse_mode="HTML")
+    await state.update_data(menu_msg_id=call.message.message_id)
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_market_alerts")
+    
+    await call.message.edit_text(_t(lang, "add_time_prompt"), reply_markup=kb.as_markup(), parse_mode="HTML")
     await state.set_state(MarketAlertStates.waiting_for_time)
     await call.answer()
 
@@ -1387,7 +1678,6 @@ async def process_market_alert_time(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
     time_str = message.text.strip()
     
-    # Validate format HH:MM
     try:
         parts = time_str.split(":")
         if len(parts) != 2: raise ValueError
@@ -1398,14 +1688,62 @@ async def process_market_alert_time(message: Message, state: FSMContext):
         await message.answer(_t(lang, "invalid_time"))
         return
 
-    user_settings = await db.get_user_settings(message.chat.id)
+    data = await state.get_data()
+    msg_id = data.get("menu_msg_id")
+    await state.update_data(pending_time=time_str)
+    
+    # Cleanup user message
+    try:
+        await message.delete()
+    except:
+        pass
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Каждый день", callback_data="ma_type:daily")
+    kb.button(text="📍 Один раз", callback_data="ma_type:once")
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_market_alerts")
+    kb.adjust(1)
+    
+    text = f"⏰ Time: <b>{time_str} UTC</b>\n\nВыберите частоту уведомлений:"
+    
+    if msg_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                text=text,
+                reply_markup=kb.as_markup(),
+                parse_mode="HTML"
+            )
+            await state.set_state(MarketAlertStates.waiting_for_type)
+        except:
+            await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+            await state.set_state(MarketAlertStates.waiting_for_type)
+    else:
+        await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+        await state.set_state(MarketAlertStates.waiting_for_type)
+
+@router.callback_query(MarketAlertStates.waiting_for_type, F.data.startswith("ma_type:"))
+async def process_market_alert_type(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_lang(call.message.chat.id)
+    data = await state.get_data()
+    time_str = data.get("pending_time")
+    alert_type = call.data.split(":")[1]
+    is_repeat = (alert_type == "daily")
+    
+    user_settings = await db.get_user_settings(call.message.chat.id)
     alert_times = user_settings.get("market_alert_times", [])
-    if time_str not in alert_times:
-        alert_times.append(time_str)
-        await db.update_user_settings(message.chat.id, {"market_alert_times": alert_times})
-        
+    
+    # Remove existing for this time if any
+    alert_times = [t for t in alert_times if (t["t"] if isinstance(t, dict) else t) != time_str]
+    
+    # Add new
+    alert_times.append({"t": time_str, "r": is_repeat})
+    await db.update_user_settings(call.message.chat.id, {"market_alert_times": alert_times})
+    
     await state.clear()
-    await message.answer(_t(lang, "market_alert_added").format(time=time_str), reply_markup=_back_kb(lang, "cb_market_alerts"), parse_mode="HTML")
+    await call.answer(_t(lang, "market_alert_added").format(time=time_str))
+    await cb_market_alerts(call)
 
 @router.callback_query(F.data.startswith("del_market_alert:"))
 async def cb_del_market_alert(call: CallbackQuery):
@@ -1414,11 +1752,23 @@ async def cb_del_market_alert(call: CallbackQuery):
     
     user_settings = await db.get_user_settings(call.message.chat.id)
     alert_times = user_settings.get("market_alert_times", [])
-    if time_str in alert_times:
-        alert_times.remove(time_str)
-        await db.update_user_settings(call.message.chat.id, {"market_alert_times": alert_times})
+    
+    # Handle both formats during deletion
+    new_times = []
+    found = False
+    for t in alert_times:
+        curr_t = t["t"] if isinstance(t, dict) else t
+        if curr_t == time_str:
+            found = True
+            continue
+        new_times.append(t)
+    
+    if found:
+        await db.update_user_settings(call.message.chat.id, {"market_alert_times": new_times})
+        await call.answer(_t(lang, "market_alert_removed").format(time=time_str))
+    else:
+        await call.answer("🗑️ Alert not found or already removed")
         
-    await call.answer(_t(lang, "market_alert_removed").format(time=time_str))
     await cb_market_alerts(call)
 
 @router.callback_query(F.data == "calc_start")
@@ -1682,7 +2032,7 @@ async def cb_stats(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang), parse_mode="HTML")
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang))
         return
         
     # Aggregate stats
@@ -1730,12 +2080,15 @@ async def cb_whales(call: CallbackQuery):
     
     is_on = user_settings.get("whale_alerts", False)
     threshold = user_settings.get("whale_threshold", 100_000)
+    wl_only = user_settings.get("whale_watchlist_only", False)
     
     status = _t(lang, "whale_alerts_on") if is_on else _t(lang, "whale_alerts_off")
+    wl_status = "👁️ Watchlist Only: ON" if wl_only else "🌐 All Assets"
     
     text = f"{_t(lang, 'whales_title')}\n\n"
     text += _t(lang, "whale_intro") + "\n\n"
     text += f"{status}\n"
+    text += f"{wl_status}\n"
     text += f"Min Value: <b>${pretty_float(threshold, 0)}</b>"
     
     kb = InlineKeyboardBuilder()
@@ -1743,11 +2096,21 @@ async def cb_whales(call: CallbackQuery):
     toggle_txt = _t(lang, "disable") if is_on else _t(lang, "enable")
     kb.button(text=toggle_txt, callback_data=f"toggle_whales:{'off' if is_on else 'on'}")
     
+    wl_toggle_txt = "🔔 Show All Assets" if wl_only else "👁️ Watchlist Only"
+    kb.button(text=wl_toggle_txt, callback_data=f"toggle_whale_wl:{'off' if wl_only else 'on'}")
+    
     kb.button(text="✏️ Threshold", callback_data="set_whale_thr_prompt")
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
     kb.adjust(1)
     
-    await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await smart_edit(call, text, reply_markup=kb.as_markup())
+
+@router.callback_query(F.data.startswith("toggle_whale_wl:"))
+async def cb_toggle_whale_wl(call: CallbackQuery):
+    action = call.data.split(":")[1]
+    is_on = (action == "on")
+    await db.update_user_settings(call.message.chat.id, {"whale_watchlist_only": is_on})
+    await cb_whales(call)
 
 @router.callback_query(F.data.startswith("toggle_whales:"))
 async def cb_toggle_whales(call: CallbackQuery):
@@ -1814,7 +2177,7 @@ async def cb_flex_menu(call: CallbackQuery):
     kb.button(text=_t(lang, "btn_back"), callback_data="cb_settings")
     kb.adjust(2, 2, 1)
     
-    await call.message.edit_text(_t(lang, "flex_title"), reply_markup=kb.as_markup(), parse_mode="HTML")
+    await smart_edit(call, _t(lang, "flex_title"), reply_markup=kb.as_markup())
 
 @router.callback_query(F.data.startswith("cb_flex_gen:"))
 async def cb_flex_gen(call: CallbackQuery):
@@ -1827,6 +2190,22 @@ async def cb_flex_gen(call: CallbackQuery):
     if not wallets:
         await call.message.answer(_t(lang, "need_wallet"))
         return
+
+    # Labels for the card
+    period_labels = {
+        "day": _t(lang, "flex_period_day"),
+        "week": _t(lang, "flex_period_week"),
+        "month": _t(lang, "flex_period_month"),
+        "all": _t(lang, "flex_period_all")
+    }
+    period_label = period_labels.get(period, "Period")
+    
+    wallet_label = "Portfolio"
+    if len(wallets) == 1:
+        w = wallets[0]
+        wallet_label = f"{w[:6]}...{w[-4:]}"
+    elif len(wallets) > 1:
+        wallet_label = f"{len(wallets)} Wallets"
 
     # Calculate global PnL for the period
     total_period_pnl = 0.0
@@ -1930,14 +2309,22 @@ async def cb_flex_gen(call: CallbackQuery):
     
     is_positive = pnl_val >= 0
     
-    # Label
-    p_label = _t(lang, f"flex_period_{period}")
-    w_label = "Net Worth" if len(wallets) > 1 else f"Wallet {wallets[0][:4]}"
+    # Generate for the first wallet for now (or loop/select)
+    from bot.analytics import prepare_account_flex_data
+    from bot.renderer import render_html_to_image
     
-    buf = generate_flex_pnl_card(pnl_val, pnl_pct, p_label, is_positive, w_label)
+    flex_data = prepare_account_flex_data(pnl_val, pnl_pct, period_label, is_positive, wallet_label)
     
-    if buf:
-        photo = BufferedInputFile(buf.read(), filename="flex_pnl.png")
-        await call.message.answer_photo(photo)
-    else:
-        await call.message.answer(_t(lang, "flex_gen_error"))
+    try:
+        buf = await render_html_to_image("account_flex.html", flex_data)
+        photo = BufferedInputFile(buf.read(), filename="equity_flex.png")
+        await call.message.delete()
+        await call.message.answer_photo(
+            photo, 
+            caption=f"📊 <b>{period_label} Account Summary</b>", 
+            reply_markup=_back_kb(lang, "cb_flex_menu"),
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error rendering account flex: {e}")
+        await call.message.answer("❌ Error generating image.")

@@ -13,6 +13,17 @@ class Database:
         self.watchlist = self.db.watchlist
         self.alerts = self.db.alerts  # New collection for price alerts
 
+    async def init_db(self):
+        """Initialize database indexes for performance and integrity."""
+        # Unique index for fills to avoid duplicates
+        await self.fills.create_index([("oid", 1)], unique=True)
+        # Indexes for frequent lookups
+        await self.wallets.create_index([("address", 1)])
+        await self.wallets.create_index([("user_id", 1)])
+        await self.users.create_index([("user_id", 1)], unique=True)
+        await self.alerts.create_index([("user_id", 1)])
+        await self.alerts.create_index([("symbol", 1)])
+
     async def add_user(self, user_id, wallet_address=None):
         existing = await self.users.find_one({"user_id": user_id})
         if not existing:
@@ -145,19 +156,33 @@ class Database:
         return await cursor.to_list(length=None)
         
     # --- ALERTS ---
-    async def add_price_alert(self, user_id: int, symbol: str, price: float, direction: str):
-        """
-        direction: 'above' or 'below'
-        """
-        await self.alerts.insert_one({
-            "user_id": user_id,
-            "symbol": symbol.upper(),
-            "price": price,
-            "direction": direction,
-            "created_at": time.time()
-        })
-        
-    async def get_user_alerts(self, user_id: int):
+        async def add_alert(self, user_id: int, symbol: str, target: float, direction: str, alert_type: str = "price"):
+            """
+            alert_type: 'price', 'funding', 'oi'
+            direction: 'above', 'below'
+            """
+            await self.alerts.insert_one({
+                "user_id": user_id,
+                "symbol": symbol.upper(),
+                "target": target,
+                "direction": direction,
+                "type": alert_type,
+                "created_at": time.time()
+            })
+    
+        async def get_known_assets(self):
+            doc = await self.db.internal_state.find_one({"key": "known_assets"})
+            return set(doc.get("list", [])) if doc else set()
+    
+        async def update_known_assets(self, assets_list):
+            await self.db.internal_state.update_one(
+                {"key": "known_assets"},
+                {"$set": {"list": list(assets_list)}},
+                upsert=True
+            )
+    
+        async def delete_alert(self, alert_id: str):
+    
         cursor = self.alerts.find({"user_id": user_id})
         return await cursor.to_list(length=None)
         
@@ -167,9 +192,16 @@ class Database:
         
     async def delete_alert(self, alert_id: str):
         try:
-            await self.alerts.delete_one({"_id": ObjectId(alert_id)})
-        except:
-            pass
+            if not alert_id: return False
+            oid = ObjectId(alert_id) if isinstance(alert_id, str) else alert_id
+            res = await self.alerts.delete_one({"_id": oid})
+            return res.deleted_count > 0
+        except Exception as e:
+            # You can add logging here if needed
+            return False
+
+    async def delete_all_user_alerts(self, user_id: int):
+        await self.alerts.delete_many({"user_id": user_id})
 
     # --- USER SETTINGS ---
     async def update_user_settings(self, user_id, settings_dict):

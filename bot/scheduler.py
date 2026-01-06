@@ -1,14 +1,17 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.database import db
-from bot.services import get_spot_balances, get_user_portfolio, pretty_float, get_perps_context, get_hlp_info
-from bot.analytics import generate_market_report_card, generate_alpha_dashboard, generate_ecosystem_dashboard
-from bot.locales import _t
-from bot.config import settings
-from aiogram.types import BufferedInputFile, InputMediaPhoto
-import time
-import logging
+from bot.services import (
+    get_spot_balances, get_user_portfolio, pretty_float, get_perps_context, 
+    get_hlp_info, _is_buy, calc_avg_entry_from_fills
+)
+from bot.analytics import prepare_modern_market_data
+from bot.renderer import render_html_to_image
 import datetime
 import asyncio
+import logging
+import time
+from aiogram.types import BufferedInputFile, InputMediaPhoto
+from bot.locales import _t
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +24,36 @@ async def send_market_reports(bot):
     
     for user in users:
         alert_times = user.get("market_alert_times", [])
-        if now_utc in alert_times:
+        should_send = False
+        new_alert_times = []
+        modified = False
+        
+        for t_entry in alert_times:
+            if isinstance(t_entry, dict):
+                t = t_entry["t"]
+                is_repeat = t_entry.get("r", True)
+            else:
+                t = t_entry
+                is_repeat = True
+            
+            if t == now_utc:
+                should_send = True
+                if not is_repeat:
+                    modified = True
+                    continue # Don't keep in list if one-time
+            
+            new_alert_times.append(t_entry)
+            
+        if should_send:
             users_to_alert.append(user)
+            if modified:
+                # Update DB to remove one-time alert
+                await db.update_user_settings(user["user_id"], {"market_alert_times": new_alert_times})
             
     if not users_to_alert:
         return
         
-    logger.info(f"Sending market reports to {len(users_to_alert)} users for {now_utc} UTC")
+    logger.info(f"Sending modern market reports to {len(users_to_alert)} users for {now_utc} UTC")
     
     # Fetch market data once
     ctx, hlp_info = await asyncio.gather(
@@ -51,35 +77,69 @@ async def send_market_reports(bot):
         
     asset_ctxs = ctx[1]
     
-    # Generate images once
-    buf1 = generate_market_report_card(asset_ctxs, universe)
-    buf2 = generate_alpha_dashboard(asset_ctxs, universe)
-    buf3 = generate_ecosystem_dashboard(asset_ctxs, universe, hlp_info)
+    # Prepare data for new templates
+    from bot.analytics import prepare_liquidity_data
+    data_alpha = prepare_modern_market_data(asset_ctxs, universe, hlp_info)
+    data_liq = prepare_liquidity_data(asset_ctxs, universe)
     
-    if not buf1 or not buf2 or not buf3:
-        logger.error("Failed to generate market dashboard images")
+    if not data_alpha:
+        logger.error("Failed to prepare market data")
         return
+
+    # Render images
+    try:
+        buf_alpha = await render_html_to_image("market_stats.html", data_alpha)
+        buf_liq = await render_html_to_image("liquidity_stats.html", data_liq)
+        buf_heat = await render_html_to_image("funding_heatmap.html", data_alpha)
         
-    img_data1 = buf1.read()
-    img_data2 = buf2.read()
-    img_data3 = buf3.read()
+        img_alpha = buf_alpha.read()
+        img_liq = buf_liq.read()
+        img_heat = buf_heat.read()
+    except Exception as e:
+        logger.error(f"Failed to render market images: {e}")
+        return
     
     for user in users_to_alert:
         chat_id = user["user_id"]
         lang = user.get("lang", "en")
         
-        # Prepare caption
-        caption = f"📊 <b>{_t(lang, 'market_alerts_title')} ({now_utc} UTC)</b>"
+        # Build beautiful text report
+        text_report = (
+            f"📊 <b>{_t(lang, 'market_alerts_title')}</b>\n\n"
+            f"{_t(lang, 'market_report_global')}:\n"
+            f"• {_t(lang, 'market_report_vol')}: <b>${data_alpha['global_volume']}</b>\n"
+            f"• {_t(lang, 'market_report_oi')}: <b>${data_alpha['total_oi']}</b>\n"
+            f"• {_t(lang, 'market_report_sentiment')}: <b>{data_alpha['sentiment_label']}</b>\n\n"
+            f"{_t(lang, 'market_report_top_gainers')}:\n"
+        )
+        
+        for asset in data_alpha['gainers'][:3]:
+            text_report += f"• <b>{asset['name']}</b>: ${asset['price']} (<code>{asset['change']:+.2f}%</code>)\n"
+            
+        text_report += f"\n{_t(lang, 'market_report_top_losers')}:\n"
+        for asset in data_alpha['losers'][:3]:
+            text_report += f"• <b>{asset['name']}</b>: ${asset['price']} (<code>{asset['change']:+.2f}%</code>)\n"
+
+        text_report += f"\n{_t(lang, 'market_report_efficiency')}:\n"
+        for asset in data_alpha['efficiency'][:3]:
+            text_report += f"• {asset['name']}: <code>{asset['ratio']:.1f}x</code>\n"
+
+        text_report += f"\n{_t(lang, 'market_report_funding')}:\n"
+        high_f = sorted(data_alpha['funding_map'], key=lambda x: x['apr'], reverse=True)[:3]
+        for f in high_f:
+            text_report += f"• {f['name']}: <code>{f['apr']:+.1f}%</code> APR\n"
+            
+        text_report += f"\n{_t(lang, 'market_report_footer', time=now_utc + ' UTC')}"
         
         try:
             media = [
-                InputMediaPhoto(media=BufferedInputFile(img_data1, filename="market_overview.png"), caption=caption, parse_mode="HTML"),
-                InputMediaPhoto(media=BufferedInputFile(img_data2, filename="alpha_sentiment.png")),
-                InputMediaPhoto(media=BufferedInputFile(img_data3, filename="ecosystem_liquidity.png"))
+                InputMediaPhoto(media=BufferedInputFile(img_heat, filename="heatmap.png"), caption=text_report, parse_mode="HTML"),
+                InputMediaPhoto(media=BufferedInputFile(img_alpha, filename="alpha.png")),
+                InputMediaPhoto(media=BufferedInputFile(img_liq, filename="liquidity.png"))
             ]
             await bot.send_media_group(chat_id, media)
         except Exception as e:
-            logger.error(f"Failed to send market report to {chat_id}: {e}")
+            logger.error(f"Failed to send market media group to {chat_id}: {e}")
 
 def _is_buy(side: str) -> bool:
     s = (side or "").lower()
@@ -251,7 +311,7 @@ async def send_weekly_summary(bot):
                 avg_entry = 0.0
                 try:
                     coin_fills = await db.get_fills_by_coin(wallet, coin)
-                    avg_entry = _calc_coin_avg_entry_from_fills(coin_fills)
+                    avg_entry = calc_avg_entry_from_fills(coin_fills)
                 except Exception:
                     avg_entry = 0.0
 

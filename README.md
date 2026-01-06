@@ -1,116 +1,115 @@
-# ⚡ Velox: Hyperliquid Wallet Watcher & Analytics Terminal
+# ⚡ Velox: Institutional-Grade Hyperliquid Terminal
 
-**Velox** is an institutional-grade Telegram bot designed for real-time monitoring, portfolio analytics, and market intelligence on the Hyperliquid L1 (Spot & Perpetuals). It transforms raw blockchain data into actionable insights through a sleek, visual-first interface.
+**Velox** is a high-performance Telegram terminal designed for professional traders on the **Hyperliquid L1**. It transforms complex blockchain data into beautiful, actionable visual intelligence. 
+
+Beyond simple wallet tracking, Velox provides a suite of tools for portfolio analytics, market sentiment monitoring, and automated risk management.
 
 ---
 
 ## 🚀 Key Features
 
-### 1. 🛡️ Real-Time Wallet Sentinel
-*   **Multi-Wallet Tracking**: Monitor an unlimited number of wallets with custom tags and individual notification thresholds.
-*   **Instant Fill Alerts**: Real-time notifications for trades (Spot/Perps) including realized PnL and fee tracking.
-*   **Liquidation Watch**: Immediate alerts for account liquidations and margin ratio warnings (alerts at >80% margin usage).
-*   **Proximity Alerts**: Never miss a fill. Velox notifies you when the market price approaches your open limit orders (customizable USD and percentage thresholds).
+### 1. 🛡️ Advanced Wallet Sentinel
+*   **Omni-Channel Tracking**: Monitor multiple wallets simultaneously (Spot, Perpetuals, and HLP Vaults).
+*   **Smart Notifications**: Custom filters to ignore "noise" (set USD thresholds for alerts).
+*   **Real-time Fills**: Instant trade notifications with calculated realized PnL and fee tracking.
+*   **Vault Analytics**: Automatic tracking of HLP and other vault equity performance.
+*   **Proximity Alerts**: Get notified when market price approaches your open limit orders (customizable % distance).
 
-### 2. 📊 Visual Performance Analytics
-*   **Equity Curves**: Dynamic generation of performance graphs showing account value history directly in Telegram.
-*   **Flex PnL Cards**: Generate stylized, shareable ROI cards (Day/Week/Month/All-time) inspired by top-tier exchange UIs.
-*   **Trade Statistics**: Comprehensive breakdown of Win Rate, Profit Factor, Gross Profit/Loss, and Net PnL.
-*   **Data Export**: Export your entire trade history and equity data to CSV for external analysis.
+### 2. 📊 Visual Intelligence (Playwright-Powered)
+*   **Flex PnL Cards**: Generate sleek, exchange-style ROI cards for your winning trades.
+*   **Portfolio Composition**: High-quality visual breakdown of your assets across Spot and Perps.
+*   **Equity Curves**: Dynamic performance graphs showing account value history.
+*   **Market Dashboards**: Professional-grade visual reports including:
+    *   **Alpha & Sentiment**: Funding Rates (APR), Basis (Premium/Discount), and Leverage Density.
+    *   **Liquidity & Depth**: Market Depth, Slippage monitoring, and Open Interest trends.
+    *   **Funding Heatmaps**: Color-coded tables for instant market sentiment analysis.
 
-### 3. 🌊 Market Intelligence
-*   **Whale Watcher**: Live feed of institutional-sized trades ($50k+) for high-volume assets.
-*   **Volatility Alerts**: Real-time monitoring of significant price moves (e.g., ±2% within 5 minutes) for your custom watchlist.
-*   **Scheduled Market Dashboards**: Automated delivery of professional-grade market reports at user-defined times. Reports include three distinct visual dashboards:
-    1.  **Market Overview**: Prices, Volume, Gainers/Losers, and Open Interest.
-    2.  **Alpha & Sentiment**: Funding Rates (High/Low), Basis (Premium/Discount), and Leverage Density.
-    3.  **Ecosystem & Liquidity**: Market Depth (Slippage), Capital Efficiency, and HLP Vault performance.
-*   **Market Heatmaps**: Visual tables summarizing Funding Rates (APR), Open Interest, and 24h Volume across the Hyperliquid ecosystem.
-*   **Custom Price Alerts**: User-defined "Above/Below" alerts with persistent monitoring.
+### 3. ⏰ Automated Market Intelligence
+*   **Scheduled Reports**: Set custom UTC times to receive full market dashboards automatically.
+*   **Whale Watcher**: Live monitoring of institutional-sized trades ($50k+).
+*   **Volatility Sentinel**: Real-time alerts for significant price moves (e.g., ±2% in 5 mins) on your watchlist.
+*   **Triple-Layer Alerts**:
+    1.  **Price Alerts**: Traditional Above/Below targets.
+    2.  **Funding Alerts**: Alert when APR exceeds/drops below specific thresholds.
+    3.  **OI Alerts**: Monitor Open Interest spikes for potential volatility.
 
-### 4. 🛠️ Advanced Trading Tools
-*   **Professional Calculator**: Sophisticated risk management tool for Spot and Perps. Calculates position size, leverage, liquidation price, fees, and R:R ratios.
-*   **Inline Price Search**: Access real-time asset prices in any Telegram chat by typing `@your_bot_name SYMBOL`.
-*   **Automated Summaries**: Daily digests and weekly performance reports delivered straight to your DM.
+### 4. 🛠️ Professional Trading Suite
+*   **Risk Calculator**: Institutional-grade calculator for Spot/Perps. Computes position sizing based on risk-per-trade, SL/TP levels, R:R ratio, and estimated liquidation prices.
+*   **Data Terminal**: Export your entire trade history and equity data to CSV/Excel for external audits.
+*   **Inline Terminal**: Instant price checks in any chat using `@your_bot_name SYMBOL`.
+*   **Multilingual Support**: Fully localized in 🇬🇧 English and 🇷🇺 Russian.
 
 ---
 
 ## 🛠️ Tech Stack
 
--   **Backend**: Python 3.10+ (Asynchronous event-driven architecture).
--   **Framework**: `aiogram 3.x` for the Telegram Bot interface.
--   **Real-time Data**: High-performance `websockets` integration with Hyperliquid L1.
--   **Database**: `MongoDB` with `Motor` (async driver) for persistent storage of trades and user settings.
--   **Data Vis**: `Matplotlib` & `Pandas` for dynamic image rendering and financial calculations.
--   **Configuration**: `Pydantic Settings` for robust environment management.
--   **Scheduling**: `APScheduler` for automated reports and background tasks.
+-   **Runtime**: Python 3.10+ (Asynchronous / `asyncio`)
+-   **Telegram Engine**: `aiogram 3.x` (State-of-the-art framework)
+-   **Rendering Engine**: `Playwright` + `Jinja2` + `TailwindCSS` (HTML-to-Image rendering)
+-   **Database**: `MongoDB` + `Motor` (Async persistence)
+-   **Analytics**: `Pandas`, `Matplotlib`, `NumPy`
+-   **Task Engine**: `APScheduler`
+-   **L1 Connectivity**: High-speed `WebSockets` + REST API
 
 ---
 
-## 📦 Installation & Setup
+## 📦 Quick Start
 
-### Docker (Recommended)
-The easiest way to deploy Velox is using Docker Compose.
+### 🐳 Docker Deployment (Recommended)
+```bash
+# Clone the terminal
+git clone https://github.com/qzbxw/velox.git && cd velox
 
-1.  **Clone the repository**:
-    ```bash
-    git clone https://github.com/qzbxw/velox.git
-    cd velox
-    ```
+# Set up credentials
+cp .env.example .env
+# Edit .env with your BOT_TOKEN and MONGO_URI
 
-2.  **Configure environment**:
-    ```bash
-    cp .env.example .env
-    # Edit .env with your BOT_TOKEN and MONGO_URI
-    ```
+# Launch
+docker-compose up -d --build
+```
 
-3.  **Launch**:
-    ```bash
-    docker-compose up -d --build
-    ```
-
-### Local Development
-1.  **Install dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-2.  **Run the bot**:
-    ```bash
-    python -m bot.main
-    ```
+### 🐍 Manual Setup
+1. **Install Chromium for Rendering**:
+   ```bash
+   pip install -r requirements.txt
+   playwright install chromium
+   ```
+2. **Launch**:
+   ```bash
+   python -m bot.main
+   ```
 
 ---
 
-## 🎮 Commands Overview
+## 🎮 Command Interface
 
-| Command | Description |
+| Command | Action |
 | :--- | :--- |
-| `/start` | Open the main interactive menu |
-| `/add_wallet <0x...>` | Start tracking a new wallet |
-| `/tag <0x...> <Name>` | Assign a human-readable name to a wallet |
-| `/threshold <0x...> <USD>` | Set minimum trade size for notifications |
-| `/alert <SYM> <Price>` | Set a custom price alert |
-| `/watch <SYM>` | Add symbol to volatility watchlist |
-| `/set_whale <USD>` | Set minimum threshold for whale alerts |
-| `/export` | Get CSV export of trades and equity |
+| `/start` | Open the interactive Main Menu |
+| `/add_wallet <0x...>` | Register a new wallet for tracking |
+| `/tag <0x...> <Name>` | Assign a custom name to a wallet |
+| `/threshold <0x...> <$>` | Filter out small trade notifications |
+| `/alert <SYM> <Price>` | Set a custom price target |
+| `/f_alert <SYM> <APR>` | Alert on Funding Rate changes |
+| `/oi_alert <SYM> <$M>` | Alert on Open Interest (in millions) |
+| `/watch <SYM>` | Add asset to real-time Volatility Watchlist |
+| `/set_vol <%>` | Set custom volatility notification % |
+| `/export` | Download trade history & equity CSV |
 
 ---
 
 ## 📐 Architecture
 
-Velox is built with scalability and reliability in mind:
--   **`WSManager`**: A central engine managing real-time subscriptions and debouncing alerts to prevent spam.
--   **`Analytics Engine`**: Decoupled logic for financial calculations and image rendering.
--   **`Stateful Handlers`**: FSM-based interaction flow for complex operations like the risk calculator.
--   **`Service Layer`**: Abstraction over the Hyperliquid REST API for data consistency.
+Velox is built on a decoupled, event-driven architecture:
+*   **`WSManager`**: Handles thousands of concurrent events from Hyperliquid L1 with built-in debouncing.
+*   **`Renderer`**: A dedicated rendering pipeline using a headless browser to ensure pixel-perfect financial visuals.
+*   **`Service Layer`**: Abstracted API logic ensuring high reliability and failover protection.
+*   **`Database`**: Schema-less storage optimized for high-frequency trade logging.
 
 ---
 
 ## 📄 License
-
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License**.
 
 ---
-
-*Developed for traders who demand precision and speed.*
+*Built for traders who demand more than just a bot.*

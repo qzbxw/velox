@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&family=JetBrains+Mono:wght@700&display=swap');
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            margin: 0; padding: 0; width: 800px; height: 800px;
+            background-color: #05070a; color: white;
+            display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        .main-card {
+            width: 800px; height: 800px;
+            background: radial-gradient(circle at 50% 50%, #0f172a 0%, #05070a 100%);
+            position: relative; padding: 50px;
+            display: flex; flex-direction: column;
+            border: 1px solid #1e293b;
+        }
+        .orb {
+            position: absolute; width: 600px; height: 600px; border-radius: 50%;
+            background: #6366f1;
+            filter: blur(140px); opacity: 0.1; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .label { color: #64748b; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 3px; }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 30px; padding: 30px;
+        }
+        .asset-row {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 15px 0;
+        }
+        .asset-row:last-child { border-bottom: none; }
+        .progress-bg { background: rgba(255, 255, 255, 0.05); height: 8px; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+        .progress-fill { height: 100%; border-radius: 4px; background: linear-gradient(90deg, #6366f1 0%, #a855f7 100%); }
+    </style>
+</head>
+<body>
+    <div class="main-card">
+        <div class="orb"></div>
+        <div class="relative z-10 flex flex-col h-full">
+            <div class="flex justify-between items-start mb-10">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shadow-[0_0_30px_rgba(79,70,229,0.3)]">
+                        <span class="text-2xl font-black">V</span>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-black tracking-tighter uppercase">Velox <span class="text-indigo-500">Terminal</span></h1>
+                        <p class="text-slate-500 font-bold text-[8px] tracking-[0.4em] uppercase">Institutional Intelligence</p>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="label mb-1">Total Value</div>
+                    <div class="text-2xl font-black text-white mono tracking-tighter">${{ total_value }}</div>
+                </div>
+            </div>
+
+            <div class="label mb-6">Portfolio Composition</div>
+            
+            <div class="glass-panel flex-1 overflow-hidden mb-8">
+                <div class="flex flex-col h-full">
+                    {% for asset in assets %}
+                    <div class="asset-row">
+                        <div class="flex justify-between items-end mb-1">
+                            <div class="flex items-center gap-3">
+                                <span class="text-xl font-bold text-slate-100">{{ asset.name }}</span>
+                                <span class="text-sm font-bold text-slate-500 mono">{{ asset.percentage }}%</span>
+                            </div>
+                            <div class="text-lg font-bold text-slate-300 mono">${{ asset.value }}</div>
+                        </div>
+                        <div class="progress-bg">
+                            <div class="progress-fill" style="width: {{ asset.percentage }}%"></div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="mt-auto flex justify-between items-end">
+                <div class="glass-panel py-4 px-8 flex gap-10">
+                    <div>
+                        <div class="label mb-1" style="font-size: 10px;">Network</div>
+                        <div class="text-base font-bold text-slate-200">Hyperliquid L1</div>
+                    </div>
+                    <div>
+                        <div class="label mb-1" style="font-size: 10px;">Last Updated</div>
+                        <div class="text-base font-bold text-slate-200 mono">{{ date }}</div>
+                    </div>
+                </div>
+                <div class="text-right pb-2">
+                    <div class="text-indigo-400 font-black text-xl tracking-tighter uppercase">Portfolio Insights</div>
+                    <div class="text-[9px] text-slate-500 font-bold mt-1 uppercase tracking-widest">t.me/veloxhlbot</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

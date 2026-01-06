@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&family=JetBrains+Mono:wght@700&display=swap');
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            margin: 0; padding: 0; width: 800px; height: 800px;
+            background-color: #05070a; color: white;
+            display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        .container {
+            width: 800px; height: 800px; position: relative;
+            background: radial-gradient(circle at 0% 0%, {{ '#0ecb8115' if is_positive else '#f6465d15' }} 0%, transparent 50%),
+                        radial-gradient(circle at 100% 100%, #6366f111 0%, transparent 50%);
+            display: flex; flex-direction: column; padding: 60px; border: 1px solid #ffffff08;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 24px; padding: 30px;
+        }
+        .roi-value {
+            font-family: 'JetBrains Mono', monospace; font-size: 140px; line-height: 0.9;
+            font-weight: 800; letter-spacing: -6px;
+            background: {{ 'linear-gradient(to bottom, #0ecb81, #059669)' if is_positive else 'linear-gradient(to bottom, #f6465d, #dc2626)' }};
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 10px 20px {{ '#0ecb8122' if is_positive else '#f6465d22' }});
+        }
+        .token-badge {
+            background: {{ '#0ecb8122' if is_positive else '#f6465d22' }};
+            color: {{ '#0ecb81' if is_positive else '#f6465d' }};
+            border: 1px solid {{ '#0ecb8144' if is_positive else '#f6465d44' }};
+            padding: 8px 16px; border-radius: 100px; font-weight: 800; font-size: 16px; text-transform: uppercase;
+        }
+        .label { color: #64748b; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 3px; margin-bottom: 5px; }
+        .stat-value { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="flex justify-between items-start mb-16">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center">
+                    <span class="text-2xl font-black">V</span>
+                </div>
+                <div>
+                    <div class="text-2xl font-black tracking-tighter uppercase leading-none">VELOX<span class="text-indigo-400">HL</span></div>
+                    <div class="text-[8px] text-slate-500 font-bold tracking-[0.3em] uppercase mt-1">Wallet Sentinel</div>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <div class="token-badge">{{ side }} {{ leverage }}X</div>
+                <div class="token-badge" style="background: #ffffff08; color: white; border-color: #ffffff11;">{{ symbol }}</div>
+            </div>
+        </div>
+        <div class="flex-1 flex flex-col justify-center">
+            <div class="label">Return on Investment</div>
+            <div class="roi-value">{{ roi }}%</div>
+            <div class="flex items-baseline gap-4 mt-4">
+                <div class="text-4xl font-bold mono {{ 'text-emerald-400' if is_positive else 'text-rose-400' }}">
+                    {{ '+' if is_positive else '' }}${{ pnl }}
+                </div>
+                <div class="text-slate-500 text-base font-bold uppercase tracking-[0.2em]">Net Profit</div>
+            </div>
+        </div>
+        <div class="glass grid grid-cols-2 gap-8 mt-auto">
+            <div>
+                <div class="label">Entry Price</div>
+                <div class="stat-value text-slate-200">${{ entry_price }}</div>
+            </div>
+            <div class="text-right">
+                <div class="label">Mark Price</div>
+                <div class="stat-value text-slate-200">${{ mark_price }}</div>
+            </div>
+        </div>
+        <div class="mt-8 text-center">
+            <div class="text-[9px] text-slate-600 font-bold tracking-[0.5em] uppercase">Velox Terminal • t.me/veloxhlbot</div>
+        </div>
+    </div>
+</body>
+</html>

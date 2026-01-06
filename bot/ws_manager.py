@@ -9,7 +9,10 @@ from collections import deque
 from bot.config import settings
 from bot.database import db
 from bot.locales import _t
-from bot.services import get_open_orders, get_spot_meta, normalize_spot_coin, pretty_float, get_symbol_name, get_perps_context
+from bot.services import get_open_orders, get_spot_meta, normalize_spot_coin, pretty_float, get_symbol_name, get_perps_context, get_hlp_info
+from bot.renderer import render_html_to_image
+from bot.analytics import prepare_modern_market_data, prepare_liquidity_data
+from aiogram.types import BufferedInputFile, InputMediaPhoto
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,10 @@ class WSManager:
         self.ping_task = None
         self.alerts_refresh_task = None
         self.whale_task = None
+        self.listing_check_task = None
+        
+        # Market Stats for Alerts
+        self.asset_ctx_cache = {} # sym -> ctx data
         
         # Whale Watcher
         self.top_assets = set()
@@ -58,6 +65,7 @@ class WSManager:
         # Start background tasks
         self.alerts_refresh_task = asyncio.create_task(self._refresh_alerts_loop())
         self.whale_task = asyncio.create_task(self._whale_assets_loop())
+        self.listing_check_task = asyncio.create_task(self._listing_monitor_loop())
         
         while self.running:
             try:
@@ -73,19 +81,31 @@ class WSManager:
                     # Load and subscribe users
                     users = await db.get_all_users()
                     for user in users:
+                        # Legacy primary wallet
                         wallet = user.get("wallet_address")
                         if wallet:
                             self.track_wallet(wallet)
                             await self._seed_open_orders(wallet)
                             await self.subscribe_user(wallet)
+                            await asyncio.sleep(0.05) # Small delay to prevent rate limit
 
-                        chat_id = user.get("chat_id")
+                        chat_id = user.get("chat_id") or user.get("user_id")
                         if chat_id:
                             wl = user.get("watchlist")
                             if isinstance(wl, list):
                                 for sym in wl:
                                     if isinstance(sym, str) and sym:
                                         self.watch_subscribers[sym.upper()].add(chat_id)
+                    
+                    # Also load from dedicated wallets collection
+                    cursor = db.wallets.find({})
+                    async for w_doc in cursor:
+                        wallet = w_doc.get("address")
+                        if wallet:
+                            self.track_wallet(wallet)
+                            await self._seed_open_orders(wallet)
+                            await self.subscribe_user(wallet)
+                            await asyncio.sleep(0.05)
                             
                     # Start Ping loop
                     self.ping_task = asyncio.create_task(self._ping_loop())
@@ -179,15 +199,23 @@ class WSManager:
             side_txt = "BUY" if side == "B" else "SELL"
             
             for u in whale_users:
+                user_id = u.get("user_id")
                 # Check user specific threshold if any
                 thr = u.get("whale_threshold", 100_000)
-                if val >= thr:
-                    try:
-                        lang = u.get("lang", "ru")
-                        msg = _t(lang, "whale_alert") + "\n" + _t(lang, "whale_msg", icon=icon, side=side_txt, symbol=sym, val=pretty_float(val, 0), price=pretty_float(px))
-                        await self.bot.send_message(u["user_id"], msg, parse_mode="HTML")
-                    except:
-                        pass
+                if val < thr: continue
+
+                # Watchlist filter
+                if u.get("whale_watchlist_only"):
+                    watchlist = await db.get_watchlist(user_id)
+                    if sym not in watchlist:
+                        continue
+                    
+                try:
+                    lang = u.get("lang", "ru")
+                    msg = _t(lang, "whale_alert") + "\n" + _t(lang, "whale_msg", icon=icon, side=side_txt, symbol=sym, val=pretty_float(val, 0), price=pretty_float(px))
+                    await self.bot.send_message(user_id, msg, parse_mode="HTML")
+                except:
+                    pass
 
 
     async def _load_universe(self):
@@ -261,14 +289,22 @@ class WSManager:
                 logger.error(f"Error refreshing alerts: {e}")
             await asyncio.sleep(10)
 
-    def get_price(self, coin: str) -> float:
+    def get_price(self, coin: str, original_id: str | None = None) -> float:
         if not coin:
             return 0.0
         if coin == "USDC":
             return 1.0
+            
+        # 1. Try original ID (e.g. "@156")
+        if original_id and str(original_id) in self.mid_prices:
+            return float(self.mid_prices[str(original_id)])
+
+        # 2. Try coin name as is
         px = self.mid_prices.get(coin)
         if px is not None:
             return float(px)
+            
+        # 3. Handle U-prefix (internal name often has U)
         if coin.startswith("U") and len(coin) > 1:
             px = self.mid_prices.get(coin[1:])
             if px is not None:
@@ -381,17 +417,65 @@ class WSManager:
         }))
 
     async def handle_message(self, data):
+        # logger.debug(f"WS Message: {data}")
         channel = data.get("channel")
+        msg_data = data.get("data", {})
+        
         if channel == "allMids":
-            await self.handle_mids(data.get("data", {}).get("mids", {}))
+            await self.handle_mids(msg_data.get("mids", {}))
         elif channel == "userFills":
-            await self.handle_fills(data.get("data", {}))
+            await self.handle_fills(msg_data)
         elif channel == "openOrders":
-            await self.handle_open_orders(data.get("data", []))
+            await self.handle_open_orders(msg_data)
         elif channel == "webData2":
-            await self.handle_web_data2(data.get("data", {}))
+            await self.handle_web_data2(msg_data)
         elif channel == "trades":
             await self.handle_trades(data)
+
+    async def _listing_monitor_loop(self):
+        """Periodically check for new assets in the universe."""
+        while self.running:
+            try:
+                from bot.services import get_all_assets_meta
+                meta = await get_all_assets_meta()
+                
+                current_assets = set()
+                if meta["spot"]:
+                    for u in meta["spot"].get("universe", []): current_assets.add(u["name"])
+                if meta["perps"]:
+                    for u in meta["perps"].get("universe", []): current_assets.add(u["name"])
+                
+                if not current_assets:
+                    await asyncio.sleep(300)
+                    continue
+
+                known = await db.get_known_assets()
+                if not known:
+                    # First run, just save current
+                    await db.update_known_assets(current_assets)
+                else:
+                    new_assets = current_assets - known
+                    if new_assets:
+                        logger.info(f"New assets detected: {new_assets}")
+                        await self._broadcast_listing(new_assets)
+                        await db.update_known_assets(current_assets)
+                        # Refresh local universe for other logic
+                        self.all_coins |= new_assets
+                        
+            except Exception as e:
+                logger.error(f"Listing monitor error: {e}")
+            await asyncio.sleep(600) # Check every 10 min
+
+    async def _broadcast_listing(self, new_assets):
+        users = await db.get_all_users()
+        for sym in new_assets:
+            for u in users:
+                try:
+                    lang = u.get("lang", "ru")
+                    msg = _t(lang, "new_listing_msg", sym=sym)
+                    await self.bot.send_message(u["user_id"], msg, parse_mode="HTML")
+                    await asyncio.sleep(0.05)
+                except: pass
 
     async def handle_mids(self, mids):
         for coin, price in mids.items():
@@ -400,7 +484,66 @@ class WSManager:
         self.last_mids_update_ts = time.time()
         await self._update_market_history_and_alerts()
         await self.check_proximity()
-        await self._check_custom_alerts() # Check user defined alerts
+        await self._check_custom_alerts() 
+        
+        # Periodically refresh asset context for Funding/OI alerts
+        if time.time() - getattr(self, "_last_ctx_refresh", 0) > 60:
+            asyncio.create_task(self._check_market_stats_alerts())
+            self._last_ctx_refresh = time.time()
+
+    async def _check_market_stats_alerts(self):
+        """Check funding and OI alerts using metaAndAssetCtxs."""
+        ctx = await get_perps_context()
+        if not ctx or not isinstance(ctx, list) or len(ctx) != 2: return
+        
+        universe = ctx[0].get("universe", [])
+        asset_ctxs = ctx[1]
+        
+        for alert in self.active_alerts:
+            a_type = alert.get("type", "price")
+            if a_type not in ("funding", "oi"): continue
+            
+            aid = str(alert["_id"])
+            if aid in self.triggered_alerts: continue
+            
+            sym = alert["symbol"]
+            target = alert["target"]
+            direction = alert["direction"]
+            user_id = alert["user_id"]
+            
+            # Find data
+            idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
+            if idx == -1 or idx >= len(asset_ctxs): continue
+            
+            data = asset_ctxs[idx]
+            current_val = 0.0
+            
+            if a_type == "funding":
+                current_val = float(data.get("funding", 0)) * 24 * 365 * 100 # APR
+            else: # oi
+                current_val = float(data.get("openInterest", 0)) * float(data.get("markPx", 1)) / 1e6 # $M
+                
+            triggered = (direction == "above" and current_val >= target) or \
+                        (direction == "below" and current_val <= target)
+            
+            if triggered:
+                self.triggered_alerts.add(aid)
+                await db.delete_alert(aid)
+                
+                try:
+                    lang = await db.get_lang(user_id)
+                    unit = "% APR" if a_type == "funding" else "M$"
+                    key = "funding_alert_msg" if a_type == "funding" else "oi_alert_msg"
+                    
+                    msg = _t(lang, key, 
+                        sym=sym, 
+                        current=f"{current_val:+.2f}", 
+                        target=f"{target:+.2f}", 
+                        direction=direction,
+                        unit=unit
+                    )
+                    await self.bot.send_message(user_id, msg, parse_mode="HTML")
+                except: pass
 
     async def _check_custom_alerts(self):
         """Check all active custom alerts against current prices."""
@@ -428,18 +571,76 @@ class WSManager:
                 # Fire alert
                 self.triggered_alerts.add(aid)
                 # Remove from DB
-                await db.delete_alert(aid)
-                # Send message
-                try:
-                    lang = await db.get_lang(user_id)
-                except:
-                    lang = "ru"
+                success = await db.delete_alert(aid)
+                logger.info(f"Price alert {aid} for {symbol} triggered and removed from DB: {success}")
+                
+                # Immediately remove from local memory to avoid stale data in case of race conditions
+                self.active_alerts = [a for a in self.active_alerts if str(a.get("_id")) != aid]
+                
+                # Send message as background task to not block the loop
+                asyncio.create_task(self._send_rich_alert(user_id, symbol, current_price, target, direction))
 
-                msg = _t(lang, "custom_alert_title") + "\n\n" + _t(lang, "custom_alert_msg", symbol=html.escape(symbol), price=pretty_float(current_price), direction=direction, target=target)
-                try:
-                    await self.bot.send_message(user_id, msg, parse_mode="HTML")
-                except Exception as e:
-                    logger.error(f"Failed to send alert to {user_id}: {e}")
+    async def _send_rich_alert(self, user_id: int, symbol: str, current_price: float, target: float, direction: str):
+        try:
+            lang = await db.get_lang(user_id)
+        except:
+            lang = "en"
+
+        # Build detailed text
+        msg = f"🔔 <b>{_t(lang, 'custom_alert_title')}</b>\n\n"
+        msg += f"<b>{symbol}</b> hit <b>${pretty_float(current_price)}</b>\n"
+        msg += f"(Target: {direction} {pretty_float(target)})\n\n"
+        
+        # Add market context if available
+        try:
+            ctx, hlp_info = await asyncio.gather(
+                get_perps_context(),
+                get_hlp_info(),
+                return_exceptions=True
+            )
+            
+            if not isinstance(ctx, Exception) and ctx and isinstance(ctx, list) and len(ctx) == 2:
+                universe = ctx[0].get("universe", [])
+                asset_ctxs = ctx[1]
+                
+                # Find current asset data
+                asset_data = None
+                for i, u in enumerate(universe):
+                    if u["name"] == symbol:
+                        c = asset_ctxs[i]
+                        funding = float(c.get("funding", 0)) * 24 * 365 * 100
+                        vol = float(c.get("dayNtlVlm", 0))
+                        change = ((float(c.get("markPx", 0)) - float(c.get("prevDayPx", 0))) / float(c.get("prevDayPx", 1))) * 100
+                        asset_data = f"📊 <b>{symbol} Stats:</b>\n• 24h Change: <code>{change:+.2f}%</code>\n• Funding: <code>{funding:.1f}% APR</code>\n• 24h Vol: <b>${vol/1e6:.1f}M</b>"
+                        break
+                
+                if asset_data:
+                    msg += asset_data + "\n\n"
+
+                # Generate 3 images
+                if isinstance(hlp_info, Exception): hlp_info = None
+                data_alpha = prepare_modern_market_data(asset_ctxs, universe, hlp_info)
+                data_liq = prepare_liquidity_data(asset_ctxs, universe)
+                
+                buf_alpha = await render_html_to_image("market_stats.html", data_alpha)
+                buf_liq = await render_html_to_image("liquidity_stats.html", data_liq)
+                buf_heat = await render_html_to_image("funding_heatmap.html", data_alpha)
+                
+                media = [
+                    InputMediaPhoto(media=BufferedInputFile(buf_heat.read(), filename="heatmap.png"), caption=msg, parse_mode="HTML"),
+                    InputMediaPhoto(media=BufferedInputFile(buf_alpha.read(), filename="alpha.png")),
+                    InputMediaPhoto(media=BufferedInputFile(buf_liq.read(), filename="liquidity.png"))
+                ]
+                await self.bot.send_media_group(user_id, media)
+                return
+        except Exception as e:
+            logger.error(f"Error generating rich alert: {e}")
+
+        # Fallback to plain text if image generation fails
+        try:
+            await self.bot.send_message(user_id, msg, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Failed to send alert to {user_id}: {e}")
 
     async def _update_market_history_and_alerts(self):
         now = time.time()
@@ -562,7 +763,7 @@ class WSManager:
                     limit_px = float(limit_px_raw)
                 except (TypeError, ValueError):
                     continue
-                current_px = self.get_price(coin)
+                current_px = self.get_price(coin, original_id=coin)
                 
                 if not current_px: continue
                 
@@ -623,7 +824,8 @@ class WSManager:
             except Exception:
                 lang = "ru"
 
-            safe_coin = html.escape(await get_symbol_name(coin))
+            is_spot = str(coin).startswith("@")
+            safe_coin = html.escape(await get_symbol_name(coin, is_spot=is_spot))
             
             if side == "buy":
                 side_txt = _t(lang, "prox_alert_buy")
@@ -692,15 +894,25 @@ class WSManager:
                 side = fill.get("side")
                 px = float(fill.get("px") or 0)
                 sz = float(fill.get("sz") or 0)
+                
+                logger.info(f"Processing fill: {coin} {side} {sz} @ {px} for {user_wallet}")
+                
                 if not all([coin, side, px, sz]):
+                    logger.warning(f"Skipping incomplete fill: {fill}")
                     continue
                 
                 usd_value = px * sz
+                fee = float(fill.get("fee", 0))
+                closed_pnl = float(fill.get("closedPnl", 0))
                 
                 # Resolve symbol name safely (async)
-                sym_name = await get_symbol_name(coin)
+                is_spot_guess = str(coin).startswith("@") or (isinstance(coin, str) and "/" in coin)
+                sym_name = await get_symbol_name(coin, is_spot=is_spot_guess)
+                
+                logger.info(f"Resolved sym_name: {sym_name} (is_spot_guess: {is_spot_guess})")
                 
                 if not self._is_known_coin(sym_name):
+                    logger.warning(f"Skipping unknown coin: {sym_name} (original: {coin})")
                     continue
                 
                 fill_with_user = dict(fill)
@@ -713,6 +925,7 @@ class WSManager:
                 # Check user settings (threshold)
                 threshold = user.get("threshold", 0.0)
                 if usd_value < threshold and not is_liq:
+                    logger.info(f"Fill value ${usd_value:.2f} below threshold ${threshold:.2f}, skipping alert")
                     continue
 
                 side_emoji = "🟢" if side.lower() in ("b","buy","bid") else "🔴"
@@ -720,7 +933,6 @@ class WSManager:
                     side_emoji = "💀"
                 
                 safe_coin = html.escape(sym_name)
-                
                 tag = user.get("tag")
                 wallet_display = f"<b>{html.escape(tag)}</b>" if tag else f"<code>{user_wallet[:6]}...{user_wallet[-4:]}</code>"
                 
@@ -729,15 +941,20 @@ class WSManager:
                 else:
                     title = _t(lang, "fill_alert_title")
 
-                msg = title + "\n" + _t(lang, "fill_alert_msg", 
-                    side_icon=side_emoji, 
-                    side=side.upper(), 
-                    sz=sz, 
-                    symbol=safe_coin, 
-                    px=pretty_float(px), 
-                    val=pretty_float(usd_value, 2), 
-                    wallet=wallet_display
-                )
+                # Build extended message
+                msg = f"{side_emoji} {title}\n\n"
+                msg += f"<b>{side.upper()} {sz} {safe_coin}</b> @ ${pretty_float(px)}\n"
+                msg += f"💰 {_t(lang, 'value_lbl', 'Value')}: <b>${pretty_float(usd_value, 2)}</b>\n"
+                
+                if fee != 0:
+                    msg += f"💸 Fee: <code>${pretty_float(fee, 2)}</code>\n"
+                
+                if closed_pnl != 0:
+                    pnl_icon = "📈" if closed_pnl > 0 else "📉"
+                    msg += f"{pnl_icon} <b>Realized PnL: {'+' if closed_pnl > 0 else ''}${pretty_float(closed_pnl, 2)}</b>\n"
+
+                msg += f"\n👛 Wallet: {wallet_display}"
+                
                 try:
                     await self.bot.send_message(chat_id, msg, parse_mode="HTML")
                 except Exception as e:
@@ -751,19 +968,65 @@ class WSManager:
              orders = data.get("orders", [])
              
         user_wallet = data.get("user") if isinstance(data, dict) else None
-        if user_wallet:
-            user_wallet = user_wallet.lower()
+        if not user_wallet:
+            return
 
-        if user_wallet:
-            if self.all_coins:
-                filtered = []
-                for o in orders:
-                    coin, _ = self._extract_order_fields(o)
-                    if self._is_known_coin(coin):
-                        filtered.append(o)
-                self.open_orders[user_wallet] = filtered
-            else:
-                self.open_orders[user_wallet] = orders
+        user_wallet = user_wallet.lower()
+        
+        # Detect NEW orders for placement alerts
+        old_orders = self.open_orders.get(user_wallet, [])
+        old_oids = {self._extract_order_id(o) for o in old_orders}
+        
+        new_orders_to_alert = []
+        for o in orders:
+            oid = self._extract_order_id(o)
+            if oid and oid not in old_oids:
+                new_orders_to_alert.append(o)
+
+        if self.all_coins:
+            filtered = []
+            for o in orders:
+                coin, _ = self._extract_order_fields(o)
+                if self._is_known_coin(coin):
+                    filtered.append(o)
+            self.open_orders[user_wallet] = filtered
+        else:
+            self.open_orders[user_wallet] = orders
+
+        # Send alerts for new orders
+        if new_orders_to_alert:
+            users = await db.get_users_by_wallet(user_wallet)
+            for user in users:
+                chat_id = user.get("chat_id")
+                lang = "ru"
+                try:
+                    lang = await db.get_lang(chat_id)
+                except:
+                    pass
+                
+                for o in new_orders_to_alert:
+                    coin_raw, px = self._extract_order_fields(o)
+                    if not self._is_known_coin(coin_raw):
+                        continue
+                    
+                    is_spot = str(coin_raw).startswith("@")
+                    coin = await get_symbol_name(coin_raw, is_spot=is_spot)
+                        
+                    sz = self._extract_order_size(o)
+                    side = self._extract_order_side(o)
+                    side_icon = "🟢" if side == "buy" else "🔴"
+                    
+                    tag = user.get("tag")
+                    wallet_display = f"<b>{html.escape(tag)}</b>" if tag else f"<code>{user_wallet[:6]}...{user_wallet[-4:]}</code>"
+                    
+                    msg = f"🆕 <b>{_t(lang, 'order_placed_title', 'Order Placed')}</b>\n"
+                    msg += f"{side_icon} {side.upper()} {sz} <b>{coin}</b> @ ${pretty_float(px)}\n"
+                    msg += f"Wallet: {wallet_display}"
+                    
+                    try:
+                        await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                    except Exception as e:
+                        logger.error(f"Failed to send order alert: {e}")
     
     async def handle_web_data2(self, data):
         """Handle clearinghouse state updates (margin/risk)."""

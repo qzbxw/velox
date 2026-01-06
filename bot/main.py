@@ -2,6 +2,7 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from bot.config import settings
+from bot.database import db
 from bot.handlers import router
 from bot.ws_manager import WSManager
 from bot.scheduler import setup_scheduler
@@ -11,6 +12,22 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 async def main():
+    # 1. Startup Validation
+    if not settings.BOT_TOKEN or ":" not in settings.BOT_TOKEN:
+        logger.error("Invalid BOT_TOKEN provided in environment!")
+        return
+
+    # 2. Initialize Database
+    try:
+        logger.info("Initializing database...")
+        await db.init_db()
+        # Simple ping to verify connectivity
+        await db.client.admin.command('ping')
+        logger.info("Database connection verified.")
+    except Exception as e:
+        logger.error(f"Failed to connect to MongoDB: {e}")
+        return
+
     # Initialize Bot
     bot = Bot(token=settings.BOT_TOKEN)
     dp = Dispatcher()
@@ -20,7 +37,6 @@ async def main():
     
     # Initialize WS Manager
     ws_manager = WSManager(bot)
-    # Attach to bot for access in handlers (a bit hacky but effective for simple bot)
     bot.ws_manager = ws_manager
     
     # Start WS Manager in background
@@ -33,10 +49,21 @@ async def main():
     logger.info("Starting bot...")
     try:
         await dp.start_polling(bot)
+    except Exception as e:
+        logger.error(f"Bot polling error: {e}")
     finally:
+        logger.info("Shutting down...")
         ws_manager.running = False
-        ws_task.cancel()
+        if ws_task:
+            ws_task.cancel()
+            try:
+                await ws_task
+            except asyncio.CancelledError:
+                pass
+        
+        scheduler.shutdown()
         await bot.session.close()
+        logger.info("Bot session closed. Goodbye!")
 
 if __name__ == "__main__":
     try:

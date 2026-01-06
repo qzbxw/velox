@@ -937,3 +937,47 @@ def pretty_float(x: float, max_decimals: int = 6) -> str:
     if "." in s:
         s = s.rstrip("0").rstrip(".")
     return s
+
+def prepare_coin_prices_data(assets_ctx: list, universe: list) -> dict:
+    """
+    Prepares data for coin_prices.html
+    """
+    import pandas as pd
+    from datetime import datetime
+    
+    data = []
+    for i, u in enumerate(universe):
+        if i >= len(assets_ctx): break
+        ctx = assets_ctx[i]
+        name = u["name"]
+        mark = float(ctx.get("markPx", 0))
+        prev_day = float(ctx.get("prevDayPx", 0) or mark)
+        
+        change_24h = ((mark - prev_day) / prev_day) * 100 if prev_day > 0 else 0.0
+        
+        data.append({
+            "name": name,
+            "price": mark,
+            "change": change_24h,
+            "vol": float(ctx.get("dayNtlVlm", 0)) # To sort by volume
+        })
+        
+    df = pd.DataFrame(data)
+    if df.empty: return {}
+
+    # Sort by Volume descending to show most relevant coins
+    df = df.sort_values("vol", ascending=False).head(33)
+    
+    coins = []
+    for _, row in df.iterrows():
+        coins.append({
+            "name": row["name"],
+            "price": pretty_float(row["price"]),
+            "change": round(row["change"], 2)
+        })
+
+    return {
+        "date": datetime.now().strftime("%d %b %Y • %H:%M"),
+        "coins": coins
+    }
+

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800;900&family=JetBrains+Mono:wght@700&display=swap');
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #05070a; color: white;
+            width: 800px; height: 800px; padding: 40px;
+            margin: 0; display: flex; flex-direction: column; overflow: hidden;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass {
+            background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 24px; 
+            /* No padding for this specific container to make grid look seamless */
+            overflow: hidden; 
+        }
+        .label { color: #64748b; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 2px; }
+    </style>
+</head>
+<body>
+    <div class="flex justify-between items-start mb-6">
+        <div class="flex items-center gap-4">
+            <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center">
+                <span class="text-2xl font-black">V</span>
+            </div>
+            <div>
+                <h1 class="text-2xl font-black tracking-tighter uppercase leading-none">Velox <span class="text-indigo-500">Prices</span></h1>
+                <p class="text-slate-500 font-bold text-[8px] tracking-[0.3em] uppercase mt-1">Real-time Market Data</p>
+            </div>
+        </div>
+        <div class="text-right">
+            <div class="text-lg font-black mono text-slate-200">{{ date }}</div>
+            <div class="text-indigo-400 font-bold text-[9px] uppercase tracking-widest mt-1">t.me/veloxhlbot</div>
+        </div>
+    </div>
+
+    <!-- Main Grid for Prices -->
+    <div class="glass flex-1 border border-white/10 relative flex flex-col">
+        <!-- Header Row -->
+        <div class="flex bg-white/5 p-3 px-6 border-b border-white/5 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+            <div class="w-1/3">Asset</div>
+            <div class="w-1/3 text-right">Price</div>
+            <div class="w-1/3 text-right">24h Change</div>
+        </div>
+        
+         <div class="grid grid-cols-3 bg-white/5 gap-px">
+            {% for coin in coins[:33] %}
+            <div class="bg-[#0b0e11] p-3 flex flex-col justify-center items-center text-center h-[60px] relative overflow-hidden">
+                <!-- Background decoration for large movers -->
+                {% if coin.change > 10 %}
+                <div class="absolute inset-0 bg-emerald-500/5"></div>
+                {% elif coin.change < -10 %}
+                <div class="absolute inset-0 bg-rose-500/5"></div>
+                {% endif %}
+                
+                <div class="flex justify-between w-full items-end px-2">
+                    <span class="font-black text-sm text-slate-200">{{ coin.name }}</span>
+                    <span class="mono text-[10px] font-bold {{ 'text-emerald-400' if coin.change > 0 else 'text-rose-400' }}">{{ '+' if coin.change > 0 else '' }}{{ coin.change }}%</span>
+                </div>
+                <div class="w-full text-left px-2 mt-1">
+                    <span class="text-[11px] text-slate-500 font-bold mono">${{ coin.price }}</span>
+                </div>
+            </div>
+            {% endfor %}
+         </div>
+    </div>
+</body>
+</html>

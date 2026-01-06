@@ -105,29 +105,29 @@ async def send_market_reports(bot):
         
         # Build beautiful text report
         text_report = (
-            f"📊 <b>{_t(lang, 'market_alerts_title')}</b>\n\n"
+            f"📊 🔔 {_t(lang, 'market_alerts_title')}\n\n"
             f"{_t(lang, 'market_report_global')}:\n"
-            f"• {_t(lang, 'market_report_vol')}: <b>${data_alpha['global_volume']}</b>\n"
-            f"• {_t(lang, 'market_report_oi')}: <b>${data_alpha['total_oi']}</b>\n"
-            f"• {_t(lang, 'market_report_sentiment')}: <b>{data_alpha['sentiment_label']}</b>\n\n"
+            f"• {_t(lang, 'market_report_vol')}: ${data_alpha['global_volume']}\n"
+            f"• {_t(lang, 'market_report_oi')}: ${data_alpha['total_oi']}\n"
+            f"• {_t(lang, 'market_report_sentiment')}: {data_alpha['sentiment_label']}\n\n"
             f"{_t(lang, 'market_report_top_gainers')}:\n"
         )
         
         for asset in data_alpha['gainers'][:3]:
-            text_report += f"• <b>{asset['name']}</b>: ${asset['price']} (<code>{asset['change']:+.2f}%</code>)\n"
+            text_report += f"• {asset['name']}: ${asset['price']} ({asset['change']:+.2f}%)\n"
             
         text_report += f"\n{_t(lang, 'market_report_top_losers')}:\n"
         for asset in data_alpha['losers'][:3]:
-            text_report += f"• <b>{asset['name']}</b>: ${asset['price']} (<code>{asset['change']:+.2f}%</code>)\n"
+            text_report += f"• {asset['name']}: ${asset['price']} ({asset['change']:+.2f}%)\n"
 
         text_report += f"\n{_t(lang, 'market_report_efficiency')}:\n"
         for asset in data_alpha['efficiency'][:3]:
-            text_report += f"• {asset['name']}: <code>{asset['ratio']:.1f}x</code>\n"
+            text_report += f"• {asset['name']}: {asset['ratio']:.1f}x\n"
 
         text_report += f"\n{_t(lang, 'market_report_funding')}:\n"
         high_f = sorted(data_alpha['funding_map'], key=lambda x: x['apr'], reverse=True)[:3]
         for f in high_f:
-            text_report += f"• {f['name']}: <code>{f['apr']:+.1f}%</code> APR\n"
+            text_report += f"• {f['name']}: {f['apr']:+.1f}% APR\n"
             
         text_report += f"\n{_t(lang, 'market_report_footer', time=now_utc + ' UTC')}"
         

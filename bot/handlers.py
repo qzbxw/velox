@@ -1399,23 +1399,26 @@ async def cb_market_overview(call: CallbackQuery):
     universe = ctx[0].get("universe", [])
     asset_ctxs = ctx[1]
     
-    from bot.analytics import prepare_modern_market_data, prepare_liquidity_data
+    from bot.analytics import prepare_modern_market_data, prepare_liquidity_data, prepare_coin_prices_data
     from bot.renderer import render_html_to_image
     
     # Prepare data
     data_alpha = prepare_modern_market_data(asset_ctxs, universe, hlp_info)
     data_liq = prepare_liquidity_data(asset_ctxs, universe)
+    data_prices = prepare_coin_prices_data(asset_ctxs, universe)
     
     try:
         # Render all images
         buf_alpha = await render_html_to_image("market_stats.html", data_alpha)
         buf_liq = await render_html_to_image("liquidity_stats.html", data_liq)
         buf_heat = await render_html_to_image("funding_heatmap.html", data_alpha)
+        buf_prices = await render_html_to_image("coin_prices.html", data_prices)
         
         media = [
             InputMediaPhoto(media=BufferedInputFile(buf_heat.read(), filename="insights_1.png"), caption="📊 <b>Funding & Basis Map</b>", parse_mode="HTML"),
             InputMediaPhoto(media=BufferedInputFile(buf_alpha.read(), filename="insights_2.png"), caption="📈 <b>Market Alpha & Sentiment</b>", parse_mode="HTML"),
-            InputMediaPhoto(media=BufferedInputFile(buf_liq.read(), filename="insights_3.png"), caption="🌊 <b>Liquidity & Depth</b>", parse_mode="HTML")
+            InputMediaPhoto(media=BufferedInputFile(buf_liq.read(), filename="insights_3.png"), caption="🌊 <b>Liquidity & Depth</b>", parse_mode="HTML"),
+            InputMediaPhoto(media=BufferedInputFile(buf_prices.read(), filename="insights_4.png"), caption="🪙 <b>Real-time Prices</b>", parse_mode="HTML")
         ]
         
         await call.message.delete()

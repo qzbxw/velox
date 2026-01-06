@@ -148,7 +148,7 @@ EN = {
     
     # Market Alerts
     "btn_market_alerts": "🔔 Market Alerts",
-    "market_alerts_title": "🔔 <b>Market Overview Alerts</b>",
+    "market_alerts_title": "Market Overview Alerts",
     "market_alerts_msg": "Configure scheduled market reports.\nYou will receive detailed dashboards (Fundamentals & Alpha Insights).\nNote: All times are in <b>UTC</b>.",
     "add_time_prompt": "⌨️ Enter time in <b>HH:MM</b> format (UTC):\nExample: <code>09:00</code> or <code>18:30</code>",
     "invalid_time": "❌ Invalid time format. Use HH:MM (e.g., 09:30)",
@@ -157,15 +157,15 @@ EN = {
     "no_market_alerts": "📭 No scheduled market reports.",
     "btn_add_time": "➕ Add Time",
 
-    "market_report_global": "🌍 <b>Global Market Pulse</b>",
+    "market_report_global": "🌍 Market Pulse",
     "market_report_vol": "24h Volume",
     "market_report_oi": "Open Interest",
     "market_report_sentiment": "Sentiment",
-    "market_report_top_gainers": "🚀 <b>Top Gainers</b>",
-    "market_report_top_losers": "📉 <b>Top Losers</b>",
-    "market_report_efficiency": "⚡ <b>Capital Efficiency (Vol/OI)</b>",
-    "market_report_funding": "💰 <b>High Funding (APR)</b>",
-    "market_report_footer": "<i>Updated: {time} • Velox Intelligence</i>",
+    "market_report_top_gainers": "🚀 Top Gainers (24h)",
+    "market_report_top_losers": "📉 Top Losers (24h)",
+    "market_report_efficiency": "⚡️ Capital Efficiency (Vol/OI)",
+    "market_report_funding": "💰 High Funding (APR)",
+    "market_report_footer": "Updated: {time} • Velox Intelligence prices of tracked coins in watchlist",
     
     # Buttons
     "btn_balance": "🏦 Balance",
@@ -384,7 +384,7 @@ RU = {
     
     # Market Alerts
     "btn_market_alerts": "🔔 Алерты Рынка",
-    "market_alerts_title": "🔔 <b>Алерты обзора рынка</b>",
+    "market_alerts_title": "Алерты обзора рынка",
     "market_alerts_msg": "Настройте расписание отчетов по рынку.\nВы будете получать детальные дашборды (Обзор рынка + Alpha аналитика).\nПримечание: Все время указывается в <b>UTC</b>.",
     "add_time_prompt": "⌨️ Введите время в формате <b>ЧЧ:ММ</b> (UTC):\nПример: <code>09:00</code> или <code>18:30</code>",
     "invalid_time": "❌ Неверный формат. Используйте ЧЧ:ММ (например, 09:30)",
@@ -393,15 +393,15 @@ RU = {
     "no_market_alerts": "📭 У вас нет запланированных отчетов.",
     "btn_add_time": "➕ Добавить время",
 
-    "market_report_global": "🌍 <b>Пульс Рынка</b>",
+    "market_report_global": "🌍 Пульс Рынка",
     "market_report_vol": "Объем 24ч",
     "market_report_oi": "Откр. интерес",
     "market_report_sentiment": "Настроение",
-    "market_report_top_gainers": "🚀 <b>Лидеры роста (24ч)</b>",
-    "market_report_top_losers": "📉 <b>Лидеры падения (24ч)</b>",
-    "market_report_efficiency": "⚡ <b>Эффективность капитала (Vol/OI)</b>",
-    "market_report_funding": "💰 <b>Высокий Фандинг (APR)</b>",
-    "market_report_footer": "<i>Обновлено: {time} • Velox Intelligence</i>",
+    "market_report_top_gainers": "🚀 Лидеры роста (24ч)",
+    "market_report_top_losers": "📉 Лидеры падения (24ч)",
+    "market_report_efficiency": "⚡️ Эффективность капитала (Vol/OI)",
+    "market_report_funding": "💰 Высокий Фандинг (APR)",
+    "market_report_footer": "Обновлено: {time} • Velox Intelligence цены остлеживаемых в watchлисте монет",
     
     # Buttons
     "btn_balance": "🏦 Баланс",

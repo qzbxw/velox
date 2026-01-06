@@ -78,9 +78,10 @@ async def send_market_reports(bot):
     asset_ctxs = ctx[1]
     
     # Prepare data for new templates
-    from bot.analytics import prepare_liquidity_data
+    from bot.analytics import prepare_liquidity_data, prepare_coin_prices_data
     data_alpha = prepare_modern_market_data(asset_ctxs, universe, hlp_info)
     data_liq = prepare_liquidity_data(asset_ctxs, universe)
+    data_prices = prepare_coin_prices_data(asset_ctxs, universe)
     
     if not data_alpha:
         logger.error("Failed to prepare market data")
@@ -91,10 +92,12 @@ async def send_market_reports(bot):
         buf_alpha = await render_html_to_image("market_stats.html", data_alpha)
         buf_liq = await render_html_to_image("liquidity_stats.html", data_liq)
         buf_heat = await render_html_to_image("funding_heatmap.html", data_alpha)
+        buf_prices = await render_html_to_image("coin_prices.html", data_prices)
         
         img_alpha = buf_alpha.read()
         img_liq = buf_liq.read()
         img_heat = buf_heat.read()
+        img_prices = buf_prices.read()
     except Exception as e:
         logger.error(f"Failed to render market images: {e}")
         return
@@ -103,9 +106,33 @@ async def send_market_reports(bot):
         chat_id = user["user_id"]
         lang = user.get("lang", "en")
         
+        # Build watchlist text
+        watchlist = await db.get_watchlist(chat_id)
+        watchlist_lines = []
+        if watchlist:
+            for sym in watchlist:
+                idx = -1
+                for i, u in enumerate(universe):
+                    u_name = u["name"] if isinstance(u, dict) else u
+                    if u_name == sym:
+                        idx = i
+                        break
+                if idx != -1:
+                    ac = asset_ctxs[idx]
+                    price = float(ac.get("markPx", 0))
+                    prev_day = float(ac.get("prevDayPx", 0) or price)
+                    change = ((price - prev_day) / prev_day) * 100 if prev_day > 0 else 0.0
+                    icon = "🟢" if change >= 0 else "🔴"
+                    watchlist_lines.append(f"• {sym}: ${pretty_float(price)} ({icon} {change:+.2f}%)")
+        
+        watchlist_text = ""
+        if watchlist_lines:
+            watchlist_text = f"{_t(lang, 'market_report_watchlist')}:\n" + "\n".join(watchlist_lines) + "\n\n"
+
         # Build beautiful text report
         text_report = (
             f"📊 🔔 {_t(lang, 'market_alerts_title')}\n\n"
+            f"{watchlist_text}"
             f"{_t(lang, 'market_report_global')}:\n"
             f"• {_t(lang, 'market_report_vol')}: ${data_alpha['global_volume']}\n"
             f"• {_t(lang, 'market_report_oi')}: ${data_alpha['total_oi']}\n"
@@ -133,7 +160,8 @@ async def send_market_reports(bot):
         
         try:
             media = [
-                InputMediaPhoto(media=BufferedInputFile(img_heat, filename="heatmap.png"), caption=text_report, parse_mode="HTML"),
+                InputMediaPhoto(media=BufferedInputFile(img_prices, filename="prices.png"), caption=text_report, parse_mode="HTML"),
+                InputMediaPhoto(media=BufferedInputFile(img_heat, filename="heatmap.png")),
                 InputMediaPhoto(media=BufferedInputFile(img_alpha, filename="alpha.png")),
                 InputMediaPhoto(media=BufferedInputFile(img_liq, filename="liquidity.png"))
             ]

@@ -165,7 +165,8 @@ EN = {
     "market_report_top_losers": "📉 Top Losers (24h)",
     "market_report_efficiency": "⚡️ Capital Efficiency (Vol/OI)",
     "market_report_funding": "💰 High Funding (APR)",
-    "market_report_footer": "Updated: {time} • Velox Intelligence prices of tracked coins in watchlist",
+    "market_report_watchlist": "⭐ Watchlist",
+    "market_report_footer": "Updated: {time} • Velox Intelligence",
     
     # Buttons
     "btn_balance": "🏦 Balance",
@@ -401,7 +402,8 @@ RU = {
     "market_report_top_losers": "📉 Лидеры падения (24ч)",
     "market_report_efficiency": "⚡️ Эффективность капитала (Vol/OI)",
     "market_report_funding": "💰 Высокий Фандинг (APR)",
-    "market_report_footer": "Обновлено: {time} • Velox Intelligence цены остлеживаемых в watchлисте монет",
+    "market_report_watchlist": "⭐ Избранные монеты",
+    "market_report_footer": "Обновлено: {time} • Velox Intelligence",
     
     # Buttons
     "btn_balance": "🏦 Баланс",

@@ -1414,11 +1414,63 @@ async def cb_market_overview(call: CallbackQuery):
         buf_heat = await render_html_to_image("funding_heatmap.html", data_alpha)
         buf_prices = await render_html_to_image("coin_prices.html", data_prices)
         
+        # Build watchlist text
+        watchlist = await db.get_watchlist(call.message.chat.id)
+        watchlist_lines = []
+        if watchlist:
+            for sym in watchlist:
+                idx = -1
+                for i, u in enumerate(universe):
+                    u_name = u["name"] if isinstance(u, dict) else u
+                    if u_name == sym:
+                        idx = i
+                        break
+                if idx != -1:
+                    ac = asset_ctxs[idx]
+                    price = float(ac.get("markPx", 0))
+                    prev_day = float(ac.get("prevDayPx", 0) or price)
+                    change = ((price - prev_day) / prev_day) * 100 if prev_day > 0 else 0.0
+                    icon = "🟢" if change >= 0 else "🔴"
+                    watchlist_lines.append(f"• {sym}: ${pretty_float(price)} ({icon} {change:+.2f}%)")
+        
+        watchlist_text = ""
+        if watchlist_lines:
+            watchlist_text = f"{_t(lang, 'market_report_watchlist')}:\n" + "\n".join(watchlist_lines) + "\n\n"
+
+        now_utc = time.strftime("%H:%M")
+        text_report = (
+            f"📊 🔔 {_t(lang, 'market_alerts_title')}\n\n"
+            f"{watchlist_text}"
+            f"{_t(lang, 'market_report_global')}:\n"
+            f"• {_t(lang, 'market_report_vol')}: ${data_alpha['global_volume']}\n"
+            f"• {_t(lang, 'market_report_oi')}: ${data_alpha['total_oi']}\n"
+            f"• {_t(lang, 'market_report_sentiment')}: {data_alpha['sentiment_label']}\n\n"
+            f"{_t(lang, 'market_report_top_gainers')}:\n"
+        )
+        
+        for asset in data_alpha['gainers'][:3]:
+            text_report += f"• {asset['name']}: ${asset['price']} ({asset['change']:+.2f}%)\n"
+            
+        text_report += f"\n{_t(lang, 'market_report_top_losers')}:\n"
+        for asset in data_alpha['losers'][:3]:
+            text_report += f"• {asset['name']}: ${asset['price']} ({asset['change']:+.2f}%)\n"
+
+        text_report += f"\n{_t(lang, 'market_report_efficiency')}:\n"
+        for asset in data_alpha['efficiency'][:3]:
+            text_report += f"• {asset['name']}: {asset['ratio']:.1f}x\n"
+
+        text_report += f"\n{_t(lang, 'market_report_funding')}:\n"
+        high_f = sorted(data_alpha['funding_map'], key=lambda x: x['apr'], reverse=True)[:3]
+        for f in high_f:
+            text_report += f"• {f['name']}: {f['apr']:+.1f}% APR\n"
+            
+        text_report += f"\n{_t(lang, 'market_report_footer', time=now_utc + ' UTC')}"
+
         media = [
-            InputMediaPhoto(media=BufferedInputFile(buf_heat.read(), filename="insights_1.png"), caption="📊 <b>Funding & Basis Map</b>", parse_mode="HTML"),
-            InputMediaPhoto(media=BufferedInputFile(buf_alpha.read(), filename="insights_2.png"), caption="📈 <b>Market Alpha & Sentiment</b>", parse_mode="HTML"),
-            InputMediaPhoto(media=BufferedInputFile(buf_liq.read(), filename="insights_3.png"), caption="🌊 <b>Liquidity & Depth</b>", parse_mode="HTML"),
-            InputMediaPhoto(media=BufferedInputFile(buf_prices.read(), filename="insights_4.png"), caption="🪙 <b>Real-time Prices</b>", parse_mode="HTML")
+            InputMediaPhoto(media=BufferedInputFile(buf_prices.read(), filename="insights_1.png"), caption=text_report, parse_mode="HTML"),
+            InputMediaPhoto(media=BufferedInputFile(buf_heat.read(), filename="insights_2.png")),
+            InputMediaPhoto(media=BufferedInputFile(buf_alpha.read(), filename="insights_3.png")),
+            InputMediaPhoto(media=BufferedInputFile(buf_liq.read(), filename="insights_4.png"))
         ]
         
         await call.message.delete()

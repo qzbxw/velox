@@ -201,7 +201,7 @@ class WSManager:
             for u in whale_users:
                 user_id = u.get("user_id")
                 # Check user specific threshold if any
-                thr = u.get("whale_threshold", 100_000)
+                thr = u.get("whale_threshold", 50_000)
                 if val < thr: continue
 
                 # Watchlist filter

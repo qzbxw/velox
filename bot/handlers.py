@@ -574,29 +574,7 @@ async def cb_balance(call: CallbackQuery):
         wallet_lines = []
         wallet_total = 0.0
         
-        # ... (rest of spot logic) ...
-        
-        # Vaults logic
-        vault_total = 0.0
-        vault_lines = []
-        if vault_equities:
-            for v in vault_equities:
-                v_name = v.get("vaultAddress")
-                v_equity = float(v.get("equity", 0))
-                if v_equity > 1:
-                    vault_total += v_equity
-                    # Try to get human name if it's HLP
-                    disp_name = "HLP" if "df13098394e1832014b0df3f91285497" in v_name.lower() else f"Vault {v_name[:6]}"
-                    vault_lines.append(f"🏛 <b>{disp_name}</b>: ${pretty_float(v_equity, 2)}")
-
-        # ... (rest of header/body assembly) ...
-        header = f"👛 <b>{wallet[:6]}...{wallet[-4:]}</b>"
-        body = ""
-        if wallet_lines:
-            body += f"\n   <b>Spot:</b> ${pretty_float(wallet_total, 2)}\n   " + "\n   ".join(wallet_lines)
-        if vault_lines:
-            body += f"\n   <b>{_t(lang, 'vaults_lbl')}:</b> ${pretty_float(vault_total, 2)}\n   " + "\n   ".join(vault_lines)
-        
+        # 1. Process Spot
         if spot_bals:
             for b in spot_bals:
                 coin_id = b.get("coin")
@@ -626,8 +604,9 @@ async def cb_balance(call: CallbackQuery):
                 pnl_str = ""
                 if entry > 0 and px > 0:
                     pnl_pct = ((px / entry) - 1) * 100
+                    pnl_usd = (px - entry) * amount
                     pnl_icon = "🟢" if pnl_pct >= 0 else "🔴"
-                    pnl_str = f" | {pnl_icon} {pnl_pct:+.1f}%"
+                    pnl_str = f" | {pnl_icon} {pnl_pct:+.1f}% (${pretty_float(pnl_usd, 2)})"
 
                 line = f"▫️ <b>{coin_name}</b>: {amount:.4f} (${pretty_float(val, 0)})"
                 if entry > 0:
@@ -637,6 +616,19 @@ async def cb_balance(call: CallbackQuery):
                     line += f" (🔒 {hold:.4f})"
                 wallet_lines.append(line)
 
+        # 2. Vaults logic
+        vault_total = 0.0
+        vault_lines = []
+        if vault_equities:
+            for v in vault_equities:
+                v_name = v.get("vaultAddress")
+                v_equity = float(v.get("equity", 0))
+                if v_equity > 1:
+                    vault_total += v_equity
+                    disp_name = "HLP" if "df13098394e1832014b0df3f91285497" in v_name.lower() else f"Vault {v_name[:6]}"
+                    vault_lines.append(f"🏛 <b>{disp_name}</b>: ${pretty_float(v_equity, 2)}")
+
+        # 3. Perps Logic
         perps_equity = 0.0
         margin_used = 0.0
         total_ntl = 0.0
@@ -648,20 +640,17 @@ async def cb_balance(call: CallbackQuery):
             withdrawable = float(perps_state.get("withdrawable", 0) or 0)
             maint_margin = float(perps_state.get("crossMaintenanceMarginUsed", 0) or 0)
             
-            # Margin Summary
             if "marginSummary" in perps_state:
                 ms = perps_state["marginSummary"]
                 perps_equity = float(ms.get("accountValue", 0) or 0)
                 margin_used = float(ms.get("totalMarginUsed", 0) or 0)
                 total_ntl = float(ms.get("totalNtlPos", 0) or 0)
             
-            # Calculate Total uPnL
             for p in perps_state.get("assetPositions", []):
                 pos = p.get("position", {})
                 coin_id = pos.get("coin")
                 szi = float(pos.get("szi", 0))
                 entry_px = float(pos.get("entryPx", 0))
-                
                 if szi == 0: continue
                 
                 sym = await get_symbol_name(coin_id, is_spot=False)
@@ -672,10 +661,15 @@ async def cb_balance(call: CallbackQuery):
                 if mark_px:
                      total_upnl += (mark_px - entry_px) * szi
 
+        # 4. Assemble Wallet Message
         header = f"👛 <b>{wallet[:6]}...{wallet[-4:]}</b>"
         body = ""
         if wallet_lines:
             body += f"\n   <b>Spot:</b> ${pretty_float(wallet_total, 2)}\n   " + "\n   ".join(wallet_lines)
+        
+        if vault_lines:
+            body += f"\n   <b>{_t(lang, 'vaults_lbl')}:</b> ${pretty_float(vault_total, 2)}\n   " + "\n   ".join(vault_lines)
+
         if perps_equity > 1 or margin_used > 0:
              body += f"\n   <b>Perps Eq:</b> ${pretty_float(perps_equity, 2)}"
              body += f"\n   {_t(lang, 'withdrawable')}: ${pretty_float(withdrawable, 2)}"
@@ -1037,10 +1031,17 @@ async def cb_orders(call: CallbackQuery):
         return
 
     all_orders = []
+    # Fetch balances and positions once per wallet for speed
+    wallet_data = {} # {wallet: {'spot': balances, 'perps': perps_state}}
+
     for wallet in wallets:
         orders = await get_open_orders(wallet)
         if isinstance(orders, dict): orders = orders.get("orders", [])
         if not orders: continue
+        
+        spot_bals = await get_spot_balances(wallet)
+        perps_state = await get_perps_state(wallet)
+        wallet_data[wallet] = {"spot": spot_bals, "perps": perps_state}
         
         for o in orders:
             o["wallet"] = wallet
@@ -1063,6 +1064,7 @@ async def cb_orders(call: CallbackQuery):
     
     msg_parts = []
     for o in page_items:
+        wallet = o["wallet"]
         # Resolve coin name
         coin_raw = o.get("coin")
         is_spot = str(coin_raw).startswith("@")
@@ -1073,27 +1075,74 @@ async def cb_orders(call: CallbackQuery):
         
         sz = float(o.get("sz", 0))
         px = float(o.get("limitPx", 0))
-        side = o.get("side")
+        side = str(o.get("side")).lower()
+        is_buy = side.startswith("b")
         
         # Calculate distance
         current_px = await get_mid_price(sym, coin_raw)
         dist_str = "n/a"
         if current_px > 0 and px > 0:
-            # How many percent from current price to entry?
-            # If current is 110 and buy limit is 100, we need -9.09% move.
             diff = ((px - current_px) / current_px) * 100
             dist_str = f"<b>{diff:+.2f}%</b>"
             
-        icon = "🟢" if str(side).lower().startswith("b") else "🔴"
-        side_label = "BUY" if str(side).lower().startswith("b") else "SELL"
-        w_short = f"{o['wallet'][:4]}..{o['wallet'][-3:]}"
+        icon = "🟢" if is_buy else "🔴"
+        side_label = "BUY" if is_buy else "SELL"
+        w_short = f"{wallet[:4]}..{wallet[-3:]}"
         
         val_usd = sz * px
         
+        # --- Profit/New Avg Logic ---
+        profit_line = ""
+        avg_entry = 0.0
+        current_sz = 0.0
+        
+        if is_spot:
+            bals = wallet_data[wallet]["spot"]
+            for b in bals:
+                if str(b.get("coin")) == str(coin_raw):
+                    avg_entry = extract_avg_entry_from_balance(b)
+                    current_sz = float(b.get("total", 0))
+                    break
+        else:
+            pstate = wallet_data[wallet]["perps"]
+            if pstate:
+                for p in pstate.get("assetPositions", []):
+                    pos = p.get("position", {})
+                    if str(pos.get("coin")) == str(coin_raw):
+                        avg_entry = float(pos.get("entryPx", 0))
+                        current_sz = float(pos.get("szi", 0))
+                        break
+
+        if not is_buy: # SELL order
+            if avg_entry > 0:
+                profit_usd = (px - avg_entry) * sz
+                if not is_spot and current_sz < 0: # Closing a short
+                    profit_usd = (avg_entry - px) * sz
+                
+                profit_pct = ((px / avg_entry) - 1) * 100
+                if not is_spot and current_sz < 0:
+                    profit_pct = ((avg_entry / px) - 1) * 100
+                
+                p_color = "🟢" if profit_usd >= 0 else "🔴"
+                profit_line = f"\n   " + _t(lang, "profit_if_filled", val=f"{p_color}${pretty_float(profit_usd, 2)}", pct=f"{profit_pct:+.1f}")
+        else: # BUY order
+            if avg_entry > 0:
+                if not is_spot and current_sz < 0: # Closing a short
+                    profit_usd = (avg_entry - px) * sz
+                    profit_pct = ((avg_entry / px) - 1) * 100
+                    p_color = "🟢" if profit_usd >= 0 else "🔴"
+                    profit_line = f"\n   " + _t(lang, "profit_if_filled", val=f"{p_color}${pretty_float(profit_usd, 2)}", pct=f"{profit_pct:+.1f}")
+                elif current_sz > 0: # Increasing long
+                    new_sz = current_sz + sz
+                    new_avg = ((current_sz * avg_entry) + (sz * px)) / new_sz
+                    diff_avg = ((new_avg / avg_entry) - 1) * 100
+                    profit_line = f"\n   " + _t(lang, "new_avg_if_filled", val=pretty_float(new_avg, 2), pct=f"{diff_avg:+.1f}")
+
         item_text = (
             f"{icon} <b>{sym}</b> [{market_type}]\n"
             f"   {side_label}: {sz} @ ${pretty_float(px)} (~${pretty_float(val_usd, 2)})\n"
             f"   Цена: ${pretty_float(current_px)} | До входа: {dist_str} [{w_short}]"
+            f"{profit_line}"
         )
         msg_parts.append(item_text)
 

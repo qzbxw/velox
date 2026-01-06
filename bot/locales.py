@@ -238,7 +238,7 @@ EN = {
     # Whales
     "whale_alerts_on": "🔔 Whale Alerts: <b>ON</b>",
     "whale_alerts_off": "🔕 Whale Alerts: <b>OFF</b>",
-    "whale_intro": "Tracking large trades > $100k globally.",
+    "whale_intro": "Tracking large trades > $50k globally.",
     "funding_alert_set": "✅ Funding alert set for <b>{symbol}</b>: {dir} <b>{val}% APR</b>",
     "oi_alert_set": "✅ OI alert set for <b>{symbol}</b>: {dir} <b>${val}M</b>",
     "new_listing_msg": "🚀 <b>New Asset Listed on Hyperliquid!</b>\n\nSymbol: <b>${sym}</b>\n\n<i>Trading is now available. Use /watch {sym} to monitor volatility.</i>",
@@ -248,6 +248,8 @@ EN = {
     "calc_exit_btn": "🧮 Calc Exit {sym}",
     "exit_calc_title": "📊 <b>Exit Calculator: {sym}</b>\nPre-filled from position.\n\n",
     "calc_funding_row": "\n{icon} <b>Funding:</b> {f_rate}% ({apr}% APR)",
+    "profit_if_filled": "💰 <b>Profit if filled:</b> {val} ({pct}%)",
+    "new_avg_if_filled": "🔹 <b>New Avg:</b> ${val} ({pct}%)",
 }
 
 # --- RUSSIAN ---
@@ -472,8 +474,8 @@ RU = {
     # Whales
     "whale_alerts_on": "🔔 Алерты Китов: <b>ВКЛ</b>",
     "whale_alerts_off": "🔕 Алерты Китов: <b>ВЫКЛ</b>",
-        "whale_intro": "Отслеживание сделок >     00k по всему рынку.",
-            "funding_alert_set": "✅ Алерт на фандинг установлен: <b>{symbol}</b> {dir} <b>{val}% APR</b>",
+    "whale_intro": "Отслеживание сделок > 50k по всему рынку.",
+    "funding_alert_set": "✅ Алерт на фандинг установлен: <b>{symbol}</b> {dir} <b>{val}% APR</b>",
             "oi_alert_set": "✅ Алерт на OI установлен: <b>{symbol}</b> {dir} <b>${val}M</b>",
             "new_listing_msg": "🚀 <b>Новый актив на Hyperliquid!</b>\n\nСимвол: <b>${sym}</b>\n\n<i>Торговля уже доступна. Используй /watch {sym} для отслеживания волатильности.</i>",
             "funding_alert_msg": "💰 <b>Алерт: Фандинг {sym}</b>\n\nТекущий: <b>{current}{unit}</b>\nЦель: {direction} <b>{target}{unit}</b>",
@@ -482,5 +484,7 @@ RU = {
             "calc_exit_btn": "🧮 Выход {sym}",
             "exit_calc_title": "📊 <b>Калькулятор выхода: {sym}</b>\nДанные подтянуты из позиции.\n\n",
             "calc_funding_row": "\n{icon} <b>Фандинг:</b> {f_rate}% ({apr}% APR)",
+            "profit_if_filled": "💰 <b>Профит при исполнении:</b> {val} ({pct}%)",
+            "new_avg_if_filled": "🔹 <b>Новая средняя:</b> ${val} ({pct}%)",
         }
         

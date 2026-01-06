@@ -523,9 +523,12 @@ class WSManager:
             if aid in self.triggered_alerts: continue
             
             sym = alert["symbol"]
-            target = alert["target"]
+            target = alert.get("target")
             direction = alert["direction"]
             user_id = alert["user_id"]
+            
+            if target is None:
+                continue
             
             # Find data
             idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
@@ -572,6 +575,9 @@ class WSManager:
             target = alert.get("price")
             direction = alert.get("direction") # above / below
             user_id = alert.get("user_id")
+            
+            if target is None:
+                continue
             
             current_price = self.get_price(symbol)
             if not current_price:

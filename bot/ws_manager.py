@@ -981,7 +981,7 @@ class WSManager:
                 # Build extended message
                 msg = f"{side_emoji} {title}\n\n"
                 msg += f"<b>{side.upper()} {sz} {safe_coin}</b> @ ${pretty_float(px)}\n"
-                msg += f"💰 {_t(lang, 'value_lbl', 'Value')}: <b>${pretty_float(usd_value, 2)}</b>\n"
+                msg += f"💰 {_t(lang, 'value_lbl')}: <b>${pretty_float(usd_value, 2)}</b>\n"
                 
                 if fee != 0:
                     msg += f"💸 Fee: <code>${pretty_float(fee, 2)}</code>\n"
@@ -1056,7 +1056,7 @@ class WSManager:
                     tag = user.get("tag")
                     wallet_display = f"<b>{html.escape(tag)}</b>" if tag else f"<code>{user_wallet[:6]}...{user_wallet[-4:]}</code>"
                     
-                    msg = f"🆕 <b>{_t(lang, 'order_placed_title', 'Order Placed')}</b>\n"
+                    msg = f"🆕 <b>{_t(lang, 'order_placed_title')}</b>\n"
                     msg += f"{side_icon} {side.upper()} {sz} <b>{coin}</b> @ ${pretty_float(px)}\n"
                     msg += f"Wallet: {wallet_display}"
                     

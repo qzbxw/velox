@@ -806,12 +806,18 @@ def prepare_liquidity_data(assets_ctx: list, universe: list) -> dict:
         total_oi += oi
         
         # Slippage calculation
-        impact_pxs = ctx.get("impactPxs", [mark, mark])
+        # impactPxs is [bid_impact, ask_impact] for a specific notional (usually $10k-$50k depending on asset)
+        impact_pxs = ctx.get("impactPxs")
         slippage = 0.0
-        if impact_pxs and len(impact_pxs) >= 2 and mark > 0:
-            bid_impact = float(impact_pxs[0])
-            ask_impact = float(impact_pxs[1])
-            slippage = (abs(ask_impact - mark) + abs(mark - bid_impact)) / (2 * mark) * 100
+        
+        if impact_pxs and isinstance(impact_pxs, list) and len(impact_pxs) >= 2 and mark > 0:
+            try:
+                bid_impact = float(impact_pxs[0])
+                ask_impact = float(impact_pxs[1])
+                # Calculate simple slippage relative to mark
+                slippage = (abs(ask_impact - mark) + abs(mark - bid_impact)) / (2 * mark) * 100
+            except (ValueError, TypeError):
+                slippage = 0.0
 
         # Day High/Low for Volatility
         # Note: HL API might not give 1h H/L directly in meta, but we use 24h as proxy or check if available

@@ -12,6 +12,7 @@ class Database:
         self.fills = self.db.fills
         self.watchlist = self.db.watchlist
         self.alerts = self.db.alerts  # New collection for price alerts
+        self.wallet_states = self.db.wallet_states  # Tracks last update times
 
     async def init_db(self):
         """Initialize database indexes for performance and integrity."""
@@ -232,5 +233,55 @@ class Database:
     async def get_user_settings(self, user_id):
         user = await self.users.find_one({"user_id": user_id})
         return user if user else {}
+
+    async def get_overview_settings(self, user_id: int) -> dict:
+        """
+        Get Market Overview settings for a user.
+        Returns dict with defaults if not found.
+        """
+        user = await self.users.find_one({"user_id": user_id})
+        if not user:
+            return {
+                "schedules": ["06:00", "18:00"], # Default Morning & Evening
+                "style": "detailed",
+                "prompt_override": None,
+                "enabled": True
+            }
+        
+        return user.get("overview", {
+            "schedules": ["06:00", "18:00"],
+            "style": "detailed",
+            "prompt_override": None,
+            "enabled": True
+        })
+
+    async def update_overview_settings(self, user_id: int, settings: dict):
+        """
+        Update Market Overview settings.
+        settings: dict containing any of keys: schedules, style, prompt_override, enabled
+        """
+        # First ensure user exists using upsert via update_one
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                f"overview.{k}": v for k, v in settings.items()
+            }},
+            upsert=True
+        )
+
+    # --- WALLET STATES (Ledger Tracking) ---
+    async def get_all_watched_addresses(self):
+        """Get list of unique wallet addresses currently being watched."""
+        return await self.wallets.distinct("address")
+
+    async def get_wallet_state(self, address):
+        return await self.wallet_states.find_one({"address": address.lower()})
+
+    async def update_wallet_ledger_time(self, address, timestamp):
+        await self.wallet_states.update_one(
+            {"address": address.lower()},
+            {"$set": {"last_ledger_time": int(timestamp)}},
+            upsert=True
+        )
 
 db = Database(settings.MONGO_URI, settings.MONGO_DB_NAME)

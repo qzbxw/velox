@@ -6,6 +6,12 @@ from bot.config import settings
 
 logger = logging.getLogger(__name__)
 
+# --- Rate Limiter ---
+async def _rate_limit():
+    # Simple delay to stay under ~1200 req/min (20/s)
+    # 0.06s * 1 = 0.06s delay per call.
+    await asyncio.sleep(0.06)
+
 # Cache for symbol mappings (ID -> Name)
 _SYMBOL_CACHE = {
     "spot": {},  # id (int/str) -> name (str)
@@ -275,7 +281,8 @@ async def get_perps_meta():
             return None
 
 async def get_perps_context():
-    """Fetch perps market context (funding, oi, volume, etc)."""
+    """Fetch global perps market context (funding, prices, open interest)."""
+    await _rate_limit()
     url = f"{settings.HYPERLIQUID_API_URL}/info"
     payload = {"type": "metaAndAssetCtxs"}
     
@@ -375,6 +382,7 @@ async def get_mid_price(symbol: str, original_id: str | None = None) -> float:
 
 async def get_user_portfolio(wallet_address: str):
     """Fetch historical PnL/Portfolio stats (Official API data)."""
+    await _rate_limit()
     url = f"{settings.HYPERLIQUID_API_URL}/info"
     payload = {
         "type": "portfolio",
@@ -477,3 +485,74 @@ async def get_all_assets_meta():
         "spot": spot if not isinstance(spot, Exception) else None,
         "perps": perps if not isinstance(perps, Exception) else None
     }
+
+# Fear & Greed Index Cache
+_FNG_CACHE = {
+    "data": None,
+    "last_update": 0
+}
+
+async def get_fear_greed_index():
+    """
+    Fetch Fear & Greed Index from Alternative.me API.
+    Returns dict with: value (0-100), classification, timestamp, change from yesterday.
+    Caches for 5 minutes.
+    """
+    now = time.time()
+    if now - _FNG_CACHE["last_update"] < 300 and _FNG_CACHE["data"]:
+        return _FNG_CACHE["data"]
+    
+    url = "https://api.alternative.me/fng/?limit=2"  # Get today + yesterday for change
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    fng_data = data.get("data", [])
+                    
+                    if len(fng_data) >= 1:
+                        today = fng_data[0]
+                        yesterday = fng_data[1] if len(fng_data) >= 2 else None
+                        
+                        value = int(today.get("value", 50))
+                        classification = today.get("value_classification", "Neutral")
+                        timestamp = int(today.get("timestamp", 0))
+                        
+                        # Calculate change
+                        change = 0
+                        if yesterday:
+                            yesterday_val = int(yesterday.get("value", value))
+                            change = value - yesterday_val
+                        
+                        result = {
+                            "value": value,
+                            "classification": classification,
+                            "timestamp": timestamp,
+                            "change": change,
+                            "emoji": _fng_emoji(value)
+                        }
+                        
+                        _FNG_CACHE["data"] = result
+                        _FNG_CACHE["last_update"] = now
+                        return result
+                        
+                logger.error(f"Error fetching Fear & Greed: {resp.status}")
+                return None
+    except Exception as e:
+        logger.error(f"Exception fetching Fear & Greed: {e}")
+        return None
+
+def _fng_emoji(value: int) -> str:
+    """Return emoji based on Fear & Greed value."""
+    if value <= 20:
+        return "😱"  # Extreme Fear
+    elif value <= 40:
+        return "😰"  # Fear
+    elif value <= 60:
+        return "😐"  # Neutral
+    elif value <= 80:
+        return "😊"  # Greed
+    else:
+        return "🤑"  # Extreme Greed
+

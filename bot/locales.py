@@ -21,7 +21,7 @@ EN = {
     "welcome": "👋 <b>Velox Terminal</b>\n\nReal-time Hyperliquid portfolio monitoring & analytics.\n\n/add_wallet <code>address</code> - Track wallet\n/help - Show commands",
     "set_wallet": "⚠️ No wallet connected. Use /add_wallet <code>0x...</code>",
     "tracking": "✅ Tracking: <code>{wallet}</code>",
-    "help_msg": "<b>Available Commands:</b>\n\n🔹 <b>Portfolio</b>\n/add_wallet <code>0x...</code> - Track wallet\n/tag <code>0x...</code> <code>Name</code> - Rename wallet\n/threshold <code>0x...</code> <code>1000</code> - Min fill USD to alert\n\n🔹 <b>Alerts</b>\n/alert <code>ETH</code> <code>3000</code> - Price alert\n/watch <code>SOL</code> - Add to watchlist\n/unwatch <code>SOL</code> - Remove from watchlist\n/set_prox <code>0.5</code> - Proximity alert %\n/set_vol <code>2.0</code> - Volatility alert %\n/set_whale <code>250000</code> - Whale alert min USD\n\n🔹 <b>Misc</b>\n/start - Main Menu\n/export - Export PnL history CSV",
+    "help_msg": "<b>Available Commands:</b>\n\n🔹 <b>Portfolio</b>\n/add_wallet <code>0x...</code> - Track wallet\n/tag <code>0x...</code> <code>Name</code> - Rename wallet\n/funding - Funding Log (24h)\n/threshold <code>0x...</code> <code>1000</code> - Min fill USD to alert\n\n🔹 <b>Alerts</b>\n/alert <code>ETH</code> <code>3000</code> - Price alert\n/f_alert <code>ETH</code> <code>50</code> - Funding APR alert\n/oi_alert <code>ETH</code> <code>100</code> - OI ($M) alert\n/watch <code>SOL</code> - Add to watchlist\n/unwatch <code>SOL</code> - Remove from watchlist\n/set_prox <code>0.5</code> - Proximity alert %\n/set_vol <code>2.0</code> - Volatility alert %\n/set_whale <code>250000</code> - Whale alert min USD\n\n🔹 <b>Market</b>\n/overview - AI Market Overview\n/overview_settings - Configure AI Reports\n\n🔹 <b>Misc</b>\n/start - Main Menu\n/export - Export PnL history CSV",
     
     # Alerts - Management
     "alert_added": "✅ Alert set: <b>{symbol}</b> {dir} <b>${price}</b>",
@@ -235,6 +235,17 @@ EN = {
     "btn_analysis": "🧠 Analysis",
     "btn_export": "📥 Export CSV",
     "btn_flex": "💪 Flex PnL",
+    
+    # Overview Settings
+    "ov_btn_toggle": "Toggle On/Off",
+    "ov_btn_morning": "Morning (06:00)",
+    "ov_btn_evening": "Evening (18:00)",
+    "ov_btn_style_det": "Style: Detailed",
+    "ov_btn_style_brief": "Style: Brief",
+    "ov_time_added": "✅ Time added: {time}",
+    "ov_prompt_set": "✅ Custom prompt set.",
+    "ov_invalid_time": "❌ Invalid time format (HH:MM).",
+
     "flex_title": "💪 <b>PnL Flex Mode</b>",
     "flex_period_day": "Day",
     "flex_period_week": "Week",
@@ -287,6 +298,30 @@ EN = {
     "calc_funding_row": "\n{icon} <b>Funding:</b> {f_rate}% ({apr}% APR)",
     "profit_if_filled": "💰 <b>Profit if filled:</b> {val} ({pct}%)",
     "new_avg_if_filled": "🔹 <b>New Avg:</b> ${val} ({pct}%)",
+    
+    # Fear & Greed Index
+    "fng_title": "🧠 <b>Fear & Greed Index</b>",
+    "fng_value": "Current: <b>{value}</b> ({classification})",
+    "fng_change": "Change: <b>{change:+d}</b> from yesterday",
+    "fng_extreme_fear": "Extreme Fear",
+    "fng_fear": "Fear",
+    "fng_neutral": "Neutral",
+    "fng_greed": "Greed",
+    "fng_extreme_greed": "Extreme Greed",
+    "btn_fear_greed": "🧠 Fear & Greed",
+
+    # Ledger
+    "deposit_alert": "💰 <b>Deposit Detected</b>",
+    "withdraw_alert": "💸 <b>Withdrawal Detected</b>",
+    "transfer_alert": "↔️ <b>Transfer Detected</b>",
+    "ledger_amt": "Amount: <b>${amount}</b>",
+
+    # Funding Log
+    "funding_log_title": "💰 <b>Funding History (Last 24h)</b>",
+    "funding_total": "Total: <b>${val}</b>", 
+    "funding_row": "• {time} {sym}: <b>${val}</b>",
+    "funding_empty": "<i>No funding payments found.</i>",
+    "ai_generating": "⚡ <b>Velox AI is decoding market signals...</b>\n<i>This usually takes ~10 seconds.</i>",
 }
 
 # --- RUSSIAN ---
@@ -294,7 +329,7 @@ RU = {
     "welcome": "👋 <b>Velox Terminal</b>\n\nМониторинг и аналитика портфеля Hyperliquid в реальном времени.\n\n/add_wallet <code>address</code> - Добавить кошелёк\n/help - Список команд",
     "set_wallet": "⚠️ Кошелёк не подключен. Используй /add_wallet <code>0x...</code>",
     "tracking": "✅ Отслеживаю: <code>{wallet}</code>",
-    "help_msg": "<b>Доступные команды:</b>\n\n🔹 <b>Портфель</b>\n/add_wallet <code>0x...</code> - Трекать кошелёк\n/tag <code>0x...</code> <code>Name</code> - Назвать кошелёк\n/threshold <code>0x...</code> <code>1000</code> - Мин. сумма исполнения ($) для алерта\n\n🔹 <b>Алерты</b>\n/alert <code>ETH</code> <code>3000</code> - Ценовой алерт\n/watch <code>SOL</code> - Добавить в вотчлист\n/unwatch <code>SOL</code> - Убрать из вотчлиста\n/set_prox <code>0.5</code> - Порог 'Цена рядом' %\n/set_vol <code>2.0</code> - Порог волатильности %\n/set_whale <code>250000</code> - Мин. сумма кита\n\n🔹 <b>Прочее</b>\n/start - Главное меню\n/export - Скачать CSV историю PnL",
+    "help_msg": "<b>Доступные команды:</b>\n\n🔹 <b>Портфель</b>\n/add_wallet <code>0x...</code> - Трекать кошелёк\n/tag <code>0x...</code> <code>Name</code> - Назвать кошелёк\n/funding - Лог фандинга (24ч)\n/threshold <code>0x...</code> <code>1000</code> - Мин. сумма ($)\n\n🔹 <b>Алерты</b>\n/alert <code>ETH</code> <code>3000</code> - Ценовой алерт\n/f_alert <code>ETH</code> <code>50</code> - Алерт APR\n/oi_alert <code>ETH</code> <code>100</code> - Алерт OI ($M)\n/watch <code>SOL</code> - Вотчлист\n/unwatch <code>SOL</code> - Убрать из вотчлиста\n/set_prox <code>1.0</code> - Порог 'Цена рядом' %\n/set_vol <code>2.0</code> - Порог волатильности %\n/set_whale <code>250000</code> - Мин. сумма кита\n\n🔹 <b>Рынок</b>\n/overview - AI Обзор Рынка\n/overview_settings - Настройки отчетов\n\n🔹 <b>Прочее</b>\n/start - Меню\n/export - CSV Экспорт",
     
     # Alerts - Management
     "alert_added": "✅ Алерт установлен: <b>{symbol}</b> {dir} <b>${price}</b>",
@@ -508,6 +543,17 @@ RU = {
     "btn_analysis": "🧠 Анализ",
     "btn_export": "📥 Экспорт CSV",
     "btn_flex": "💪 Flex PnL",
+    
+    # Overview Settings
+    "ov_btn_toggle": "Вкл/Выкл",
+    "ov_btn_morning": "Утро (06:00)",
+    "ov_btn_evening": "Вечер (18:00)",
+    "ov_btn_style_det": "Стиль: Подробно",
+    "ov_btn_style_brief": "Стиль: Кратко",
+    "ov_time_added": "✅ Время добавлено: {time}",
+    "ov_prompt_set": "✅ Промпт установлен.",
+    "ov_invalid_time": "❌ Неверный формат (ЧЧ:ММ).",
+
     "flex_title": "💪 <b>PnL Flex Mode</b>",
     "flex_period_day": "День",
     "flex_period_week": "Неделя",
@@ -560,5 +606,28 @@ RU = {
             "calc_funding_row": "\n{icon} <b>Фандинг:</b> {f_rate}% ({apr}% APR)",
             "profit_if_filled": "💰 <b>Профит при исполнении:</b> {val} ({pct}%)",
             "new_avg_if_filled": "🔹 <b>Новая средняя:</b> ${val} ({pct}%)",
-        }
-        
+            
+            # Fear & Greed Index
+            "fng_title": "🧠 <b>Индекс Страха и Жадности</b>",
+            "fng_value": "Сейчас: <b>{value}</b> ({classification})",
+            "fng_change": "Изменение: <b>{change:+d}</b> со вчера",
+            "fng_extreme_fear": "Крайний Страх",
+            "fng_fear": "Страх",
+            "fng_neutral": "Нейтрально",
+            "fng_greed": "Жадность",
+            "fng_extreme_greed": "Крайняя Жадность",
+            "btn_fear_greed": "🧠 Страх и Жадность",
+
+    # Ledger
+    "deposit_alert": "💰 <b>Депозит</b>",
+    "withdraw_alert": "💸 <b>Вывод средств</b>",
+    "transfer_alert": "↔️ <b>Трансфер</b>",
+    "ledger_amt": "Сумма: <b>${amount}</b>",
+
+    # Funding Log
+    "funding_log_title": "💰 <b>История Фандинга (24ч)</b>",
+    "funding_total": "Итого: <b>${val}</b>", 
+    "funding_row": "• {time} {sym}: <b>${val}</b>",
+        "funding_empty": "<i>Нет выплат фандинга.</i>",
+        "ai_generating": "⚡ <b>Velox AI декодирует рыночные сигналы...</b>\n<i>Это займет около 10 секунд.</i>",
+    }        

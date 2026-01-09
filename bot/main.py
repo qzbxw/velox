@@ -45,6 +45,20 @@ async def main():
     # Setup Scheduler
     scheduler = setup_scheduler(bot)
     
+    # Set Bot Commands
+    from aiogram.types import BotCommand
+    commands = [
+        BotCommand(command="start", description="Main Menu"),
+        BotCommand(command="help", description="Show Commands"),
+        BotCommand(command="add_wallet", description="Track Wallet"),
+        BotCommand(command="overview", description="AI Market Overview"),
+        BotCommand(command="funding", description="Funding Log"),
+        BotCommand(command="alert", description="Price Alert"),
+        BotCommand(command="watch", description="Watchlist"),
+        BotCommand(command="export", description="Export CSV"),
+    ]
+    await bot.set_my_commands(commands)
+    
     # Start Polling
     logger.info("Starting bot...")
     try:

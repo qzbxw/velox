@@ -50,6 +50,7 @@ class WSManager:
         self.alerts_refresh_task = None
         self.whale_task = None
         self.listing_check_task = None
+        self.ledger_task = None
         
         # Market Stats for Alerts
         self.asset_ctx_cache = {} # sym -> ctx data
@@ -66,6 +67,7 @@ class WSManager:
         self.alerts_refresh_task = asyncio.create_task(self._refresh_alerts_loop())
         self.whale_task = asyncio.create_task(self._whale_assets_loop())
         self.listing_check_task = asyncio.create_task(self._listing_monitor_loop())
+        self.ledger_task = asyncio.create_task(self._ledger_loop())
         
         while self.running:
             try:
@@ -877,7 +879,7 @@ class WSManager:
 
             # Check for "dust" orders triggering USD alert while being far away
             if pct_diff > 0.10:
-                return
+                continue
 
             # Formatted Numbers
             mid_fmt = pretty_float(current_px)
@@ -978,10 +980,19 @@ class WSManager:
                 else:
                     title = _t(lang, "fill_alert_title")
 
+                # Get current price for comparison  
+                current_px = self.get_price(coin, original_id=coin)
+                
                 # Build extended message
                 msg = f"{side_emoji} {title}\n\n"
                 msg += f"<b>{side.upper()} {sz} {safe_coin}</b> @ ${pretty_float(px)}\n"
                 msg += f"💰 {_t(lang, 'value_lbl')}: <b>${pretty_float(usd_value, 2)}</b>\n"
+                
+                # Show current price comparison
+                if current_px and current_px != px:
+                    price_change = ((current_px - px) / px) * 100
+                    change_icon = "📈" if price_change > 0 else "📉"
+                    msg += f"📊 Now: <b>${pretty_float(current_px)}</b> ({change_icon} {price_change:+.2f}%)\n"
                 
                 if fee != 0:
                     msg += f"💸 Fee: <code>${pretty_float(fee, 2)}</code>\n"
@@ -990,10 +1001,30 @@ class WSManager:
                     pnl_icon = "📈" if closed_pnl > 0 else "📉"
                     msg += f"{pnl_icon} <b>Realized PnL: {'+' if closed_pnl > 0 else ''}${pretty_float(closed_pnl, 2)}</b>\n"
 
+                # Add timestamp
+                fill_time = fill.get("time")
+                if fill_time:
+                    try:
+                        from datetime import datetime
+                        ts = datetime.fromtimestamp(int(fill_time) / 1000)
+                        msg += f"🕐 {ts.strftime('%H:%M:%S')}\n"
+                    except:
+                        pass
+
                 msg += f"\n👛 Wallet: {wallet_display}"
                 
+                # Build inline keyboard with quick actions
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                from aiogram.types import InlineKeyboardButton
+                kb = InlineKeyboardBuilder()
+                kb.row(
+                    InlineKeyboardButton(text="📊 Positions", callback_data="cb_positions"),
+                    InlineKeyboardButton(text=f"🔔 Alert {sym_name[:6]}", callback_data=f"quick_alert:{sym_name}")
+                )
+                kb.row(InlineKeyboardButton(text="🏠 Menu", callback_data="cb_menu"))
+                
                 try:
-                    await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                    await self.bot.send_message(chat_id, msg, reply_markup=kb.as_markup(), parse_mode="HTML")
                 except Exception as e:
                     logger.error(f"Failed to send fill notification to {chat_id}: {e}")
 
@@ -1117,3 +1148,105 @@ class WSManager:
                     await self.bot.send_message(chat_id, msg, parse_mode="HTML")
                 except:
                     pass
+
+    async def _ledger_loop(self):
+        """Monitor deposits and withdrawals via REST polling."""
+        from bot.services import get_user_ledger
+        logger.info("Starting Ledger Monitor Loop")
+        
+        while self.running:
+            try:
+                # 1. Get unique wallets
+                wallets = await db.get_all_watched_addresses()
+                
+                for wallet in wallets:
+                    # 2. Get state
+                    w_state = await db.get_wallet_state(wallet)
+                    last_time = int(w_state.get("last_ledger_time", 0)) if w_state else 0
+                    
+                    # 3. Fetch updates
+                    # If last_time == 0, we fetch updates, find max time, save it, and continue (no alert on first run)
+                    updates = await get_user_ledger(wallet, start_time=last_time + 1 if last_time > 0 else None)
+                    
+                    if not updates or not isinstance(updates, list):
+                        continue
+                        
+                    # Filter updates
+                    new_max_time = last_time
+                    valid_updates = []
+                    
+                    for event in updates:
+                        # event structure: {"hash": "...", "time": 123456789, "delta": {...}}
+                        ts = int(event.get("time", 0))
+                        if ts > last_time:
+                            valid_updates.append(event)
+                            if ts > new_max_time:
+                                new_max_time = ts
+                    
+                    # Initialization check
+                    if last_time == 0:
+                        if new_max_time > 0:
+                            await db.update_wallet_ledger_time(wallet, new_max_time)
+                        continue
+                    
+                    # Process Alerts
+                    valid_updates.sort(key=lambda x: int(x.get("time", 0)))
+                    
+                    for event in valid_updates:
+                        delta = event.get("delta", {})
+                        type_ = delta.get("type")
+                        
+                        # Supported types
+                        if type_ not in ("deposit", "withdraw", "transfer", "spotTransfer"):
+                            continue
+                            
+                        # Extract amount
+                        amount = delta.get("usdc") or delta.get("amount") or 0.0
+                        try:
+                            amount = float(amount)
+                        except:
+                            amount = 0.0
+                        
+                        # Determine Alert Key
+                        key_map = {
+                            "deposit": "deposit_alert",
+                            "withdraw": "withdraw_alert",
+                            "transfer": "transfer_alert",
+                            "spotTransfer": "transfer_alert"
+                        }
+                        
+                        key = key_map.get(type_, "transfer_alert")
+                        
+                        # Notify Users
+                        users = await db.get_users_by_wallet(wallet)
+                        for user in users:
+                            chat_id = user["chat_id"]
+                            lang = await db.get_lang(chat_id)
+                            
+                            title = _t(lang, key)
+                            msg = f"{title}\n"
+                            msg += f"👛 <code>{wallet[:6]}...{wallet[-4:]}</code>\n"
+                            msg += _t(lang, "ledger_amt", amount=pretty_float(amount))
+                            
+                            # Add time
+                            try:
+                                from datetime import datetime
+                                ts_dt = datetime.fromtimestamp(int(event.get("time", 0)) / 1000)
+                                msg += f"\n🕐 {ts_dt.strftime('%H:%M:%S')}"
+                            except: pass
+
+                            try:
+                                await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                            except: pass
+                            
+                    # Update DB
+                    if new_max_time > last_time:
+                        await db.update_wallet_ledger_time(wallet, new_max_time)
+                        
+                    await asyncio.sleep(0.5) # Pace per wallet
+                    
+                await asyncio.sleep(60) # Global loop interval
+                
+            except Exception as e:
+                logger.error(f"Ledger Loop Error: {e}")
+                await asyncio.sleep(60)

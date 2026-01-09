@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, BufferedInputFile, InputMediaPhoto
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, BufferedInputFile, InputMediaPhoto, ErrorEvent
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.database import db
 from bot.locales import _t
@@ -11,7 +11,8 @@ from bot.services import (
     get_symbol_name, get_mid_price, get_open_orders, get_spot_balances, 
     get_perps_state, pretty_float, get_user_portfolio, get_perps_context,
     extract_avg_entry_from_balance, get_user_fills, get_hlp_info,
-    get_user_vault_equities, get_user_funding, get_user_ledger
+    get_user_vault_equities, get_user_funding, get_user_ledger,
+    get_all_assets_meta, get_fear_greed_index
 )
 from bot.analytics import (
     generate_pnl_chart, format_funding_heatmap, generate_pnl_card, 
@@ -19,10 +20,13 @@ from bot.analytics import (
     prepare_terminal_dashboard_data_clean, prepare_positions_table_data,
     prepare_orders_table_data
 )
+from bot.market_overview import market_overview
+import markdown
 from bot.renderer import render_html_to_image
 import logging
 import time
 import html
+import re
 import math
 import csv
 import io
@@ -51,6 +55,8 @@ def _main_menu_kb(lang):
     kb = InlineKeyboardBuilder()
     # Row 0: Terminal
     kb.row(InlineKeyboardButton(text="🖥️ Terminal", callback_data="cb_terminal"))
+    # Row 0.5: VELOX AI
+    kb.row(InlineKeyboardButton(text="✨ VELOX AI", callback_data="cb_ai_overview_menu"))
     # Row 1: Portfolio & Trading
     kb.row(
         InlineKeyboardButton(text=_t(lang, "cat_portfolio"), callback_data="sub:portfolio"),
@@ -111,8 +117,11 @@ def _market_kb(lang):
         InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data="cb_whales")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_alerts"),
+        InlineKeyboardButton(text=_t(lang, "btn_fear_greed"), callback_data="cb_fear_greed"),
         InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data="cb_alerts")
+    )
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_alerts")
     )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
@@ -124,6 +133,8 @@ def _back_kb(lang, target="cb_menu"):
 
 def _settings_kb(lang):
     kb = InlineKeyboardBuilder()
+    # Row 0: AI Settings
+    kb.row(InlineKeyboardButton(text="🤖 AI Overview", callback_data="cb_overview_settings_menu"))
     # Row 1: Wallets & Flex
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_wallets"), callback_data="cb_wallets_menu"),
@@ -493,6 +504,112 @@ async def _generate_export_files(wallet: str):
     doc_fills = BufferedInputFile(output_fills.getvalue().encode(), filename=f"fills_{wallet[:6]}.csv")
     
     return doc_hist, doc_fills
+
+@router.message(Command("funding"))
+async def cmd_funding(message: Message):
+    await _show_funding_page(message.chat.id, message.chat.id, page=0, edit=False)
+
+@router.callback_query(F.data.startswith("cb_funding:"))
+async def cb_funding_page(call: CallbackQuery):
+    parts = call.data.split(":")
+    page = int(parts[1])
+    await _show_funding_page(call.message.chat.id, call.message.chat.id, page=page, edit=True, msg_id=call.message.message_id)
+    await call.answer()
+
+async def _render_funding_page(bot, chat_id, page=0, edit=False, msg_id=None):
+    lang = await db.get_lang(chat_id)
+    wallets = await db.list_wallets(chat_id)
+    
+    if not wallets:
+        if edit:
+            try:
+                await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=_t(lang, "need_wallet"), parse_mode="HTML")
+            except: pass
+        else:
+            await bot.send_message(chat_id, _t(lang, "need_wallet"), parse_mode="HTML")
+        return
+
+    from bot.services import get_user_funding
+    from datetime import datetime
+    import time
+    
+    start_ts = int((time.time() - 86400) * 1000) # 24h ago
+    all_updates = []
+    
+    # Aggregate
+    for wallet in wallets:
+        updates = await get_user_funding(wallet, start_time=start_ts)
+        if updates:
+            for u in updates:
+                u['wallet'] = wallet
+            all_updates.extend(updates)
+            
+    # Sort
+    all_updates.sort(key=lambda x: int(x.get("time", 0)), reverse=True)
+    
+    # Pagination
+    ITEMS_PER_PAGE = 10
+    total_items = len(all_updates)
+    total_pages = math.ceil(total_items / ITEMS_PER_PAGE)
+    
+    if page >= total_pages: page = max(0, total_pages - 1)
+    
+    start_idx = page * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    items = all_updates[start_idx:end_idx]
+    
+    # Calc Total Sum (Global)
+    total_sum_usd = sum([float(u.get("delta", {}).get("usdc", 0) or 0) for u in all_updates])
+    
+    msg_text = f"💰 <b>{_t(lang, 'funding_log_title')}</b>\n"
+    msg_text += f"Total (24h): <b>${pretty_float(total_sum_usd, 2)}</b>\n\n"
+    
+    if not items:
+        msg_text += f"<i>{_t(lang, 'funding_empty')}</i>"
+    else:
+        for item in items:
+            ts = int(item.get("time", 0)) / 1000
+            t_str = datetime.fromtimestamp(ts).strftime('%H:%M')
+            delta = item.get("delta", {})
+            sym = delta.get("coin", "???")
+            amount = float(delta.get("usdc", 0) or 0)
+            
+            w_short = f"{item['wallet'][:4]}..{item['wallet'][-3:]}"
+            val_str = f"{amount:+.2f}"
+            
+            msg_text += f"• {t_str} <b>{sym}</b>: <b>${val_str}</b> [{w_short}]\n"
+            
+    msg_text += f"\n<i>Page {page+1}/{max(1, total_pages)}</i>"
+    
+    # Buttons
+    kb = InlineKeyboardBuilder()
+    row = []
+    if page > 0:
+        row.append(InlineKeyboardButton(text="<<", callback_data=f"cb_funding:{page-1}"))
+    row.append(InlineKeyboardButton(text="🔄", callback_data=f"cb_funding:{page}"))
+    if page < total_pages - 1:
+        row.append(InlineKeyboardButton(text=">>", callback_data=f"cb_funding:{page+1}"))
+    kb.row(*row)
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    
+    if edit and msg_id:
+        try:
+            await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=msg_text, reply_markup=kb.as_markup(), parse_mode="HTML")
+        except Exception:
+            pass
+    else:
+        await bot.send_message(chat_id, msg_text, reply_markup=kb.as_markup(), parse_mode="HTML")
+
+@router.message(Command("funding"))
+async def cmd_funding(message: Message):
+    await _render_funding_page(message.bot, message.chat.id, page=0, edit=False)
+
+@router.callback_query(F.data.startswith("cb_funding:"))
+async def cb_funding_page(call: CallbackQuery):
+    parts = call.data.split(":")
+    page = int(parts[1])
+    await _render_funding_page(call.message.bot, call.message.chat.id, page=page, edit=True, msg_id=call.message.message_id)
+    await call.answer()
 
 @router.message(Command("export"))
 async def cmd_export(message: Message):
@@ -1352,6 +1469,50 @@ async def cb_del_alert(call: CallbackQuery):
         
     await cb_alerts(call)
 
+@router.callback_query(F.data.startswith("quick_alert:"))
+async def cb_quick_alert(call: CallbackQuery):
+    """Quick alert setup from fill notification"""
+    symbol = call.data.split(":")[1]
+    lang = await db.get_lang(call.message.chat.id)
+    
+    # Get current price
+    current_price = await get_mid_price(symbol)
+    if not current_price:
+        await call.answer("❌ Cannot get price", show_alert=True)
+        return
+    
+    # Suggest +/- 3% as default targets
+    above_target = current_price * 1.03
+    below_target = current_price * 0.97
+    
+    text = f"🔔 <b>Quick Alert: {symbol}</b>\n\n"
+    text += f"Current price: <b>${pretty_float(current_price)}</b>\n\n"
+    text += "Choose alert type:"
+    
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text=f"📈 Above ${pretty_float(above_target)}", callback_data=f"set_quick_alert:{symbol}:above:{above_target}"),
+        InlineKeyboardButton(text=f"📉 Below ${pretty_float(below_target)}", callback_data=f"set_quick_alert:{symbol}:below:{below_target}")
+    )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    
+    await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await call.answer()
+
+@router.callback_query(F.data.startswith("set_quick_alert:"))
+async def cb_set_quick_alert(call: CallbackQuery):
+    """Set the quick alert"""
+    parts = call.data.split(":")
+    symbol = parts[1]
+    direction = parts[2]
+    target = float(parts[3])
+    
+    lang = await db.get_lang(call.message.chat.id)
+    await db.add_price_alert(call.message.chat.id, symbol, target, direction)
+    
+    await call.answer(_t(lang, "alert_added", symbol=symbol, dir=direction, price=pretty_float(target)), show_alert=True)
+    await cb_alerts(call)
+
 @router.message(Command("watch"))
 async def cmd_watch(message: Message):
     lang = await db.get_lang(message.chat.id)
@@ -1501,6 +1662,16 @@ async def cb_market_overview(call: CallbackQuery, state: FSMContext):
     data_liq = prepare_liquidity_data(asset_ctxs, universe)
     data_prices = prepare_coin_prices_data(asset_ctxs, universe)
     
+    # Fetch Fear & Greed
+    from bot.services import get_fear_greed_index
+    fng = await get_fear_greed_index()
+    fng_text = ""
+    if fng:
+        fng_emoji = fng["emoji"]
+        val = fng["value"]
+        cl = fng["classification"]
+        fng_text = f"• Fear/Greed: {fng_emoji} <b>{val}</b> ({cl})\n"
+    
     try:
         # Render all images
         buf_alpha = await render_html_to_image("market_stats.html", data_alpha)
@@ -1554,7 +1725,8 @@ async def cb_market_overview(call: CallbackQuery, state: FSMContext):
             f"<b>{_t(lang, 'market_report_global')}</b>\n"
             f"• Vol 24h: <b>${data_alpha['global_volume']}</b>\n"
             f"• Total OI: <b>${data_alpha['total_oi']}</b>\n"
-            f"• Sentiment: <code>{data_alpha['sentiment_label']}</code>\n\n"
+            f"• Sentiment: <code>{data_alpha['sentiment_label']}</code>\n"
+            f"{fng_text}\n"
             f"<b>{_t(lang, 'market_report_majors')}</b>\n"
             f"{majors_text}"
             f"{watchlist_text}"
@@ -1885,6 +2057,8 @@ class SettingsStates(StatesGroup):
     waiting_for_prox = State()
     waiting_for_vol = State()
     waiting_for_whale = State()
+    waiting_for_ov_time = State()
+    waiting_for_ov_prompt = State()
 
 class MarketAlertStates(StatesGroup):
     waiting_for_time = State()
@@ -2090,6 +2264,9 @@ async def process_alert_symbol(message: Message, state: FSMContext):
 
 @router.message(AlertStates.waiting_for_target)
 async def process_alert_target(message: Message, state: FSMContext):
+    try: await message.delete()
+    except: pass
+    
     lang = await db.get_lang(message.chat.id)
     try:
         target = float(message.text.replace(",", "."))
@@ -2532,6 +2709,58 @@ async def cb_toggle_whales(call: CallbackQuery):
     await db.update_user_settings(call.message.chat.id, {"whale_alerts": is_on})
     await cb_whales(call)
 
+@router.callback_query(F.data == "cb_fear_greed")
+async def cb_fear_greed(call: CallbackQuery):
+    """Display Fear & Greed Index from Alternative.me"""
+    lang = await db.get_lang(call.message.chat.id)
+    
+    from bot.services import get_fear_greed_index
+    fng = await get_fear_greed_index()
+    
+    if not fng:
+        await smart_edit(call, "❌ Unable to fetch Fear & Greed data.", reply_markup=_back_kb(lang, "sub:market"))
+        await call.answer()
+        return
+    
+    value = fng["value"]
+    classification = fng["classification"]
+    change = fng["change"]
+    emoji = fng["emoji"]
+    
+    # Visual gauge bar
+    filled = int(value / 5)  # 0-20 bars
+    gauge = "█" * filled + "░" * (20 - filled)
+    
+    # Change arrow
+    if change > 0:
+        change_icon = "📈"
+    elif change < 0:
+        change_icon = "📉"
+    else:
+        change_icon = "➖"
+    
+    text = f"{_t(lang, 'fng_title')}\n\n"
+    text += f"{emoji} <b>{value}</b> — {classification}\n\n"
+    text += f"<code>[{gauge}]</code>\n"
+    text += f"<code>0   Fear         Greed   100</code>\n\n"
+    text += f"{change_icon} {_t(lang, 'fng_change', change=change)}\n\n"
+    text += f"<i>Source: Alternative.me Crypto Fear & Greed Index</i>"
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 " + _t(lang, "btn_refresh"), callback_data="cb_fear_greed")
+    kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
+    kb.adjust(1)
+    
+    # Try to edit if message exists (Refresh logic)
+    try:
+        await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    except Exception:
+        # If content identical or can't edit (e.g. was a photo), fallback to smart_edit which handles deletion
+        if "message is not modified" not in str(Exception):
+             await smart_edit(call, text, reply_markup=kb.as_markup())
+             
+    await call.answer()
+
 @router.callback_query(F.data == "set_whale_thr_prompt")
 async def cb_set_whale_thr_prompt(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
@@ -2650,6 +2879,43 @@ async def process_set_whale_state(message: Message, state: FSMContext):
         except: await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
     else:
         await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+
+@router.message(SettingsStates.waiting_for_ov_time)
+async def process_ov_time(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    t_str = message.text.strip()
+    
+    # Validate HH:MM
+    if not re.match(r"^\d{2}:\d{2}$", t_str):
+        await message.answer(_t(lang, "ov_invalid_time"))
+        return
+
+    cfg = await db.get_overview_settings(message.from_user.id)
+    if t_str not in cfg["schedules"]:
+        cfg["schedules"].append(t_str)
+        await db.update_overview_settings(message.from_user.id, cfg)
+        
+    await state.clear()
+    await message.answer(_t(lang, "ov_time_added", time=t_str))
+    await cmd_overview_settings(message)
+
+@router.message(SettingsStates.waiting_for_ov_prompt)
+async def process_ov_prompt(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    text = message.text.strip()
+    
+    cfg = await db.get_overview_settings(message.from_user.id)
+    
+    if text.lower() == "clear":
+        cfg["prompt_override"] = None
+    else:
+        cfg["prompt_override"] = text
+        
+    await db.update_overview_settings(message.from_user.id, cfg)
+    
+    await state.clear()
+    await message.answer(_t(lang, "ov_prompt_set"))
+    await cmd_overview_settings(message)
 
 @router.message(Command("set_prox"))
 async def cmd_set_prox(message: Message):
@@ -3239,3 +3505,355 @@ async def cb_manual_digest(call: CallbackQuery):
         f"📅 24h Change: {icon} <b>${pretty_float(diff, 2)}</b> ({pct:+.2f}%)"
     )
     await call.message.answer(msg, parse_mode="HTML")
+
+# --- MARKET OVERVIEW ---
+
+async def _fetch_market_snapshot():
+    ctx = await get_perps_context()
+    # ctx[0] is universe, ctx[1] is asset_ctxs
+    # Return full context for detailed processing
+    return ctx
+
+async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
+    lang = await db.get_lang(chat_id)
+    if not status_msg:
+        status_msg = await bot.send_message(chat_id, _t(lang, "ai_generating"), parse_mode="HTML")
+    
+    try:
+        # Fetch data in parallel
+        ctx, news, fng = await asyncio.gather(
+            get_perps_context(),
+            market_overview.fetch_news_rss(since_timestamp=time.time() - 86400),
+            get_fear_greed_index(),
+            return_exceptions=True
+        )
+
+        if isinstance(ctx, Exception) or not ctx:
+            raise ValueError("Failed to fetch market context")
+        
+        universe = ctx[0]["universe"] if isinstance(ctx[0], dict) and "universe" in ctx[0] else ctx[0]
+        asset_ctxs = ctx[1]
+
+        # Process Market Data for Prompt
+        market_data = {}
+        for sym in ["BTC", "ETH"]:
+            idx = next((i for i, u in enumerate(universe) if u.get("name") == sym), -1)
+            if idx != -1 and idx < len(asset_ctxs):
+                ac = asset_ctxs[idx]
+                p = float(ac.get("markPx", 0))
+                prev = float(ac.get("prevDayPx", 0) or p)
+                change = ((p - prev)/prev)*100 if prev else 0
+                market_data[sym] = {"price": pretty_float(p), "change": round(change, 2)}
+            else:
+                market_data[sym] = {"price": "0", "change": 0.0}
+
+        # Flow data (legacy support for prompt, but zeroed out visually)
+        market_data["btc_etf_flow"] = 0
+        market_data["eth_etf_flow"] = 0
+
+        # --- Calculate Top Movers for Image ---
+        # Sort by Change %
+        def get_change(idx):
+            if idx >= len(asset_ctxs): return 0
+            ac = asset_ctxs[idx]
+            p = float(ac.get("markPx", 0))
+            prev = float(ac.get("prevDayPx", 0) or p)
+            return ((p - prev)/prev)*100 if prev else 0
+
+        mover_indices = [(i, get_change(i)) for i in range(len(universe))]
+        mover_indices.sort(key=lambda x: x[1], reverse=True)
+        
+        top_gainer = universe[mover_indices[0][0]]["name"]
+        top_gainer_pct = mover_indices[0][1]
+        
+        top_loser = universe[mover_indices[-1][0]]["name"]
+        top_loser_pct = mover_indices[-1][1]
+        
+        # Sort by Volume
+        vol_indices = [(i, float(asset_ctxs[i].get("dayNtlVlm", 0))) for i in range(len(universe)) if i < len(asset_ctxs)]
+        vol_indices.sort(key=lambda x: x[1], reverse=True)
+        top_vol = universe[vol_indices[0][0]]["name"]
+        top_vol_val = vol_indices[0][1]
+        
+        # Sort by Funding
+        fund_indices = [(i, float(asset_ctxs[i].get("funding", 0))) for i in range(len(universe)) if i < len(asset_ctxs)]
+        fund_indices.sort(key=lambda x: x[1], reverse=True)
+        top_fund = universe[fund_indices[0][0]]["name"]
+        top_fund_val = fund_indices[0][1] * 100 * 24 * 365 # APR
+
+        user_config = await db.get_overview_settings(user_id)
+        
+        # AI Generation
+        ai_data = await market_overview.generate_summary(
+            market_data, 
+            news, 
+            "INTELLIGENCE",
+            custom_prompt=user_config.get("prompt_override"),
+            style=user_config.get("style", "detailed"),
+            lang=lang
+        )
+        
+        if not isinstance(ai_data, dict):
+             ai_data = {"summary": str(ai_data), "sentiment": "Neutral", "next_event": "N/A"}
+
+        summary_text = ai_data.get("summary", "No summary available.")
+        sentiment = ai_data.get("sentiment", "Neutral")
+
+        # Global Volatility Proxy (Average Absolute Change of Top 50 Vol Coins)
+        # Or just use the Fear & Greed as is, and replace Next Event with "Market Vitality"
+        
+        render_data = {
+            "period_label": "INTELLIGENCE",
+            "date": datetime.datetime.now().strftime("%d %b %H:%M"),
+            "btc": market_data["BTC"],
+            "eth": market_data["ETH"],
+            "sentiment": sentiment,
+            "fng": fng if fng and not isinstance(fng, Exception) else {"value": 0, "classification": "N/A"},
+            "gemini_model": "3 Flash Preview",
+            
+            # New Data Fields
+            "top_gainer": {"sym": top_gainer, "val": top_gainer_pct},
+            "top_loser": {"sym": top_loser, "val": top_loser_pct},
+            "top_vol": {"sym": top_vol, "val": f"${top_vol_val/1e6:.0f}M"},
+            "top_fund": {"sym": top_fund, "val": f"{top_fund_val:.0f}%"}
+        }
+        
+        img_buf = await render_html_to_image("market_overview.html", render_data, width=1000, height=1000)
+        
+        # Header for Image Caption
+        btc_d = market_data.get("BTC", {})
+        eth_d = market_data.get("ETH", {})
+        btc_c = btc_d.get("change", 0.0)
+        eth_c = eth_d.get("change", 0.0)
+        btc_icon = "🟢" if btc_c >= 0 else "🔴"
+        eth_icon = "🟢" if eth_c >= 0 else "🔴"
+        
+        header = (
+            f"<b>BTC: ${btc_d.get('price', '0')} ({btc_icon} {btc_c:+.2f}%)</b>\n"
+            f"<b>ETH: ${eth_d.get('price', '0')} ({eth_icon} {eth_c:+.2f}%)</b>"
+        )
+        
+        # Send Image
+        img_msg = await bot.send_photo(
+             chat_id=chat_id,
+             photo=BufferedInputFile(img_buf.read(), filename="overview.png"),
+             caption=f"{header}\n\n<b>VELOX AI</b>",
+             parse_mode="HTML"
+        )
+        
+        # Prepare Text Report
+        report_text = html.escape(summary_text)
+        report_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', report_text)
+        report_text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', report_text)
+        
+        kb = InlineKeyboardBuilder()
+        kb.button(text=_t(lang, "btn_refresh"), callback_data="cb_market_overview_refresh")
+        kb.button(text=_t(lang, "btn_settings"), callback_data="cb_overview_settings_menu")
+        kb.button(text=_t(lang, "btn_back"), callback_data="cb_ai_cleanup")
+        kb.adjust(1, 2)
+
+        txt_msg = await bot.send_message(
+            chat_id=chat_id,
+            text=report_text,
+            parse_mode="HTML",
+            reply_markup=kb.as_markup()
+        )
+        
+        # Store message IDs for cleanup
+        state = FSMContext(
+            storage=bot.fsm.storage,
+            key=bot.fsm.resolve_context_key(chat_id, user_id)
+        )
+        await state.update_data(ai_overview_msg_ids=[img_msg.message_id, txt_msg.message_id])
+        
+        await status_msg.delete()
+        
+    except Exception as e:
+        logger.error(f"Overview error: {e}", exc_info=True)
+        if status_msg:
+            await status_msg.edit_text("❌ Failed to generate overview.")
+
+@router.callback_query(F.data == "cb_ai_cleanup")
+async def cb_ai_cleanup(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    mids = data.get("ai_overview_msg_ids", [])
+    for mid in mids:
+        try:
+            await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
+        except:
+            pass
+    await state.update_data(ai_overview_msg_ids=None)
+    # Go back to market menu
+    await cb_sub_market(call)
+
+@router.message(Command("overview"))
+async def cmd_overview(message: Message):
+    await _send_ai_overview(message.bot, message.chat.id, message.from_user.id)
+
+@router.callback_query(F.data == "cb_market_overview_refresh")
+async def cb_market_overview_refresh(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    # Clean up previous messages first if they exist
+    data = await state.get_data()
+    mids = data.get("ai_overview_msg_ids", [])
+    for mid in mids:
+        try:
+            await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
+        except:
+            pass
+            
+    lang = await db.get_lang(call.message.chat.id)
+    status_msg = await call.message.answer(_t(lang, "ai_generating"), parse_mode="HTML")
+    await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg)
+
+@router.message(Command("overview_settings"))
+async def cmd_overview_settings(message: Message):
+    lang = await db.get_lang(message.chat.id)
+    cfg = await db.get_overview_settings(message.from_user.id)
+    
+    prompt_status = "✅ Custom" if cfg.get('prompt_override') else "❌ Default"
+    
+    text = (
+        f"⚙️ <b>{_t(lang, 'market_title')} - {_t(lang, 'settings_title')}</b>\n\n"
+        f"<b>Status:</b> {'✅ Enabled' if cfg['enabled'] else '🔴 Disabled'}\n"
+        f"<b>Prompt:</b> {prompt_status}\n\n"
+        f"<b>Schedule (UTC):</b>"
+    )
+    
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text=_t(lang, "ov_btn_toggle"), callback_data="ov_toggle"))
+    
+    # List times
+    schedules = cfg.get("schedules", [])
+    if not schedules:
+        text += "\n<i>No scheduled times.</i>"
+    else:
+        for t in sorted(schedules):
+            kb.row(InlineKeyboardButton(text=f"❌ {t}", callback_data=f"ov_del_time:{t}"))
+            text += f"\n• {t}"
+            
+    kb.row(
+        InlineKeyboardButton(text="➕ Add Time", callback_data="ov_add_time"),
+        InlineKeyboardButton(text="📝 Set Prompt", callback_data="ov_prompt")
+    )
+    
+    await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("ov_"))
+async def cb_overview_settings(call: CallbackQuery, state: FSMContext):
+    action = call.data
+    user_id = call.from_user.id
+    lang = await db.get_lang(call.message.chat.id)
+    
+    if action == "ov_add_time":
+        await state.update_data(menu_msg_id=call.message.message_id)
+        await call.message.edit_text(_t(lang, "add_time_prompt"), reply_markup=_back_kb(lang, "cb_overview_settings_menu"), parse_mode="HTML")
+        await state.set_state(SettingsStates.waiting_for_ov_time)
+        await call.answer()
+        return
+
+    if action == "ov_prompt":
+        await state.update_data(menu_msg_id=call.message.message_id)
+        await call.message.edit_text("⌨️ Enter your <b>Custom Prompt</b> instructions:\n<i>(e.g. 'Focus on DeFi tokens', 'Be sarcastic')</i>\nType 'clear' to reset.", reply_markup=_back_kb(lang, "cb_overview_settings_menu"), parse_mode="HTML")
+        await state.set_state(SettingsStates.waiting_for_ov_prompt)
+        await call.answer()
+        return
+
+    cfg = await db.get_overview_settings(user_id)
+    
+    if action == "ov_toggle":
+        cfg["enabled"] = not cfg["enabled"]
+    elif action.startswith("ov_del_time:"):
+        t = action.split(":", 1)[1]
+        if t in cfg["schedules"]:
+            cfg["schedules"].remove(t)
+            
+    await db.update_overview_settings(user_id, cfg)
+    
+    # Refresh message
+    prompt_status = "✅ Custom" if cfg.get('prompt_override') else "❌ Default"
+    text = (
+        f"⚙️ <b>{_t(lang, 'market_title')} - {_t(lang, 'settings_title')}</b>\n\n"
+        f"<b>Status:</b> {'✅ Enabled' if cfg['enabled'] else '🔴 Disabled'}\n"
+        f"<b>Prompt:</b> {prompt_status}\n\n"
+        f"<b>Schedule (UTC):</b>"
+    )
+    
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text=_t(lang, "ov_btn_toggle"), callback_data="ov_toggle"))
+    
+    schedules = cfg.get("schedules", [])
+    if not schedules:
+        text += "\n<i>No scheduled times.</i>"
+    else:
+        for t in sorted(schedules):
+            kb.row(InlineKeyboardButton(text=f"❌ {t}", callback_data=f"ov_del_time:{t}"))
+            text += f"\n• {t}"
+            
+    kb.row(
+        InlineKeyboardButton(text="➕ Add Time", callback_data="ov_add_time"),
+        InlineKeyboardButton(text="📝 Set Prompt", callback_data="ov_prompt")
+    )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
+
+    try:
+        await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    except: pass
+    await call.answer()
+
+@router.callback_query(F.data == "cb_overview_settings_menu")
+async def cb_overview_settings_menu(call: CallbackQuery):
+    await call.answer()
+    lang = await db.get_lang(call.message.chat.id)
+    cfg = await db.get_overview_settings(call.from_user.id)
+    
+    prompt_status = "✅ Custom" if cfg.get('prompt_override') else "❌ Default"
+    
+    text = (
+        f"⚙️ <b>{_t(lang, 'market_title')} - {_t(lang, 'settings_title')}</b>\n\n"
+        f"<b>Status:</b> {'✅ Enabled' if cfg['enabled'] else '🔴 Disabled'}\n"
+        f"<b>Prompt:</b> {prompt_status}\n\n"
+        f"<b>Schedule (UTC):</b>"
+    )
+    
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text=_t(lang, "ov_btn_toggle"), callback_data="ov_toggle"))
+    
+    schedules = cfg.get("schedules", [])
+    if not schedules:
+        text += "\n<i>No scheduled times.</i>"
+    else:
+        for t in sorted(schedules):
+            kb.row(InlineKeyboardButton(text=f"❌ {t}", callback_data=f"ov_del_time:{t}"))
+            text += f"\n• {t}"
+            
+    kb.row(
+        InlineKeyboardButton(text="➕ Add Time", callback_data="ov_add_time"),
+        InlineKeyboardButton(text="📝 Set Prompt", callback_data="ov_prompt")
+    )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
+    
+    await smart_edit(call, text, reply_markup=kb.as_markup())
+
+@router.callback_query(F.data == "cb_ai_overview_menu")
+async def cb_ai_overview_menu(call: CallbackQuery):
+    await call.answer()
+    try:
+        await call.message.delete()
+    except:
+        pass
+        
+    lang = await db.get_lang(call.message.chat.id)
+    status_msg = await call.message.answer(_t(lang, "ai_generating"), parse_mode="HTML")
+    await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg)
+
+@router.error()
+async def global_error_handler(event: ErrorEvent):
+    logger.error(f"Critical Error in Handler: {event.exception}", exc_info=True)
+    try:
+        if event.update.message:
+            await event.update.message.answer("❌ Internal Bot Error. Please try again later.")
+        elif event.update.callback_query:
+            await event.update.callback_query.answer("❌ Internal Error.", show_alert=True)
+    except:
+        pass

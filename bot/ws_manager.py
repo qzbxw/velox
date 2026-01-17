@@ -28,10 +28,6 @@ class WSManager:
         self.open_orders = defaultdict(list)  # wallet -> [orders]
         self.tracked_wallets = set()
         
-    async def fire_hedge_insight(self, chat_id, user_id, context_type, event_data, reply_to_id=None):
-        from bot.handlers import _send_hedge_insight
-        asyncio.create_task(_send_hedge_insight(self.bot, chat_id, user_id, context_type, event_data, reply_to_id))
-
         # All known symbols (Spot + Perps)
         self.all_coins = set()
         
@@ -64,6 +60,10 @@ class WSManager:
         self.top_assets = set()
         self.whale_cache = deque(maxlen=20) # Dedup recent large trades
         self.whale_subscribers_cache = [] # List of user docs
+
+    async def fire_hedge_insight(self, chat_id, user_id, context_type, event_data, reply_to_id=None):
+        from bot.handlers import _send_hedge_insight
+        asyncio.create_task(_send_hedge_insight(self.bot, chat_id, user_id, context_type, event_data, reply_to_id))
 
     async def start(self):
         self.running = True

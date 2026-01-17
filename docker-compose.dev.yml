@@ -17,6 +17,7 @@ services:
       - WATCH_ALERT_PCT=${WATCH_ALERT_PCT}
       - WATCH_ALERT_WINDOW_SEC=${WATCH_ALERT_WINDOW_SEC}
       - WATCH_ALERT_COOLDOWN=${WATCH_ALERT_COOLDOWN}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     depends_on:
       - mongo
     networks:

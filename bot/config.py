@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 class Settings(BaseSettings):
@@ -27,8 +27,10 @@ class Settings(BaseSettings):
     WATCH_ALERT_WINDOW_SEC: int = Field(300, description="Watchlist alert time window in seconds")
     WATCH_ALERT_COOLDOWN: int = Field(900, description="Watchlist alert cooldown per symbol in seconds")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 settings = Settings()

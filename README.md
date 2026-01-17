@@ -90,8 +90,8 @@ An interactive interface where you can ask questions about your specific portfol
 ### Option A: Docker (Production)
 ```bash
 # 1. Clone
-git clone https://github.com/your-repo/velox-hedge-ai.git
-cd velox-hedge-ai
+git clone https://github.com/qzbxw/velox.git
+cd velox
 
 # 2. Config
 cp .env.example .env
@@ -159,4 +159,4 @@ python -m bot.main
 
 ---
 
-*Velox Hedge AI — Clarity in the Chaos.*
+*Velox x Hedge AI*

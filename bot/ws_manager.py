@@ -19,8 +19,15 @@ logger = logging.getLogger(__name__)
 class WSManager:
     def __init__(self, bot):
         self.bot = bot
-        # ... existing init ...
-
+        self.ws_url = settings.HYPERLIQUID_WS_URL
+        self.running = False
+        self.ws = None
+        
+        # Data caches
+        self.mid_prices = {}  # symbol/id -> price
+        self.open_orders = defaultdict(list)  # wallet -> [orders]
+        self.tracked_wallets = set()
+        
     async def fire_hedge_insight(self, chat_id, user_id, context_type, event_data, reply_to_id=None):
         from bot.handlers import _send_hedge_insight
         asyncio.create_task(_send_hedge_insight(self.bot, chat_id, user_id, context_type, event_data, reply_to_id))

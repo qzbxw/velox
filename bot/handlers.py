@@ -3863,14 +3863,20 @@ async def _hedge_settings_render(call: CallbackQuery, user_id: int):
     triggers = cfg.get("triggers", {})
     
     def _btn_text(key, label):
+        if not enabled:
+            return f"⚪️ {label}"
         is_on = triggers.get(key, False)
         return f"{'✅' if is_on else '❌'} {label}"
 
     kb = InlineKeyboardBuilder()
     
     # Row 0: Master Toggle
+    state_text = "ON" if enabled else "OFF"
+    if lang == "ru":
+        state_text = "ВКЛ" if enabled else "ВЫКЛ"
+        
     kb.row(InlineKeyboardButton(
-        text=_t(lang, "hedge_btn_toggle", state="ON" if enabled else "OFF"), 
+        text=_t(lang, "hedge_btn_toggle", state=state_text), 
         callback_data="hedge_toggle_master"
     ))
     
@@ -3905,12 +3911,12 @@ async def _hedge_settings_render(call: CallbackQuery, user_id: int):
 
 @router.callback_query(F.data == "cb_hedge_settings_menu")
 async def cb_hedge_settings_menu(call: CallbackQuery):
-    await _hedge_settings_render(call, call.from_user.id)
+    await _hedge_settings_render(call, call.message.chat.id)
     await call.answer()
 
 @router.callback_query(F.data.startswith("hedge_toggle"))
 async def cb_hedge_toggle(call: CallbackQuery):
-    user_id = call.from_user.id
+    user_id = call.message.chat.id
     cfg = await db.get_hedge_settings(user_id)
     
     if call.data == "hedge_toggle_master":

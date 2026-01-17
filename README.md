@@ -1,175 +1,162 @@
-# ⚡ Velox Hedge AI: Institutional Hyperliquid Terminal
+# ⚡ Velox & 🧠 Hedge AI: Institutional Hyperliquid Terminal
 
 ![Velox Hedge AI](https://img.shields.io/badge/Velox-Hedge_AI-blueviolet?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Production-success?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
-**Velox Hedge AI** is not just a Telegram bot; it is an autonomous, institutional-grade trading terminal and risk management system built specifically for the **Hyperliquid L1** ecosystem.
-
-Powered by **Google Gemini AI** and advanced quantitative analytics, Velox acts as your personal hedge fund analyst, monitoring your portfolio, analyzing market sentiment, and managing risk in real-time, 24/7. It transforms raw blockchain data into high-resolution visual intelligence, giving you the edge of a professional trading desk on your mobile device.
+**Velox Hedge AI** is a dual-core institutional trading system built for **Hyperliquid L1**. It combines a high-performance, real-time tracking terminal (**Velox**) with an autonomous quantitative analyst (**Hedge AI**) powered by Google Gemini.
 
 ---
 
-## 🧠 The AI Core: Velox Intelligence
+# 🖥️ Part 1: Velox Terminal
+**The Execution & Monitoring Engine.**
+Velox is designed to replace standard exchange interfaces with a Telegram-based "Headless Terminal" that offers superior latency and risk management tools.
 
-At the heart of the system lies the **Velox AI Engine**, designed to provide more than just alerts. It offers deep market understanding:
+### 1. 🔔 Advanced Alerting Suite
+Velox monitors the L1 state via WebSockets to provide alerts that standard interfaces cannot match:
 
-*   **AI Market Overviews**: Integrates with LLMs (Google Gemini) to generate human-readable summaries of market conditions, funding rate anomalies, and volatility structures.
-*   **Sentiment Analysis**: Aggregates Fear & Greed indices, funding heatmaps, and Open Interest (OI) flows to determine the psychological state of the market.
-*   **Smart Anomaly Detection**: The AI doesn't just watch price; it watches *deviation*. It detects when funding rates decouple from price action or when OI spikes without volume, alerting you to potential squeezes or traps.
+*   **🎯 Proximity Alerts (Limit Order Tracking)**
+    *   Monitors your open Limit Orders in real-time.
+    *   Alerts you when market price gets within **0.5% - 1.0%** (configurable) of your order.
+    *   *Why?* To let you know you are about to get filled or if front-running is occurring.
+*   **🐋 Whale Watcher**
+    *   Scans **all market trades** globally on Hyperliquid.
+    *   Filters for trades exceeding **$50,000 - $250,000+** (user configurable).
+    *   Includes symbol filtering (Watchlist only vs. Global).
+*   **🌊 Volatility Scanner**
+    *   High-frequency monitor for rapid price movements.
+    *   Alerts on **±2% moves within 5 minutes** (configurable windows).
+    *   Perfect for catching pump/dump starts before they hit major news channels.
+*   **📊 Market Structure Alerts**
+    *   **Funding Rates**: Set alerts for APR spikes (e.g., >50% APR) to catch delta-neutral yield opportunities.
+    *   **Open Interest (OI)**: Alert when OI crosses $100M+ thresholds to detect leverage build-up.
+    *   **Listing Monitor**: Instantly detects new assets added to the Hyperliquid universe (Spot & Perps) within seconds of deployment.
 
----
+### 2. 🛡️ Risk Management & Calculator
+*   **Liquidation Radar**: Real-time monitoring of all sub-accounts. Alerts immediately if **Margin Ratio > 80%**.
+*   **Ledger Monitor**: Detects and reports **Deposits, Withdrawals, and Internal Transfers** for all tracked wallets (great for team/security monitoring).
+*   **Institutional Calculator**: A built-in "Reverse Risk" calculator.
+    *   *Input*: Entry, Stop Loss, and **Dollar Risk** (e.g., "I want to risk $100").
+    *   *Output*: Exact position size (in Coins and USD) and Leverage required.
+    *   *Visuals*: Generates a "Trade Plan" card with R:R ratio, fees, and scaling targets.
 
-## 🚀 Key Modules & Capabilities
+### 3. 🎨 Visual Engine (Headless Browser)
+Velox does not send text walls. It uses **Playwright (Chromium)** to render HTML/CSS templates into high-resolution images:
+*   **Unified Dashboard**: A single snapshot showing Equity, uPnL, Margin Usage, and top positions across all wallets.
+*   **Flex PnL Cards**: Generate "Exchange-Style" ROI cards with entry, mark price, and leverage data (perfect for sharing).
+*   **Portfolio Composition**: Donuts charts breaking down Spot vs. Perps vs. HLP Vaults.
+*   **Liquidity Heatmaps**: Visualizes orderbook depth and slippage ($100k impact) for top assets.
 
-### 1. 🖥️ The Velox Terminal (Visual Dashboard)
-Velox bypasses standard text alerts by using a **Headless Browser Rendering Engine (Playwright)** to generate pixel-perfect, CSS-styled financial dashboards directly in Telegram.
-*   **Unified Dashboard**: A single high-res image showing Equity, uPnL, Margin Usage, and Top Positions.
-*   **Flex PnL Cards**: Generate "Exchange-Style" ROI cards for any position to share with communities, complete with entry, mark price, and leverage data.
-*   **Portfolio Composition**: Visual pie charts and breakdowns of your asset allocation (Spot vs. Perps vs. Vaults).
-
-### 2. 🛡️ Velox Hedge: Risk Sentinel
-The "Hedge" in our name stands for uncompromised safety. The bot includes a sophisticated Risk Engine:
-*   **Liquidation Radar**: Instantly scans all open positions for liquidation proximity.
-*   **Margin Health Monitor**: Alerts when Account Margin Ratio exceeds safe thresholds.
-*   **Reverse Risk Calculator**: A professional calculator that derives position size based on your dollar risk tolerance (e.g., "I want to risk $100 on this trade").
-*   **Exposure Analysis**: Tracks net delta exposure across all sub-accounts.
-
-### 3. ⚡ Real-Time L1 Connectivity
-Velox connects directly to Hyperliquid's **WebSocket** feed for institutional latency:
-*   **Event-Driven Architecture**: Uses Python's `asyncio` for non-blocking handling of thousands of concurrent price updates.
-*   **Debounced Alerts**: Intelligent filtering prevents alert fatigue during high-volatility events.
-*   **Multi-Wallet Tracking**: Monitor an unlimited number of wallets (Spot, Perps, and HLP Vaults) simultaneously.
-
-### 4. 📊 Quantitative Analytics
-*   **Funding Heatmaps**: Visual color-coded grids showing APR hotspots across the entire market.
-*   **Liquidity Stats**: Analysis of order book depth and volume profiles.
-*   **Whale Watcher**: Filters and reports individual trades exceeding $50k-$100k+ in real-time.
-*   **Volatility Watchlist**: Custom watchlists that alert on rapid % moves within configurable time windows (e.g., ±2% in 5 mins).
-
----
-
-## 📂 Project Structure & Architecture
-
-The codebase is engineered for scalability and modularity. Here is a detailed breakdown of the `bot/` core:
-
-```
-bot/
-├── main.py              # 🚀 Entry Point: Bootstraps Bot, DB, WS Manager, and Scheduler.
-├── config.py            # ⚙️ Configuration: Pydantic-based settings management and env validation.
-├── handlers.py          # 🎮 Interaction Layer: massive router handling all user commands, callbacks, and menus.
-├── ws_manager.py        # 🔌 L1 Uplink: Manages WebSocket connections to Hyperliquid, handles heartbeats and subscriptions.
-├── renderer.py          # 🎨 Visual Engine: Controls Playwright to render HTML templates into PNG images.
-├── analytics.py         # 📈 Data Science: Pandas/NumPy logic for calculating PnL curves, heatmaps, and stats.
-├── database.py          # 💾 Persistence: Async Motor (MongoDB) driver for user state, wallets, and alerts.
-├── market_overview.py   # 📰 Intelligence: Aggregates data for the AI/Global market reports.
-├── scheduler.py         # ⏰ Cron Jobs: Manages recurring tasks like funding checks and daily reports.
-├── services.py          # 🛠️ Service Layer: Business logic for API calls, price fetching, and balance calculations.
-├── locales.py           # 🌍 i18n: Localization system supporting English and Russian.
-└── templates/           # 🖼️ UI Templates: Jinja2 + TailwindCSS HTML templates for image generation.
-    ├── terminal_dashboard.html
-    ├── pnl_card.html
-    ├── funding_heatmap.html
-    └── ...
-```
+### 4. 💼 Multi-Wallet & Export
+*   **Unlimited Wallets**: Track 1 or 100 wallets simultaneously.
+*   **Custom Tags**: Name your wallets (e.g., "Main", "Degen", "Vault").
+*   **CSV Export**: One-click export of full trade history, funding payments, and equity curves for tax/analysis.
 
 ---
 
-## 🛠️ Installation & Deployment
+# 🧠 Part 2: Hedge AI
+**The Quantitative Analyst.**
+Hedge AI is not a chatbot; it is an event-driven analytical layer injected into the terminal.
+
+### 1. ⚡ Contextual Hedge Insights
+When a major event occurs, Hedge AI analyzes it instantly and adds a "Commentary" layer:
+*   **On Liquidation**: Analyzes *why* it happened (volatility spike vs. slow bleed) and suggests collateral adjustments.
+*   **On Whale Trade**: contextualizes the trade (e.g., "Whale bought $500k SOL near resistance, possible breakout").
+*   **On New Listing**: Scrapes project info and provides a rapid fundamental summary.
+
+### 2. 📰 Autonomous Market Reports
+Hedge AI scrapes global data sources to generate human-readable reports:
+*   **Data Sources**: Hyperliquid L1 Data (OI, Vol, Basis), **Farside Investors** (BTC/ETH ETF Flows), and RSS News Feeds (CoinDesk, Decrypt).
+*   **Scheduled Reports**:
+    *   **Morning Brief (06:00 UTC)**: Overnight moves + ETF flows.
+    *   **Evening Wrap (18:00 UTC)**: Day's session summary.
+    *   **Weekly Digest (Sunday)**: Net PnL, realized gains, and net flow analysis.
+*   **Custom Persona**: You can configure Hedge AI's personality (e.g., "Brief & Professional" or "Degen Slang") via `/overview_settings`.
+
+### 3. 💬 Hedge Chat
+An interactive interface where you can ask questions about your specific portfolio:
+*   *"What is my current exposure to SOL?"*
+*   *"Summarize the last 24h of funding payments."*
+*   *"Am I at risk of liquidation?"*
+
+---
+
+## 🛠️ Installation & Setup
 
 ### Prerequisites
-*   **Docker & Docker Compose** (Recommended)
-*   OR Python 3.10+ and MongoDB (Manual)
+*   **Docker** (Recommended) OR Python 3.10+ & MongoDB.
 
-### Option A: Docker (Production Ready)
+### Option A: Docker (Production)
+```bash
+# 1. Clone
+git clone https://github.com/your-repo/velox-hedge-ai.git
+cd velox-hedge-ai
 
-1.  **Clone the Repository**
-    ```bash
-    git clone https://github.com/your-repo/velox-hedge-ai.git
-    cd velox-hedge-ai
-    ```
+# 2. Config
+cp .env.example .env
+# Edit .env with your BOT_TOKEN and GEMINI_API_KEY
 
-2.  **Configure Environment**
-    Copy the example configuration:
-    ```bash
-    cp .env.example .env
-    ```
-    Edit `.env` and populate the fields (see Configuration section below).
+# 3. Launch
+docker-compose up -d --build
+```
 
-3.  **Launch Velox**
-    ```bash
-    docker-compose up -d --build
-    ```
-    The bot will build the image, install Playwright browsers, and start the container.
-
-### Option B: Manual Setup (Development)
-
-1.  **Install Dependencies**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-2.  **Install Browsers** (Required for Rendering Engine)
-    ```bash
-    playwright install chromium
-    ```
-
-3.  **Run MongoDB**
-    Ensure a local MongoDB instance is running on port 27017.
-
-4.  **Start the Bot**
-    ```bash
-    python -m bot.main
-    ```
+### Option B: Manual (Dev)
+```bash
+pip install -r requirements.txt
+playwright install chromium
+python -m bot.main
+```
 
 ---
 
-## ⚙️ Configuration
-
-The `.env` file is the control panel for Velox Hedge.
+## ⚙️ Configuration (.env)
 
 | Variable | Description | Required |
 | :--- | :--- | :--- |
-| `BOT_TOKEN` | Telegram Bot API Token from @BotFather | ✅ Yes |
-| `MONGO_URI` | MongoDB Connection String (default: `mongodb://mongo:27017`) | ✅ Yes |
-| `GEMINI_API_KEY` | Google Gemini API Key for AI Insights | ⚠️ Optional (Recommended) |
-| `HYPERLIQUID_WS_URL` | WebSocket Endpoint (Default: Mainnet) | ✅ Yes |
-| `HYPERLIQUID_API_URL` | REST API Endpoint (Default: Mainnet) | ✅ Yes |
-| `PROXIMITY_THRESHOLD` | % Distance for price alerts (e.g., 0.01 for 1%) | ❌ No |
-| `ALERT_COOLDOWN` | Seconds between repeat alerts | ❌ No |
+| `BOT_TOKEN` | Telegram Bot API Token | ✅ |
+| `MONGO_URI` | MongoDB Connection String | ✅ |
+| `GEMINI_API_KEY` | Google Gemini API Key (for Hedge AI features) | ⚠️ (Rec.) |
+| `HYPERLIQUID_WS_URL` | WebSocket Endpoint (Default: Mainnet) | ✅ |
+| `PROXIMITY_THRESHOLD` | % distance for Limit Order alerts (default: 0.01) | ❌ |
+| `WATCH_ALERT_PCT` | % move for Volatility Scanner (default: 0.02) | ❌ |
 
 ---
 
 ## 🎮 Command Reference
 
-| Command | Description |
-| :--- | :--- |
-| `/start` | Initializes the Velox Terminal interface. |
-| `/overview` | **AI Market Report**: Triggers the Gemini-powered market analysis. |
-| `/add_wallet <addr>` | Adds a wallet to the monitoring engine. |
-| `/watch <SYMBOL>` | Adds a specific asset to the high-frequency volatility scanner. |
-| `/alert <SYM> <$$>` | Sets a server-side price alert. |
-| `/f_alert <SYM> <%>` | Sets a Funding Rate alert (APR). |
-| `/oi_alert <SYM> <$M>`| Sets an Open Interest alert (in Millions USD). |
-| `/export` | Generates and sends a CSV of trade history and equity curves. |
-| `/help` | Displays the help menu. |
+### 🔹 Portfolio & Tracking
+| Command | Usage | Description |
+| :--- | :--- | :--- |
+| `/add_wallet` | `/add_wallet 0x...` | Track a new Hyperliquid address (Spot/Perps). |
+| `/tag` | `/tag 0x... Main` | Assign a readable name to a wallet. |
+| `/threshold` | `/threshold 0x... 500` | Set min USD value to trigger fill alerts (ignore dust). |
+| `/funding` | `/funding` | Show a log of funding payments from the last 24h. |
+| `/export` | `/export` | Generate CSV files for Trade History and Equity. |
+
+### 🔹 Alerts & Monitoring
+| Command | Usage | Description |
+| :--- | :--- | :--- |
+| `/alert` | `/alert BTC 60000` | Set a server-side price alert. |
+| `/f_alert` | `/f_alert ETH 50` | Alert if Funding Rate > 50% APR (or < -20%). |
+| `/oi_alert` | `/oi_alert SOL 100` | Alert if Open Interest crosses $100M. |
+| `/watch` | `/watch HYPE` | Add asset to **Volatility Scanner** (±2% moves). |
+| `/set_whale` | `/set_whale 100000` | Set min USD threshold for global **Whale Watcher**. |
+
+### 🔹 Hedge AI & Market
+| Command | Usage | Description |
+| :--- | :--- | :--- |
+| `/overview` | `/overview` | Force-generate an AI Market Report now. |
+| `/overview_settings` | `/overview_settings` | Configure report schedule and AI persona. |
+| `/calc` | Button only | Open the Risk/Position Calculator. |
 
 ---
 
 ## 🔒 Security & Privacy
-
-Velox Hedge AI is a **non-custodial** monitoring tool.
-*   **Read-Only**: The bot only requires wallet addresses (public keys) to function. It **never** asks for Private Keys or Seed Phrases.
-*   **Data Isolation**: All user data is stored in your private MongoDB instance.
-*   **Source Available**: Fully auditable Python codebase.
+*   **Non-Custodial**: Velox **never** asks for Private Keys. It watches public addresses only.
+*   **Local Data**: All portfolio data is stored in your private MongoDB.
+*   **Open Source**: The code is fully auditable.
 
 ---
 
-## 📜 License
-
-This project is licensed under the **MIT License**. You are free to fork, modify, and deploy Velox Hedge AI for personal or commercial use.
-
----
-
-*Velox Hedge AI — Clarity in Chaos.*
+*Velox Hedge AI — Clarity in the Chaos.*

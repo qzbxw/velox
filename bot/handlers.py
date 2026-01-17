@@ -38,16 +38,40 @@ logger = logging.getLogger(__name__)
 async def smart_edit(call: CallbackQuery, text: str, reply_markup: InlineKeyboardMarkup = None):
     """Edits text message or deletes photo and sends new text message."""
     try:
+        # If the message has media, we usually want to delete it and send text
+        # or edit media if we have new media (but this function is mostly for text)
         if call.message.photo or call.message.document:
             try:
                 await call.message.delete()
             except:
                 pass
             return await call.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
-        else:
+        
+        # If it's a regular text message, try to edit it
+        try:
             return await call.message.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        except Exception as e:
+            # If editing fails (e.g. content is the same), just answer
+            if "message is not modified" in str(e):
+                return call.message
+            return await call.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
     except Exception:
         return await call.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
+
+async def smart_edit_media(call: CallbackQuery, photo: BufferedInputFile, caption: str, reply_markup: InlineKeyboardMarkup = None):
+    """Edits current media or deletes text and sends photo."""
+    try:
+        new_media = InputMediaPhoto(media=photo, caption=caption, parse_mode="HTML")
+        if call.message.photo or call.message.document:
+            return await call.message.edit_media(media=new_media, reply_markup=reply_markup)
+        else:
+            try:
+                await call.message.delete()
+            except:
+                pass
+            return await call.message.answer_photo(photo=photo, caption=caption, reply_markup=reply_markup, parse_mode="HTML")
+    except Exception:
+        return await call.message.answer_photo(photo=photo, caption=caption, reply_markup=reply_markup, parse_mode="HTML")
 
 # --- UI Helpers ---
 
@@ -55,8 +79,11 @@ def _main_menu_kb(lang):
     kb = InlineKeyboardBuilder()
     # Row 0: Terminal
     kb.row(InlineKeyboardButton(text="🖥️ Terminal", callback_data="cb_terminal"))
-    # Row 0.5: VELOX AI
-    kb.row(InlineKeyboardButton(text="✨ VELOX AI", callback_data="cb_ai_overview_menu"))
+    # Row 0.5: VELOX AI & Hedge
+    kb.row(
+        InlineKeyboardButton(text="🧠 Hedge AI", callback_data="cb_ai_overview_menu"),
+        InlineKeyboardButton(text="🛡️ Hedge Chat", callback_data="cb_hedge_chat_start")
+    )
     # Row 1: Portfolio & Trading
     kb.row(
         InlineKeyboardButton(text=_t(lang, "cat_portfolio"), callback_data="sub:portfolio"),
@@ -134,7 +161,10 @@ def _back_kb(lang, target="cb_menu"):
 def _settings_kb(lang):
     kb = InlineKeyboardBuilder()
     # Row 0: AI Settings
-    kb.row(InlineKeyboardButton(text="🤖 AI Overview", callback_data="cb_overview_settings_menu"))
+    kb.row(
+        InlineKeyboardButton(text="🧠 Hedge AI Overview", callback_data="cb_overview_settings_menu"),
+        InlineKeyboardButton(text="🛡️ Velox Hedge", callback_data="cb_hedge_settings_menu")
+    )
     # Row 1: Wallets & Flex
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_wallets"), callback_data="cb_wallets_menu"),
@@ -687,7 +717,9 @@ async def cb_export(call: CallbackQuery):
 
 
 @router.callback_query(F.data == "cb_menu")
-async def cb_menu(call: CallbackQuery):
+async def cb_menu(call: CallbackQuery, state: FSMContext = None):
+    if state:
+        await state.clear()
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     text = _t(lang, "welcome")
@@ -921,13 +953,7 @@ async def cb_portfolio_chart(call: CallbackQuery):
     try:
         buf = await render_html_to_image("portfolio_composition.html", comp_data)
         photo = BufferedInputFile(buf.read(), filename="portfolio.png")
-        await call.message.delete()
-        await call.message.answer_photo(
-            photo, 
-            caption="📊 <b>Portfolio Composition</b>", 
-            reply_markup=_back_kb(lang, "cb_balance"),
-            parse_mode="HTML"
-        )
+        await smart_edit_media(call, photo, "📊 <b>Portfolio Composition</b>", reply_markup=_back_kb(lang, "cb_balance:portfolio"))
     except Exception as e:
         logger.error(f"Error rendering portfolio composition: {e}")
         await call.message.answer("❌ Error generating image.")
@@ -1195,13 +1221,7 @@ async def cb_share_pnl(call: CallbackQuery):
     try:
         buf = await render_html_to_image("pnl_card.html", pnl_data)
         photo = BufferedInputFile(buf.read(), filename=f"pnl_{data['symbol']}.png")
-        await call.message.delete()
-        await call.message.answer_photo(
-            photo, 
-            caption=f"🚀 <b>{data['symbol']} Position</b>", 
-            reply_markup=_back_kb(lang, "cb_positions:0"),
-            parse_mode="HTML"
-        )
+        await smart_edit_media(call, photo, f"🚀 <b>{data['symbol']} Position</b>", reply_markup=_back_kb(lang, "cb_positions:0"))
     except Exception as e:
         logger.error(f"Error rendering PnL card: {e}")
         await call.message.answer("❌ Error generating image.")
@@ -1759,6 +1779,7 @@ async def cb_market_cleanup(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     mids = data.get("market_media_ids", [])
     for mid in mids:
+        if mid == call.message.message_id: continue
         try:
             await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
         except:
@@ -2024,19 +2045,10 @@ async def cb_pnl_graph(call: CallbackQuery):
     sorted_history = [[ts, val] for ts, val in sorted(aggregated_history.items())]
     
     label = "Total Portfolio" if len(wallets) > 1 else wallets[0]
-    buf = generate_pnl_chart(sorted_history, label)
-    
-    if buf:
-        photo = BufferedInputFile(buf.read(), filename="chart.png")
-        await call.message.delete()
-        await call.message.answer_photo(
-            photo, 
-            caption=f"📈 PnL Curve: <b>{label}</b>",
-            reply_markup=_back_kb(lang, "cb_pnl"),
-            parse_mode="HTML"
-        )
-    else:
-        await call.message.answer("❌ Error generating chart.")
+        buf = generate_pnl_chart(history_list, "Total Portfolio")
+        photo = BufferedInputFile(buf.read(), filename="pnl_chart.png")
+        await smart_edit_media(call, photo, "📈 <b>Equity History & Drawdown</b>", reply_markup=_back_kb(lang, "cb_pnl"))
+    except Exception as e:
 
 # --- CALCULATOR ---
 
@@ -2063,6 +2075,9 @@ class SettingsStates(StatesGroup):
 class MarketAlertStates(StatesGroup):
     waiting_for_time = State()
     waiting_for_type = State()
+
+class HedgeChatStates(StatesGroup):
+    chatting = State()
 
 @router.callback_query(F.data == "cb_market_alerts")
 async def cb_market_alerts(call: CallbackQuery):
@@ -2314,6 +2329,10 @@ async def process_alert_target(message: Message, state: FSMContext):
         except:
             await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
     else:
+        await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
+    
+    await state.clear()
+
         await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
         
     await state.clear()
@@ -3084,13 +3103,7 @@ async def cb_flex_gen(call: CallbackQuery):
     try:
         buf = await render_html_to_image("account_flex.html", flex_data)
         photo = BufferedInputFile(buf.read(), filename="equity_flex.png")
-        await call.message.delete()
-        await call.message.answer_photo(
-            photo, 
-            caption=f"📊 <b>{period_label} Account Summary</b>", 
-            reply_markup=_back_kb(lang, "cb_flex_menu"),
-            parse_mode="HTML"
-        )
+        await smart_edit_media(call, photo, f"📊 <b>{period_label} Account Summary</b>", reply_markup=_back_kb(lang, "cb_flex_menu"))
     except Exception as e:
         logger.error(f"Error rendering account flex: {e}")
         await call.message.answer("❌ Error generating image.")
@@ -3233,13 +3246,7 @@ async def cb_terminal(call: CallbackQuery):
         caption = "🖥️ <b>Velox Terminal</b>"
         if len(wallets) > 1: caption += f" ({len(wallets)} wallets)"
         
-        await call.message.delete()
-        await call.message.answer_photo(
-            photo, 
-            caption=caption,
-            reply_markup=_main_menu_kb(lang),
-            parse_mode="HTML"
-        )
+        await smart_edit_media(call, photo, caption, reply_markup=_main_menu_kb(lang))
     except Exception as e:
         logger.error(f"Error rendering terminal: {e}")
         await call.message.answer("❌ Error generating terminal.")
@@ -3345,13 +3352,7 @@ async def cb_positions_img(call: CallbackQuery):
         buf = await render_html_to_image("positions_table.html", data, width=800, height=h)
         photo = BufferedInputFile(buf.read(), filename="positions.png")
         
-        await call.message.delete()
-        await call.message.answer_photo(
-            photo, 
-            caption="📸 <b>Active Positions</b>",
-            reply_markup=_back_kb(lang, "sub:trading"),
-            parse_mode="HTML"
-        )
+        await smart_edit_media(call, photo, "📸 <b>Active Positions</b>", reply_markup=_back_kb(lang, "sub:trading"))
     except Exception as e:
         logger.error(f"Error rendering table: {e}")
         await call.message.answer("❌ Error generating table.")
@@ -3504,7 +3505,16 @@ async def cb_manual_digest(call: CallbackQuery):
         f"💰 Equity: <b>${pretty_float(current_val, 2)}</b>\n"
         f"📅 24h Change: {icon} <b>${pretty_float(diff, 2)}</b> ({pct:+.2f}%)"
     )
-    await call.message.answer(msg, parse_mode="HTML")
+    sent_msg = await call.message.answer(msg, parse_mode="HTML")
+    
+    # Fire Hedge Insight
+    ws = getattr(call.message.bot, "ws_manager", None)
+    if ws and sent_msg:
+        await ws.fire_hedge_insight(call.message.chat.id, call.from_user.id, "chat", {
+            "digest_type": "manual_preview",
+            "diff": diff,
+            "pct": pct
+        }, reply_to_id=sent_msg.message_id)
 
 # --- MARKET OVERVIEW ---
 
@@ -3678,12 +3688,12 @@ async def cb_ai_cleanup(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     mids = data.get("ai_overview_msg_ids", [])
     for mid in mids:
+        if mid == call.message.message_id: continue
         try:
             await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
         except:
             pass
     await state.update_data(ai_overview_msg_ids=None)
-    # Go back to market menu
     await cb_sub_market(call)
 
 @router.message(Command("overview"))
@@ -3703,7 +3713,9 @@ async def cb_market_overview_refresh(call: CallbackQuery, state: FSMContext):
             pass
             
     lang = await db.get_lang(call.message.chat.id)
-    status_msg = await call.message.answer(_t(lang, "ai_generating"), parse_mode="HTML")
+    kb = InlineKeyboardBuilder()
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    status_msg = await call.message.answer(_t(lang, "ai_generating"), reply_markup=kb.as_markup(), parse_mode="HTML")
     await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg)
 
 @router.message(Command("overview_settings"))
@@ -3838,14 +3850,169 @@ async def cb_overview_settings_menu(call: CallbackQuery):
 @router.callback_query(F.data == "cb_ai_overview_menu")
 async def cb_ai_overview_menu(call: CallbackQuery):
     await call.answer()
-    try:
-        await call.message.delete()
-    except:
-        pass
-        
     lang = await db.get_lang(call.message.chat.id)
-    status_msg = await call.message.answer(_t(lang, "ai_generating"), parse_mode="HTML")
+    kb = InlineKeyboardBuilder()
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    status_msg = await call.message.answer(_t(lang, "ai_generating"), reply_markup=kb.as_markup(), parse_mode="HTML")
     await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg)
+
+async def _hedge_settings_render(call: CallbackQuery, user_id: int):
+    lang = await db.get_lang(call.message.chat.id)
+    cfg = await db.get_hedge_settings(user_id)
+    
+    enabled = cfg.get("enabled", False)
+    triggers = cfg.get("triggers", {})
+    
+    def _btn_text(key, label):
+        is_on = triggers.get(key, False)
+        return f"{'✅' if is_on else '❌'} {label}"
+
+    kb = InlineKeyboardBuilder()
+    
+    # Row 0: Master Toggle
+    kb.row(InlineKeyboardButton(
+        text=_t(lang, "hedge_btn_toggle", state="ON" if enabled else "OFF"), 
+        callback_data="hedge_toggle_master"
+    ))
+    
+    # Rows 1-5: Triggers Grid (2 per row)
+    trigger_list = [
+        ("liquidation", _t(lang, "hedge_trigger_liqs")),
+        ("fills", _t(lang, "hedge_trigger_fills")),
+        ("proximity", _t(lang, "hedge_trigger_prox")),
+        ("volatility", _t(lang, "hedge_trigger_vol")),
+        ("whale", _t(lang, "hedge_trigger_whale")),
+        ("margin", _t(lang, "hedge_trigger_margin")),
+        ("listings", _t(lang, "hedge_trigger_listings")),
+        ("ledger", _t(lang, "hedge_trigger_ledger")),
+        ("funding", _t(lang, "hedge_trigger_funding")),
+        ("oi", _t(lang, "hedge_trigger_oi")),
+    ]
+    
+    for i in range(0, len(trigger_list), 2):
+        row = []
+        key1, label1 = trigger_list[i]
+        row.append(InlineKeyboardButton(text=_btn_text(key1, label1), callback_data=f"hedge_toggle:{key1}"))
+        
+        if i + 1 < len(trigger_list):
+            key2, label2 = trigger_list[i+1]
+            row.append(InlineKeyboardButton(text=_btn_text(key2, label2), callback_data=f"hedge_toggle:{key2}"))
+        kb.row(*row)
+        
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
+    
+    text = f"{_t(lang, 'hedge_title')}\n\n{_t(lang, 'hedge_desc')}"
+    await smart_edit(call, text, reply_markup=kb.as_markup())
+
+@router.callback_query(F.data == "cb_hedge_settings_menu")
+async def cb_hedge_settings_menu(call: CallbackQuery):
+    await _hedge_settings_render(call, call.from_user.id)
+    await call.answer()
+
+@router.callback_query(F.data.startswith("hedge_toggle"))
+async def cb_hedge_toggle(call: CallbackQuery):
+    user_id = call.from_user.id
+    cfg = await db.get_hedge_settings(user_id)
+    
+    if call.data == "hedge_toggle_master":
+        cfg["enabled"] = not cfg.get("enabled", False)
+    elif call.data.startswith("hedge_toggle:"):
+        key = call.data.split(":")[1]
+        if "triggers" not in cfg: cfg["triggers"] = {}
+        cfg["triggers"][key] = not cfg["triggers"].get(key, False)
+        
+    await db.update_hedge_settings(user_id, cfg)
+    await _hedge_settings_render(call, user_id)
+    await call.answer()
+
+@router.callback_query(F.data == "cb_hedge_chat_start")
+async def cb_hedge_chat_start(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_lang(call.message.chat.id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    
+    text = "🛡️ <b>Velox Hedge Chat</b>\n\nI am your AI risk manager. I have full context of your portfolio, watchlist, and latest market news.\n\nHow can I help you today?"
+    if lang == "ru":
+        text = "🛡️ <b>Velox Hedge Chat</b>\n\nЯ твой ИИ риск-менеджер. У меня есть полный контекст твоего портфеля, вотчлиста и последних новостей рынка.\n\nЧем я могу помочь сегодня?"
+        
+    await smart_edit(call, text, reply_markup=kb.as_markup())
+    await state.set_state(HedgeChatStates.chatting)
+    await state.update_data(history=[])
+    await call.answer()
+
+@router.message(HedgeChatStates.chatting, ~F.text.startswith("/"))
+async def process_hedge_chat(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    history = data.get("history", [])
+    
+    # Show typing status
+    await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
+    
+    # Add user message to history
+    history.append({"role": "user", "content": message.text})
+    
+    # Generate Response
+    response = await market_overview.generate_hedge_comment(
+        context_type="chat",
+        event_data={"user_msg": message.text},
+        user_id=message.from_user.id,
+        lang=lang,
+        history=history
+    )
+    
+    if not response:
+        response = "⚠️ I am having trouble connecting to my brain. Please try again."
+        if lang == "ru": response = "⚠️ Возникли трудности с подключением. Попробуй еще раз."
+
+    # Add AI response to history
+    history.append({"role": "assistant", "content": response})
+    
+    # Keep history short (last 10 messages)
+    if len(history) > 10:
+        history = history[-10:]
+        
+    await state.update_data(history=history)
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    
+    await message.answer(response, reply_markup=kb.as_markup(), parse_mode="HTML")
+
+async def _send_hedge_insight(bot, chat_id, user_id, context_type, event_data, reply_to_id=None):
+    """Fires in background to provide AI insight after a fast alert."""
+    try:
+        cfg = await db.get_hedge_settings(user_id)
+        if not cfg.get("enabled"): return
+        if not cfg.get("triggers", {}).get(context_type, True): return
+        
+        lang = await db.get_lang(chat_id)
+        
+        # Show typing status
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+        except: pass
+
+        # AI Generation
+        comment = await market_overview.generate_hedge_comment(
+            context_type=context_type,
+            event_data=event_data,
+            user_id=user_id,
+            lang=lang
+        )
+        
+        if comment:
+            text = f"🛡️ <b>Hedge Insight:</b>\n{comment}"
+            if lang == "ru": text = f"🛡️ <b>Velox Hedge:</b>\n{comment}"
+            
+            await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode="HTML",
+                reply_to_message_id=reply_to_id
+            )
+    except Exception as e:
+        logger.error(f"Error in Hedge Insight task: {e}")
 
 @router.error()
 async def global_error_handler(event: ErrorEvent):

@@ -269,6 +269,42 @@ class Database:
             upsert=True
         )
 
+    # --- HEDGE SETTINGS ---
+    async def get_hedge_settings(self, user_id: int) -> dict:
+        user = await self.users.find_one({"user_id": user_id})
+        default = {
+            "enabled": False,
+            "triggers": {
+                "liquidation": True,
+                "fills": True,
+                "proximity": True,
+                "volatility": True,
+                "whale": False,
+                "margin": True,
+                "listings": True,
+                "ledger": True,
+                "funding": True
+            }
+        }
+        if not user:
+            return default
+        return user.get("hedge", default)
+
+    async def update_hedge_settings(self, user_id: int, settings: dict):
+        # We use a similar flat update strategy as overview
+        update_doc = {}
+        if "enabled" in settings:
+            update_doc["hedge.enabled"] = settings["enabled"]
+        if "triggers" in settings:
+            for k, v in settings["triggers"].items():
+                update_doc[f"hedge.triggers.{k}"] = v
+        
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": update_doc},
+            upsert=True
+        )
+
     # --- WALLET STATES (Ledger Tracking) ---
     async def get_all_watched_addresses(self):
         """Get list of unique wallet addresses currently being watched."""

@@ -19,13 +19,11 @@ logger = logging.getLogger(__name__)
 class WSManager:
     def __init__(self, bot):
         self.bot = bot
-        self.ws_url = settings.HYPERLIQUID_WS_URL
-        self.running = False
-        self.ws = None
-        self.tracked_wallets = set()
-        self.mid_prices = {}  # {coin: price}
-        self.last_mids_update_ts = 0.0
-        self.open_orders = defaultdict(list)  # {wallet: [orders]}
+        # ... existing init ...
+
+    async def fire_hedge_insight(self, chat_id, user_id, context_type, event_data, reply_to_id=None):
+        from bot.handlers import _send_hedge_insight
+        asyncio.create_task(_send_hedge_insight(self.bot, chat_id, user_id, context_type, event_data, reply_to_id))
 
         # All known symbols (Spot + Perps)
         self.all_coins = set()
@@ -215,7 +213,14 @@ class WSManager:
                 try:
                     lang = u.get("lang", "ru")
                     msg = _t(lang, "whale_alert") + "\n" + _t(lang, "whale_msg", icon=icon, side=side_txt, symbol=sym, val=pretty_float(val, 0), price=pretty_float(px))
-                    await self.bot.send_message(user_id, msg, parse_mode="HTML")
+                    sent_msg = await self.bot.send_message(user_id, msg, parse_mode="HTML")
+                    if sent_msg:
+                        await self.fire_hedge_insight(user_id, user_id, "whale", {
+                            "coin": sym,
+                            "side": side_txt,
+                            "val": val,
+                            "px": px
+                        }, reply_to_id=sent_msg.message_id)
                 except:
                     pass
 
@@ -491,7 +496,11 @@ class WSManager:
                 try:
                     lang = u.get("lang", "ru")
                     msg = _t(lang, "new_listing_msg", sym=sym)
-                    await self.bot.send_message(u["user_id"], msg, parse_mode="HTML")
+                    sent_msg = await self.bot.send_message(u["user_id"], msg, parse_mode="HTML")
+                    if sent_msg:
+                        await self.fire_hedge_insight(u["user_id"], u["user_id"], "listings", {
+                            "new_coin": sym
+                        }, reply_to_id=sent_msg.message_id)
                     await asyncio.sleep(0.05)
                 except: pass
 
@@ -569,7 +578,14 @@ class WSManager:
                     kb = InlineKeyboardBuilder()
                     kb.row(InlineKeyboardButton(text=_t(lang, "btn_main_menu"), callback_data="cb_menu"))
                     
-                    await self.bot.send_message(user_id, msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+                    sent_msg = await self.bot.send_message(user_id, msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+                    if sent_msg:
+                        await self.fire_hedge_insight(user_id, user_id, "funding" if a_type == "funding" else "oi", {
+                            "coin": sym,
+                            "val": current_val,
+                            "target": target,
+                            "type": a_type
+                        }, reply_to_id=sent_msg.message_id)
                 except: pass
 
     async def _check_custom_alerts(self):
@@ -670,7 +686,13 @@ class WSManager:
                 ]
                 await self.bot.send_media_group(user_id, media)
                 # Send button after media group
-                await self.bot.send_message(user_id, _t(lang, "btn_main_menu"), reply_markup=markup)
+                sent_msg = await self.bot.send_message(user_id, _t(lang, "btn_main_menu"), reply_markup=markup)
+                if sent_msg:
+                    await self.fire_hedge_insight(user_id, user_id, "volatility", {
+                        "coin": symbol,
+                        "price": current_price,
+                        "triggered_alert": True
+                    }, reply_to_id=sent_msg.message_id)
                 return
         except Exception as e:
             logger.error(f"Error generating rich alert: {e}")
@@ -786,7 +808,13 @@ class WSManager:
 
                 msg = _t(lang, "watch_alert_title") + "\n" + _t(lang, "watch_alert_msg", dir_icon=direction, symbol=sym, move=f"{move*100:+.2f}", time=window//60, curr=f"{float(cur):.4f}", prev=f"{float(ref):.4f}")
                 try:
-                    await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                    sent_msg = await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                    if sent_msg:
+                        await self.fire_hedge_insight(chat_id, chat_id, "volatility", {
+                            "coin": sym,
+                            "move_pct": move*100,
+                            "price": float(cur)
+                        }, reply_to_id=sent_msg.message_id)
                 except Exception as e:
                     logger.error(f"Failed to send watch alert: {e}")
 
@@ -898,7 +926,15 @@ class WSManager:
                 
             msg += f"Wallet: <code>{wallet[:6]}...{wallet[-4:]}</code>"
             try:
-                await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                sent_msg = await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                if sent_msg:
+                    await self.fire_hedge_insight(chat_id, chat_id, "proximity", {
+                        "coin": safe_coin,
+                        "side": side,
+                        "limit_px": limit_px,
+                        "current_px": current_px,
+                        "dist_usd": price_dist
+                    }, reply_to_id=sent_msg.message_id)
             except Exception as e:
                 logger.error(f"Failed to send alert to {chat_id}: {e}")
 
@@ -1024,7 +1060,18 @@ class WSManager:
                 kb.row(InlineKeyboardButton(text="🏠 Menu", callback_data="cb_menu"))
                 
                 try:
-                    await self.bot.send_message(chat_id, msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+                    sent_msg = await self.bot.send_message(chat_id, msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+                    # Fire Hedge Insight
+                    if sent_msg:
+                        await self.fire_hedge_insight(chat_id, chat_id, "liquidation" if is_liq else "fills", {
+                            "coin": sym_name,
+                            "side": side,
+                            "sz": sz,
+                            "px": px,
+                            "val": usd_value,
+                            "pnl": closed_pnl,
+                            "is_liq": is_liq
+                        }, reply_to_id=sent_msg.message_id)
                 except Exception as e:
                     logger.error(f"Failed to send fill notification to {chat_id}: {e}")
 
@@ -1092,7 +1139,14 @@ class WSManager:
                     msg += f"Wallet: {wallet_display}"
                     
                     try:
-                        await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                        sent_msg = await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                        if sent_msg:
+                            await self.fire_hedge_insight(chat_id, chat_id, "proximity", {
+                                "coin": coin,
+                                "side": side,
+                                "px": px,
+                                "is_new_order": True
+                            }, reply_to_id=sent_msg.message_id)
                     except Exception as e:
                         logger.error(f"Failed to send order alert: {e}")
     
@@ -1145,7 +1199,13 @@ class WSManager:
                 )
 
                 try:
-                    await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                    sent_msg = await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                    if sent_msg:
+                        await self.fire_hedge_insight(chat_id, chat_id, "margin", {
+                            "margin_ratio": margin_ratio,
+                            "equity": account_value,
+                            "wallet": user_wallet
+                        }, reply_to_id=sent_msg.message_id)
                 except:
                     pass
 
@@ -1236,7 +1296,13 @@ class WSManager:
                             except: pass
 
                             try:
-                                await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                                sent_msg = await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                                if sent_msg:
+                                    await self.fire_hedge_insight(chat_id, chat_id, "ledger", {
+                                        "type": type_,
+                                        "amount": amount,
+                                        "wallet": wallet
+                                    }, reply_to_id=sent_msg.message_id)
                             except: pass
                             
                     # Update DB

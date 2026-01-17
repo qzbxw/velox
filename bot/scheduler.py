@@ -257,7 +257,15 @@ async def send_daily_digest(bot):
         )
         
         try:
-            await bot.send_message(chat_id, msg, parse_mode="HTML")
+            sent_msg = await bot.send_message(chat_id, msg, parse_mode="HTML")
+            if sent_msg:
+                from bot.handlers import _send_hedge_insight
+                asyncio.create_task(_send_hedge_insight(bot, chat_id, chat_id, "chat", {
+                    "digest_type": "daily",
+                    "equity": current_val,
+                    "diff": diff,
+                    "pct": pct
+                }, reply_to_id=sent_msg.message_id))
         except Exception as e:
             logger.error(f"Failed to send digest to {chat_id}: {e}")
 
@@ -365,7 +373,14 @@ async def send_weekly_summary(bot):
         )
         
         try:
-            await bot.send_message(chat_id, msg, parse_mode="HTML")
+            sent_msg = await bot.send_message(chat_id, msg, parse_mode="HTML")
+            if sent_msg:
+                from bot.handlers import _send_hedge_insight
+                asyncio.create_task(_send_hedge_insight(bot, chat_id, chat_id, "chat", {
+                    "digest_type": "weekly",
+                    "realized_pnl": realized_pnl,
+                    "net_flow": net_flow
+                }, reply_to_id=sent_msg.message_id))
         except Exception as e:
             logger.error(f"Failed to send summary to {chat_id}: {e}")
 
@@ -500,18 +515,49 @@ async def send_scheduled_overviews(bot):
                 sentiment = ai_data.get("sentiment", "Neutral")
                 next_event = ai_data.get("next_event", "N/A")
 
+                # --- Calculate Top Movers for Image ---
+                def get_change(idx):
+                    if idx >= len(p_assets): return 0
+                    ac = p_assets[idx]
+                    p = float(ac.get("markPx", 0))
+                    prev = float(ac.get("prevDayPx", 0) or p)
+                    return ((p - prev)/prev)*100 if prev else 0
+
+                mover_indices = [(i, get_change(i)) for i in range(len(p_universe))]
+                mover_indices.sort(key=lambda x: x[1], reverse=True)
+                
+                top_gainer = p_universe[mover_indices[0][0]]["name"]
+                top_gainer_pct = mover_indices[0][1]
+                
+                top_loser = p_universe[mover_indices[-1][0]]["name"]
+                top_loser_pct = mover_indices[-1][1]
+                
+                # Sort by Volume
+                vol_indices = [(i, float(p_assets[i].get("dayNtlVlm", 0))) for i in range(len(p_universe)) if i < len(p_assets)]
+                vol_indices.sort(key=lambda x: x[1], reverse=True)
+                top_vol = p_universe[vol_indices[0][0]]["name"]
+                top_vol_val = vol_indices[0][1]
+                
+                # Sort by Funding
+                fund_indices = [(i, float(p_assets[i].get("funding", 0))) for i in range(len(p_universe)) if i < len(p_assets)]
+                fund_indices.sort(key=lambda x: x[1], reverse=True)
+                top_fund = p_universe[fund_indices[0][0]]["name"]
+                top_fund_val = fund_indices[0][1] * 100 * 24 * 365 # APR
+
                 render_data = {
                     "period_label": period_label,
                     "date": datetime.datetime.now().strftime("%d %b %H:%M"),
                     "btc": market_data["BTC"],
                     "eth": market_data["ETH"],
-                    "btc_flow": market_data["btc_etf_flow"],
-                    "eth_flow": market_data["eth_etf_flow"],
-                    "ai_summary": markdown.markdown(summary_text),
                     "sentiment": sentiment,
                     "fng": fng if fng and not isinstance(fng, Exception) else {"value": 0, "classification": "N/A"},
                     "gemini_model": "3 Flash Preview",
-                    "next_event": next_event
+                    
+                    # New Data Fields
+                    "top_gainer": {"sym": top_gainer, "val": top_gainer_pct},
+                    "top_loser": {"sym": top_loser, "val": top_loser_pct},
+                    "top_vol": {"sym": top_vol, "val": f"${top_vol_val/1e6:.0f}M"},
+                    "top_fund": {"sym": top_fund, "val": f"{top_fund_val:.0f}%"}
                 }
 
                 img_buf = await render_html_to_image("market_overview.html", render_data, width=1000, height=1000)

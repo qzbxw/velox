@@ -589,7 +589,7 @@ async def _render_funding_page(bot, chat_id, page=0, edit=False, msg_id=None):
     items = all_updates[start_idx:end_idx]
     
     # Calc Total Sum (Global)
-    total_sum_usd = sum([float(u.get("delta", {}).get("usdc", 0) or 0) for u in all_updates])
+    total_sum_usd = sum([float(u.get("delta", {}).get("amount", 0) or 0) for u in all_updates])
     
     msg_text = f"💰 <b>{_t(lang, 'funding_log_title')}</b>\n"
     msg_text += f"Total (24h): <b>${pretty_float(total_sum_usd, 2)}</b>\n\n"
@@ -602,7 +602,7 @@ async def _render_funding_page(bot, chat_id, page=0, edit=False, msg_id=None):
             t_str = datetime.fromtimestamp(ts).strftime('%H:%M')
             delta = item.get("delta", {})
             sym = delta.get("coin", "???")
-            amount = float(delta.get("usdc", 0) or 0)
+            amount = float(delta.get("amount", 0) or 0)
             
             w_short = f"{item['wallet'][:4]}..{item['wallet'][-3:]}"
             val_str = f"{amount:+.2f}"

@@ -66,7 +66,7 @@ EN = {
     "balance_title": "🏦 <b>Balances & Portfolio</b>",
     "positions_title": "🎰 <b>Open Positions</b>",
     "orders_title": "🧾 <b>Open Orders</b>",
-    "market_title": "📊 <b>Market Overview</b>",
+    "market_title": "🧠 <b>Hedge AI: Market Analysis</b>",
     "settings_title": "⚙️ <b>Settings</b>",
     "lang_title": "🌍 <b>Language</b>",
     "pnl_title": "🧮 <b>PnL Analysis</b>",
@@ -149,8 +149,8 @@ EN = {
     
     # Market Alerts
     "btn_market_alerts": "🔔 Market Alerts",
-    "market_alerts_title": "Market Overview Alerts",
-    "market_alerts_msg": "Configure scheduled market reports.\nYou will receive detailed dashboards (Fundamentals & Alpha Insights).\nNote: All times are in <b>UTC</b>.",
+    "market_alerts_title": "Hedge AI Reporting",
+    "market_alerts_msg": "Configure scheduled AI market reports.\nYou will receive detailed dashboards powered by Hedge AI.\nNote: All times are in <b>UTC</b>.",
     "add_time_prompt": "⌨️ Enter time in <b>HH:MM</b> format (UTC):\nExample: <code>09:00</code> or <code>18:30</code>",
     "invalid_time": "❌ Invalid time format. Use HH:MM (e.g., 09:30)",
     "market_alert_added": "✅ Market alert scheduled for <b>{time} UTC</b>",
@@ -221,14 +221,14 @@ EN = {
     # Categories
     "cat_portfolio": "💼 Portfolio",
     "cat_trading": "⚡ Trading",
-    "cat_market": "🌊 Market Data",
+    "cat_market": "🧠 Hedge AI Pulse",
     "cat_settings": "⚙️ Settings",
     
     "menu_portfolio": "💼 <b>Portfolio Menu</b>",
     "menu_trading": "⚡ <b>Trading Menu</b>",
-    "menu_market": "🌊 <b>Market Data</b>",
+    "menu_market": "🧠 <b>Hedge AI: Market Pulse</b>",
 
-    "btn_market_overview": "📊 Market Insights",
+    "btn_market_overview": "🧠 Hedge AI Analysis",
     "btn_share": "🖼️ Share PnL",
     "btn_wallets": "👛 Wallets",
     "btn_refresh": "🔄 Refresh",
@@ -387,7 +387,7 @@ RU = {
     "balance_title": "🏦 <b>Балансы и Портфель</b>",
     "positions_title": "🎰 <b>Открытые Позиции</b>",
     "orders_title": "🧾 <b>Активные Ордера</b>",
-    "market_title": "📊 <b>Обзор Рынка</b>",
+    "market_title": "🧠 <b>Hedge AI: Анализ Рынка</b>",
     "settings_title": "⚙️ <b>Настройки</b>",
     "lang_title": "🌍 <b>Язык / Language</b>",
     "pnl_title": "🧮 <b>PnL Анализ</b>",
@@ -470,8 +470,8 @@ RU = {
     
     # Market Alerts
     "btn_market_alerts": "🔔 Рыночные Алерты",
-    "market_alerts_title": "Алерты обзора рынка",
-    "market_alerts_msg": "Настройте расписание отчетов по рынку.\nВы будете получать детальные дашборды (Обзор рынка + Alpha аналитика).\nПримечание: Все время указывается в <b>UTC</b>.",
+    "market_alerts_title": "Отчеты Hedge AI",
+    "market_alerts_msg": "Настройте расписание AI-отчетов по рынку.\nВы будете получать детальные дашборды от Hedge AI.\nПримечание: Все время указывается в <b>UTC</b>.",
     "add_time_prompt": "⌨️ Введите время в формате <b>ЧЧ:ММ</b> (UTC):\nПример: <code>09:00</code> или <code>18:30</code>",
     "invalid_time": "❌ Неверный формат. Используйте ЧЧ:ММ (например, 09:30)",
     "market_alert_added": "✅ Отчет запланирован на <b>{time} UTC</b>",
@@ -542,14 +542,14 @@ RU = {
     # Categories
     "cat_portfolio": "💼 Портфель",
     "cat_trading": "⚡ Торговля",
-    "cat_market": "🌊 Рынок",
+    "cat_market": "🧠 Пульс Hedge AI",
     "cat_settings": "⚙️ Настройки",
     
     "menu_portfolio": "💼 <b>Меню: Портфель</b>",
     "menu_trading": "⚡ <b>Меню: Торговля</b>",
-    "menu_market": "🌊 <b>Меню: Рынок</b>",
+    "menu_market": "🧠 <b>Меню: Пульс Hedge AI</b>",
 
-    "btn_market_overview": "📊 Обзор Рынка",
+    "btn_market_overview": "🧠 Аналитика Hedge AI",
     "btn_share": "🖼️ Share PnL",
     "btn_wallets": "👛 Кошельки",
     "btn_refresh": "🔄 Обновить",

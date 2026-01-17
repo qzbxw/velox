@@ -236,14 +236,68 @@ class MarketOverview:
                              lang: str = "en") -> dict:
         """
         Generates AI summary using Gemini in JSON format.
-        Returns: {
-            "summary": str,
-            "sentiment": str,
-            "next_event": str
-        }
         """
-        # ... (rest of the method)
-        return # existing code placeholder for structure
+        # Include all news for maximum AI context
+        news_text = "\n".join([f"- {n['title']} ({n['source']})" for n in news])
+        target_lang = "Russian" if lang == "ru" else "English"
+        
+        prompt = f"""
+        You are VELOX HEDGE, an institutional AI analyst. 
+        Analyze the current market state on Hyperliquid L1.
+        
+        PERIOD: {period_name}
+        LANGUAGE: {target_lang}
+        STYLE: {style}
+        {f"USER CUSTOM STYLE: {custom_prompt}" if custom_prompt else ""}
+        
+        MARKET DATA:
+        - 24h Vol: ${market_data.get('global_volume', 'N/A')}
+        - Total OI: ${market_data.get('total_oi', 'N/A')}
+        - Top Gainers: {', '.join([f"{g['name']} {g['change']}%" for g in market_data.get('top_gainers', [])[:3]])}
+        - Top Losers: {', '.join([f"{l['name']} {l['change']}%" for l in market_data.get('top_losers', [])[:3]])}
+        - ETF Flows: BTC ${market_data.get('etf_flows', {}).get('btc_flow', 0)}M, ETH ${market_data.get('etf_flows', {}).get('eth_flow', 0)}M
+        
+        LATEST NEWS:
+        {news_text}
+        
+        RESPONSE REQUIREMENTS:
+        1. "summary": A sharp, professional analysis of the market (max 500 chars). Use <b>bold</b> for key assets.
+        2. "sentiment": A one-word sentiment label (BULLISH, BEARISH, NEUTRAL, CAUTIOUS, EXPLOSIVE).
+        3. "next_event": What should the trader watch for next? (max 100 chars).
+        
+        OUTPUT FORMAT: Strictly JSON.
+        """
+
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.4,
+                "response_mime_type": "application/json"
+            }
+        }
+
+        default_res = {
+            "summary": "Market data processing complete. Sentiment remains mixed as volatility clusters around major assets.",
+            "sentiment": "NEUTRAL",
+            "next_event": "Watch for consolidation at current levels."
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.gemini_url, json=payload, timeout=20) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        # Clean markdown if present
+                        if "```json" in text:
+                            text = text.split("```json")[1].split("```")[0].strip()
+                        return json.loads(text)
+                    else:
+                        logger.error(f"Gemini API Error: {resp.status} - {await resp.text()}")
+        except Exception as e:
+            logger.error(f"Error generating AI summary: {e}")
+            
+        return default_res
 
     async def generate_hedge_comment(self, 
                                    context_type: str, 
@@ -300,7 +354,7 @@ class MarketOverview:
         
         # 3. Fetch Market Context (Recent News)
         news = await self.fetch_news_rss(since_timestamp=time.time() - 43200) # 12h
-        news_text = "\n".join([f"- {n['title']}" for n in news[:5]])
+        news_text = "\n".join([f"- {n['title']} ({n['source']})" for n in news])
 
         target_lang = "Russian" if lang == "ru" else "English"
         

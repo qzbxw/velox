@@ -424,7 +424,7 @@ def generate_market_overview_image(assets_ctx: list, universe: list, sort_by: st
             row["Symbol"],
             f"${pretty_float(row['Price'], 4)}",
             f"{row['Change%']:+.2f}%",
-            f"{row['Funding%']:+.1f}%",
+            f"{row['Funding%']:+.1f}% ({row['Funding%']/24/365:+.4f}%)",
             f"${row['Volume']/1e6:.1f}M",
             f"${row['OI']/1e6:.1f}M"
         ]
@@ -488,16 +488,14 @@ def generate_market_report_card(assets_ctx: list, universe: list) -> io.BytesIO:
         vol = float(ctx.get("dayNtlVlm", 0))
         oi = float(ctx.get("openInterest", 0)) * price
         change_24h = ((price - prev_day) / prev_day) * 100 if prev_day > 0 else 0.0
-        impact_pxs = ctx.get("impactPxs", [price, price])
-        
-        # Slippage for $100k impact
-        slippage = 0.0
-        if impact_pxs and len(impact_pxs) >= 2:
+        impact_pxs = ctx.get("impactPxs")
+        slippage = 99.9 # Default
+        if impact_pxs and isinstance(impact_pxs, list) and len(impact_pxs) >= 2 and price > 0:
             bid_impact = float(impact_pxs[0])
             ask_impact = float(impact_pxs[1])
-            if price > 0:
-                # Average slippage %
+            if bid_impact > 0 and ask_impact > 0:
                 slippage = (abs(ask_impact - price) + abs(price - bid_impact)) / (2 * price) * 100
+                if slippage == 0: slippage = 99.9
         
         data.append({
             "Symbol": name, "Price": price, "Funding": funding,
@@ -575,13 +573,16 @@ def generate_alpha_dashboard(assets_ctx: list, universe: list) -> io.BytesIO:
         basis = ((mark - oracle) / oracle) * 100 if oracle > 0 else 0.0
         lev_density = oi / vol if vol > 0 else 0.0
         
-        impact_pxs = ctx.get("impactPxs", [mark, mark])
-        slippage = 0.0
-        if impact_pxs and len(impact_pxs) >= 2:
-            slippage = (abs(float(impact_pxs[1]) - mark) + abs(mark - float(impact_pxs[0]))) / (2 * mark) * 100 if mark > 0 else 0.0
+        impact_pxs = ctx.get("impactPxs")
+        slippage = 99.9
+        if impact_pxs and isinstance(impact_pxs, list) and len(impact_pxs) >= 2 and mark > 0:
+            bid_impact = float(impact_pxs[0])
+            ask_impact = float(impact_pxs[1])
+            if bid_impact > 0 and ask_impact > 0:
+                slippage = (abs(ask_impact - mark) + abs(mark - bid_impact)) / (2 * mark) * 100
+                if slippage == 0: slippage = 99.9
         
         data.append({
-            "Symbol": name, "Basis": basis, "Funding": funding,
             "Density": lev_density, "OI": oi, "Slippage": slippage
         })
         
@@ -646,10 +647,14 @@ def generate_ecosystem_dashboard(assets_ctx: list, universe: list, hlp_info: dic
         vol = float(ctx.get("dayNtlVlm", 0))
         oi = float(ctx.get("openInterest", 0)) * mark
         
-        impact_pxs = ctx.get("impactPxs", [mark, mark])
-        slippage = 0.0
-        if impact_pxs and len(impact_pxs) >= 2:
-            slippage = (abs(float(impact_pxs[1]) - mark) + abs(mark - float(impact_pxs[0]))) / (2 * mark) * 100 if mark > 0 else 0.0
+        impact_pxs = ctx.get("impactPxs")
+        slippage = 99.9
+        if impact_pxs and isinstance(impact_pxs, list) and len(impact_pxs) >= 2 and mark > 0:
+            bid_impact = float(impact_pxs[0])
+            ask_impact = float(impact_pxs[1])
+            if bid_impact > 0 and ask_impact > 0:
+                slippage = (abs(ask_impact - mark) + abs(mark - bid_impact)) / (2 * mark) * 100
+                if slippage == 0: slippage = 99.9
         
         data.append({
             "Symbol": name, "Slippage": slippage, "Efficiency": vol / oi if oi > 0 else 0,
@@ -693,17 +698,15 @@ def generate_ecosystem_dashboard(assets_ctx: list, universe: list, hlp_info: dic
 
     # HLP Section
     ax.text(0.05, 0.12, "🏦 HLP VAULT & ECOSYSTEM", color='#fcd535', fontsize=18, weight='bold')
-    if hlp_info:
-        # Simplified extraction of HLP stats
+    if hlp_info and isinstance(hlp_info, dict):
         try:
-            day_pnl = float(hlp_info.get("dayPnl", 0))
-            apr = (day_pnl / 1e6) * 365 # Very rough estimation if dayPnl is in some unit
-            # Better: use the actual APR if found in vault details or hardcode if stable
+            summary = hlp_info.get("summary", {})
+            hlp_price = pretty_float(summary.get("sharePx", 1.0), 4)
             ax.text(0.1, 0.06, "HLP Vault", color='white', fontsize=14, weight='bold')
-            ax.text(0.4, 0.06, "Vault TVL", color='#848e9c', fontsize=14)
+            ax.text(0.4, 0.06, f"Price: ${hlp_price}", color='#848e9c', fontsize=14)
             ax.text(0.7, 0.06, "ACTIVE", color='#0ecb81', fontsize=14)
         except:
-            ax.text(0.1, 0.06, "HLP Vault Stat", color='white', fontsize=14)
+            ax.text(0.1, 0.06, "HLP Vault", color='white', fontsize=14)
             ax.text(0.7, 0.06, "STABLE", color='#0ecb81', fontsize=14)
     else:
         ax.text(0.1, 0.06, "Ecosystem Metrics", color='white', fontsize=14)
@@ -806,18 +809,22 @@ def prepare_liquidity_data(assets_ctx: list, universe: list) -> dict:
         total_oi += oi
         
         # Slippage calculation
-        # impactPxs is [bid_impact, ask_impact] for a specific notional (usually $10k-$50k depending on asset)
+        # impactPxs is [bid_impact, ask_impact] for a specific notional (usually $100k)
         impact_pxs = ctx.get("impactPxs")
-        slippage = 0.0
+        slippage = 99.9 # Default to high slippage (no liquidity data)
         
         if impact_pxs and isinstance(impact_pxs, list) and len(impact_pxs) >= 2 and mark > 0:
             try:
                 bid_impact = float(impact_pxs[0])
                 ask_impact = float(impact_pxs[1])
-                # Calculate simple slippage relative to mark
-                slippage = (abs(ask_impact - mark) + abs(mark - bid_impact)) / (2 * mark) * 100
+                if bid_impact > 0 and ask_impact > 0:
+                    # Calculate simple slippage relative to mark
+                    slippage = (abs(ask_impact - mark) + abs(mark - bid_impact)) / (2 * mark) * 100
+                    # If impacts are exactly equal to mark, it's likely stale/placeholder data
+                    if slippage == 0:
+                        slippage = 99.9
             except (ValueError, TypeError):
-                slippage = 0.0
+                slippage = 99.9
 
         # Day High/Low for Volatility
         # Note: HL API might not give 1h H/L directly in meta, but we use 24h as proxy or check if available
@@ -913,10 +920,23 @@ def prepare_modern_market_data(assets_ctx: list, universe: list, hlp_info: dict 
 
     # HLP Info
     hlp_price = "1.000"
-    hlp_apr = "20.0"
-    if hlp_info:
-        # Placeholder for real HLP extraction if needed
-        pass
+    hlp_apr = "0.0"
+    if hlp_info and isinstance(hlp_info, dict):
+        summary = hlp_info.get("summary", {})
+        try:
+            # sharePx is the price of 1 HLP share
+            hlp_price = pretty_float(summary.get("sharePx", 1.0), 4)
+            
+            # HLP APR Estimation: (DayPnL / accountValue) * 365 * 100
+            day_pnl = float(hlp_info.get("dayPnl", 0))
+            acc_val = float(summary.get("accountValue", 0))
+            if acc_val > 0:
+                calc_apr = (day_pnl / acc_val) * 365 * 100
+                hlp_apr = f"{calc_apr:,.1f}"
+            else:
+                hlp_apr = "20.0" # Fallback
+        except:
+            hlp_apr = "20.0"
 
     return {
         "date": datetime.now().strftime("%d %b %Y • %H:%M"),
@@ -929,8 +949,8 @@ def prepare_modern_market_data(assets_ctx: list, universe: list, hlp_info: dict 
         "losers": [{"name": r["name"], "change": round(r["change"], 2), "price": pretty_float(r["price"]), "vol": round(r["vol"]/1e6, 1)} for _, r in losers.iterrows()],
         "efficiency": [{"name": r["name"], "ratio": round(r["efficiency"], 1), "percent": min(100, r["efficiency"]*5)} for _, r in efficiency_top.iterrows()],
         "funding_map": [{"name": r["name"], "apr": round(r["funding"], 1)} for _, r in funding_map.iterrows()],
-        "hlp_price": "1.124",
-        "hlp_apr": "24.8"
+        "hlp_price": hlp_price,
+        "hlp_apr": hlp_apr
     }
 
 def pretty_float(x: float, max_decimals: int = 6) -> str:

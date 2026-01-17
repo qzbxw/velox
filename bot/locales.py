@@ -158,7 +158,7 @@ EN = {
     "no_market_alerts": "📭 No scheduled market reports.",
     "btn_add_time": "➕ Add Time",
 
-    "market_report_global": "🌍 Market Pulse",
+    "market_report_global": "🌍 Market Intelligence",
     "market_report_vol": "24h Volume",
     "market_report_oi": "Open Interest",
     "market_report_sentiment": "Sentiment",
@@ -221,12 +221,12 @@ EN = {
     # Categories
     "cat_portfolio": "💼 Portfolio",
     "cat_trading": "⚡ Trading",
-    "cat_market": "🧠 Hedge AI Pulse",
+    "cat_market": "🧠 Hedge AI",
     "cat_settings": "⚙️ Settings",
     
     "menu_portfolio": "💼 <b>Portfolio Menu</b>",
     "menu_trading": "⚡ <b>Trading Menu</b>",
-    "menu_market": "🧠 <b>Hedge AI: Market Pulse</b>",
+    "menu_market": "🧠 <b>Hedge AI: Market Intelligence</b>",
 
     "btn_market_overview": "🧠 Hedge AI Analysis",
     "btn_share": "🖼️ Share PnL",
@@ -479,7 +479,7 @@ RU = {
     "no_market_alerts": "📭 У вас нет запланированных отчетов.",
     "btn_add_time": "➕ Добавить время",
 
-    "market_report_global": "🌍 Пульс Рынка",
+    "market_report_global": "🌍 Обзор Рынка",
     "market_report_vol": "Объем 24ч",
     "market_report_oi": "Откр. интерес",
     "market_report_sentiment": "Настроение",
@@ -542,12 +542,12 @@ RU = {
     # Categories
     "cat_portfolio": "💼 Портфель",
     "cat_trading": "⚡ Торговля",
-    "cat_market": "🧠 Пульс Hedge AI",
+    "cat_market": "🧠 Hedge AI",
     "cat_settings": "⚙️ Настройки",
     
     "menu_portfolio": "💼 <b>Меню: Портфель</b>",
     "menu_trading": "⚡ <b>Меню: Торговля</b>",
-    "menu_market": "🧠 <b>Меню: Пульс Hedge AI</b>",
+    "menu_market": "🧠 <b>Меню: Hedge AI Market</b>",
 
     "btn_market_overview": "🧠 Аналитика Hedge AI",
     "btn_share": "🖼️ Share PnL",

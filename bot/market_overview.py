@@ -291,7 +291,21 @@ class MarketOverview:
                         # Clean markdown if present
                         if "```json" in text:
                             text = text.split("```json")[1].split("```")[0].strip()
-                        return json.loads(text)
+                        
+                        parsed = json.loads(text)
+                        
+                        # Handle list wrapping (e.g. Gemini sometimes returns [ { ... } ])
+                        if isinstance(parsed, list):
+                            if len(parsed) > 0 and isinstance(parsed[0], dict):
+                                return parsed[0]
+                            else:
+                                # Fallback if list content is weird
+                                return default_res
+                                
+                        if isinstance(parsed, dict):
+                            return parsed
+                            
+                        return default_res
                     else:
                         logger.error(f"Gemini API Error: {resp.status} - {await resp.text()}")
         except Exception as e:

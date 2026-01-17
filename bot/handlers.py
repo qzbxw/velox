@@ -2045,10 +2045,13 @@ async def cb_pnl_graph(call: CallbackQuery):
     sorted_history = [[ts, val] for ts, val in sorted(aggregated_history.items())]
     
     label = "Total Portfolio" if len(wallets) > 1 else wallets[0]
-        buf = generate_pnl_chart(history_list, "Total Portfolio")
+    try:
+        buf = generate_pnl_chart(sorted_history, label)
         photo = BufferedInputFile(buf.read(), filename="pnl_chart.png")
         await smart_edit_media(call, photo, "📈 <b>Equity History & Drawdown</b>", reply_markup=_back_kb(lang, "cb_pnl"))
     except Exception as e:
+        logger.error(f"Error rendering chart: {e}")
+        await call.message.answer("❌ Error generating graph.")
 
 # --- CALCULATOR ---
 
@@ -2331,10 +2334,6 @@ async def process_alert_target(message: Message, state: FSMContext):
     else:
         await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
     
-    await state.clear()
-
-        await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
-        
     await state.clear()
 
 @router.callback_query(F.data == "calc_start")

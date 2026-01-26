@@ -17,6 +17,11 @@ git pull origin main
 echo -e "${BLUE}🛑 Stopping containers...${NC}"
 docker compose down
 
+# Clean up Docker garbage (free space)
+echo -e "${BLUE}🧹 Cleaning Docker cache and old images...${NC}"
+docker system prune -af --volumes
+echo -e "${GREEN}✅ Docker cleaned!${NC}"
+
 # Rebuild images
 echo -e "${BLUE}🔨 Rebuilding images...${NC}"
 docker compose build

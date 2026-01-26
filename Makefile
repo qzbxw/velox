@@ -51,6 +51,7 @@ build:
 clean:
 	@echo "🧹 Cleaning up..."
 	@docker compose down -v
+	@docker system prune -af --volumes
 	@echo "✅ Cleaned!"
 
 dev:

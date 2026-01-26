@@ -14,12 +14,17 @@ logger = logging.getLogger(__name__)
 
 class MarketOverview:
     def __init__(self):
-        self.gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={settings.GEMINI_API_KEY}"
+        # Main Hedge Agent - analyzes and responds
+        self.hedge_agent_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={settings.GEMINI_API_KEY}"
+
+        # News Agent - collects fresh news via Google Search
+        self.news_agent_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={settings.GEMINI_API_KEY}"
+
         self.rss_feeds = [
             "https://decrypt.co/feed",
             "https://www.coindesk.com/arc/outboundfeeds/rss/",
             "https://cointelegraph.com/rss",
-            "https://cryptopanic.com/news/rss/" 
+            "https://cryptopanic.com/news/rss/"
         ]
         # Common browser headers to avoid 403 Forbidden
         self.headers = {
@@ -227,45 +232,129 @@ class MarketOverview:
         if "cryptopanic.com" in link: return "CryptoPanic"
         return "News"
 
-    async def generate_summary(self, 
-                             market_data: dict, 
-                             news: list[dict], 
-                             period_name: str, 
+    async def fetch_news_with_search(self, timeframe: str = "24h", topics: list = None) -> str:
+        """
+        News Agent: Collects fresh crypto news via Google Search grounding.
+        Returns: Structured news summary from Google Search
+        """
+        if topics is None:
+            topics = ["Hyperliquid", "Bitcoin", "Ethereum", "crypto market"]
+
+        topic_str = ", ".join(topics)
+
+        prompt = f"""You are a News Agent. Search Google for the latest {timeframe} crypto news related to: {topic_str}.
+
+Focus on:
+- Major price movements and market events
+- Important protocol updates or launches
+- Regulatory news
+- Institutional activity (ETFs, large purchases)
+- Technical developments
+
+Provide a concise summary (max 500 words) with key bullet points."""
+
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "tools": [{
+                "googleSearchRetrieval": {
+                    "dynamicRetrievalConfig": {
+                        "mode": "MODE_DYNAMIC",
+                        "dynamicThreshold": 0.7
+                    }
+                }
+            }],
+            "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 1024
+            }
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(self.news_agent_url, json=payload, timeout=25) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+                        # Extract grounding metadata if available
+                        grounding_meta = data.get("candidates", [{}])[0].get("groundingMetadata", {})
+                        sources = grounding_meta.get("groundingChunks", [])
+
+                        logger.info(f"News Agent found {len(sources)} sources")
+                        return text
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"News Agent error: {resp.status} - {error_text}")
+        except Exception as e:
+            logger.error(f"News Agent exception: {e}")
+
+        return "No recent news available."
+
+    async def generate_summary(self,
+                             market_data: dict,
+                             news: list[dict],
+                             period_name: str,
                              custom_prompt: str | None = None,
                              style: str = "detailed",
                              lang: str = "en") -> dict:
         """
-        Generates AI summary using Gemini in JSON format.
+        Hedge Agent: RAG system that combines market data + fresh news from News Agent.
+
+        Flow:
+        1. News Agent collects fresh crypto news via Google Search
+        2. Hedge Agent analyzes market data + news and generates final response
         """
-        # Include all news for maximum AI context
-        news_text = "\n".join([f"- {n['title']} ({n['source']})" for n in news])
         target_lang = "Russian" if lang == "ru" else "English"
-        
+
+        # Step 1: Get fresh news from News Agent (with Google Search grounding)
+        logger.info("News Agent: Fetching fresh crypto news...")
+        topics = ["Hyperliquid", "Bitcoin", "Ethereum", "crypto market"]
+
+        # Add top gainers/losers to search topics
+        if market_data.get('top_gainers'):
+            for g in market_data['top_gainers'][:2]:
+                topics.append(g.get('name', ''))
+        if market_data.get('top_losers'):
+            for l in market_data['top_losers'][:2]:
+                topics.append(l.get('name', ''))
+
+        fresh_news = await self.fetch_news_with_search(timeframe="24h", topics=topics)
+
+        # Fallback: combine with RSS if News Agent fails
+        rss_news = "\n".join([f"- {n['title']} ({n['source']})" for n in news[:5]]) if news else ""
+
+        combined_news = f"**Fresh News (via Google Search):**\n{fresh_news}\n\n**Additional Sources:**\n{rss_news}" if rss_news else fresh_news
+
+        # Step 2: Hedge Agent analyzes everything
+        logger.info("Hedge Agent: Analyzing market data + news...")
         prompt = f"""
-        You are VELOX AI, an institutional AI analyst. 
-        Analyze the current market state on Hyperliquid L1.
-        
+        You are HEDGE AI, an institutional AI analyst with RAG capabilities.
+        Analyze the current market state on Hyperliquid L1 using PROVIDED DATA.
+
         PERIOD: {period_name}
         LANGUAGE: {target_lang}
         STYLE: {style}
         {f"USER CUSTOM STYLE: {custom_prompt}" if custom_prompt else ""}
-        
-        MARKET DATA:
-        - 24h Vol: ${market_data.get('global_volume', 'N/A')}
-        - Total OI: ${market_data.get('total_oi', 'N/A')}
+
+        MARKET DATA (Hyperliquid L1):
+        - 24h Volume: ${market_data.get('global_volume', 'N/A')}
+        - Total Open Interest: ${market_data.get('total_oi', 'N/A')}
         - Top Gainers: {', '.join([f"{g['name']} {g['change']}%" for g in market_data.get('top_gainers', [])[:3]])}
         - Top Losers: {', '.join([f"{l['name']} {l['change']}%" for l in market_data.get('top_losers', [])[:3]])}
         - ETF Flows: BTC ${market_data.get('etf_flows', {}).get('btc_flow', 0)}M, ETH ${market_data.get('etf_flows', {}).get('eth_flow', 0)}M
-        
-        LATEST NEWS:
-        {news_text}
-        
+
+        NEWS INTELLIGENCE (Google Search + RSS):
+        {combined_news}
+
+        TASK:
+        Synthesize market data + news into actionable intelligence.
+
         RESPONSE REQUIREMENTS:
-        1. "summary": A sharp, professional analysis of the market (max 500 chars). Use **bold** (markdown) for key assets.
-        2. "sentiment": A one-word sentiment label (BULLISH, BEARISH, NEUTRAL, CAUTIOUS, EXPLOSIVE).
-        3. "next_event": What should the trader watch for next? (max 100 chars).
-        
-        OUTPUT FORMAT: Strictly JSON.
+        1. "summary": Sharp analysis connecting market movements to news events (max 500 chars). Use **bold** for key assets/events.
+        2. "sentiment": One word (BULLISH, BEARISH, NEUTRAL, CAUTIOUS, EXPLOSIVE)
+        3. "next_event": What traders should watch next (max 100 chars)
+
+        OUTPUT: Strictly JSON.
         """
 
         payload = {
@@ -284,33 +373,32 @@ class MarketOverview:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(self.gemini_url, json=payload, timeout=20) as resp:
+                async with session.post(self.hedge_agent_url, json=payload, timeout=20) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                         # Clean markdown if present
                         if "```json" in text:
                             text = text.split("```json")[1].split("```")[0].strip()
-                        
+
                         parsed = json.loads(text)
-                        
-                        # Handle list wrapping (e.g. Gemini sometimes returns [ { ... } ])
+
+                        # Handle list wrapping
                         if isinstance(parsed, list):
                             if len(parsed) > 0 and isinstance(parsed[0], dict):
                                 return parsed[0]
                             else:
-                                # Fallback if list content is weird
                                 return default_res
-                                
+
                         if isinstance(parsed, dict):
                             return parsed
-                            
+
                         return default_res
                     else:
-                        logger.error(f"Gemini API Error: {resp.status} - {await resp.text()}")
+                        logger.error(f"Hedge Agent error: {resp.status} - {await resp.text()}")
         except Exception as e:
-            logger.error(f"Error generating AI summary: {e}")
-            
+            logger.error(f"Hedge Agent exception: {e}")
+
         return default_res
 
     async def generate_hedge_comment(self, 
@@ -366,25 +454,30 @@ class MarketOverview:
         ov_settings = await db.get_overview_settings(user_id)
         custom_style = ov_settings.get("prompt_override", "Professional and sharp.")
         
-        # 3. Fetch Market Context (Recent News)
-        news = await self.fetch_news_rss(since_timestamp=time.time() - 43200) # 12h
-        news_text = "\n".join([f"- {n['title']} ({n['source']})" for n in news])
+        # 3. Fetch Fresh News via News Agent
+        event_symbol = event_data.get('symbol', event_data.get('sym', ''))
+        topics = ["crypto market"]
+        if event_symbol:
+            topics.append(event_symbol)
+
+        logger.info(f"Hedge Chat: Fetching news for context_type={context_type}")
+        fresh_news = await self.fetch_news_with_search(timeframe="12h", topics=topics)
 
         target_lang = "Russian" if lang == "ru" else "English"
-        
-        # 4. Construct specialized prompt
+
+        # 4. Construct RAG prompt
         prompt = f"""
-        You are VELOX AI, an elite AI risk manager.
+        You are HEDGE AI, an elite AI risk manager with real-time news access.
         USER STYLE/PROMPT: {custom_style}
         TARGET LANGUAGE: {target_lang}
-        
+
         USER CONTEXT:
         - Portfolio: {portfolio_summary}
         - Watchlist: {watchlist_str}
-        
-        MARKET CONTEXT:
-        {news_text}
-        
+
+        MARKET NEWS (Google Search):
+        {fresh_news}
+
         EVENT TYPE: {context_type.upper()}
         EVENT DATA: {json.dumps(event_data)}
         """
@@ -403,12 +496,12 @@ class MarketOverview:
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.post(self.gemini_url, json=payload, timeout=15) as resp:
+                async with session.post(self.hedge_agent_url, json=payload, timeout=15) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Hedge Chat error: {e}")
         return ""
 
 market_overview = MarketOverview()

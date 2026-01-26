@@ -18,7 +18,7 @@ def _t(lang: str, key: str, **kwargs) -> str:
 
 # --- ENGLISH ---
 EN = {
-    "welcome": "👋 <b>Trade on Hyperliquid. Dominate with Velox.</b>\n\nVelox is your institutional command center, powered by the <b>Velox AI</b> neural engine.\n\n/add_wallet <code>address</code> - Track wallet\n/help - Show commands",
+    "welcome": "👋 <b>Trade on Hyperliquid. Dominate with Velox.</b>\n\nVelox is your institutional command center, powered by the <b>Hedge AI</b> neural engine.\n\n/add_wallet <code>address</code> - Track wallet\n/help - Show commands",
     "set_wallet": "⚠️ No wallet connected. Use /add_wallet <code>0x...</code>",
     "tracking": "✅ Tracking: <code>{wallet}</code>",
     "help_msg": "<b>Available Commands:</b>\n\n🔹 <b>Portfolio</b>\n/add_wallet <code>0x...</code> - Track wallet\n/tag <code>0x...</code> <code>Name</code> - Rename wallet\n/funding - Funding Log (24h)\n/threshold <code>0x...</code> <code>1000</code> - Min fill USD to alert\n\n🔹 <b>Alerts</b>\n/alert <code>ETH</code> <code>3000</code> - Price alert\n/f_alert <code>ETH</code> <code>50</code> - Funding APR alert\n/oi_alert <code>ETH</code> <code>100</code> - OI ($M) alert\n/watch <code>SOL</code> - Add to watchlist\n/unwatch <code>SOL</code> - Remove from watchlist\n/set_prox <code>0.5</code> - Proximity alert %\n/set_vol <code>2.0</code> - Volatility alert %\n/set_whale <code>250000</code> - Whale alert min USD\n\n🔹 <b>Market</b>\n/overview - AI Market Overview\n/overview_settings - Configure AI Reports\n\n🔹 <b>Misc</b>\n/start - Main Menu\n/export - Export PnL history CSV",
@@ -66,7 +66,7 @@ EN = {
     "balance_title": "🏦 <b>Balances & Portfolio</b>",
     "positions_title": "🎰 <b>Open Positions</b>",
     "orders_title": "🧾 <b>Open Orders</b>",
-    "market_title": "🧠 <b>Velox AI: Market Analysis</b>",
+    "market_title": "🧠 <b>Hedge AI: Market Analysis</b>",
     "settings_title": "⚙️ <b>Settings</b>",
     "lang_title": "🌍 <b>Language</b>",
     "pnl_title": "🧮 <b>PnL Analysis</b>",
@@ -149,8 +149,8 @@ EN = {
     
     # Market Alerts
     "btn_market_alerts": "🔔 Market Alerts",
-    "market_alerts_title": "Velox AI Reporting",
-    "market_alerts_msg": "Configure scheduled AI market reports.\nYou will receive detailed dashboards powered by Velox AI.\nNote: All times are in <b>UTC</b>.",
+    "market_alerts_title": "Hedge AI Reporting",
+    "market_alerts_msg": "Configure scheduled AI market reports.\nYou will receive detailed dashboards powered by Hedge AI.\nNote: All times are in <b>UTC</b>.",
     "add_time_prompt": "⌨️ Enter time in <b>HH:MM</b> format (UTC):\nExample: <code>09:00</code> or <code>18:30</code>",
     "invalid_time": "❌ Invalid time format. Use HH:MM (e.g., 09:30)",
     "market_alert_added": "✅ Market alert scheduled for <b>{time} UTC</b>",
@@ -168,7 +168,7 @@ EN = {
     "market_report_funding": "💰 High Funding (APR)",
     "market_report_majors": "💎 Major Assets (Details)",
     "market_report_watchlist": "⭐ Watchlist",
-    "market_report_footer": "Updated: {time} • Velox AI",
+    "market_report_footer": "Updated: {time} • Hedge AI",
     
     # Buttons
     "btn_balance": "🏦 Balance",
@@ -221,14 +221,14 @@ EN = {
     # Categories
     "cat_portfolio": "💼 Portfolio",
     "cat_trading": "⚡ Trading",
-    "cat_market": "🧠 Velox AI",
+    "cat_market": "🧠 Hedge AI",
     "cat_settings": "⚙️ Settings",
     
     "menu_portfolio": "💼 <b>Portfolio Menu</b>",
     "menu_trading": "⚡ <b>Trading Menu</b>",
-    "menu_market": "🧠 <b>Velox AI: Market Intelligence</b>",
+    "menu_market": "🧠 <b>Hedge AI: Market Intelligence</b>",
 
-    "btn_market_overview": "🧠 Velox AI Analysis",
+    "btn_market_overview": "🧠 Hedge AI Analysis",
     "btn_share": "🖼️ Share PnL",
     "btn_wallets": "👛 Wallets",
     "btn_refresh": "🔄 Refresh",
@@ -309,8 +309,8 @@ EN = {
     "fng_greed": "Greed",
     "fng_extreme_greed": "Extreme Greed",
     "btn_fear_greed": "🧠 Fear & Greed",
-    "btn_velox_ai_settings": "🧠 Velox AI Overview",
-    "btn_velox_hedge_settings": "🛡️ Velox Hedge",
+    "btn_velox_ai_settings": "🧠 Hedge AI Overview",
+    "btn_velox_hedge_settings": "🛡️ Hedge Chat",
 
     # Ledger
     "deposit_alert": "💰 <b>Deposit Detected</b>",
@@ -323,9 +323,9 @@ EN = {
     "funding_total": "Total: <b>${val}</b>", 
     "funding_row": "• {time} {sym}: <b>${val}</b>",
     "funding_empty": "<i>No funding payments found.</i>",
-    "ai_generating": "⚡ <b>Velox AI is processing L1 data streams...</b>\n<i>This usually takes ~10 seconds.</i>",
-    "hedge_title": "🛡️ <b>Velox Hedge</b>",
-    "hedge_desc": "AI Hedge is an analytical layer that provides instant context and risk management for every trade and alert.\n\nStyle is pulled from your AI Overview custom prompt.",
+    "ai_generating": "⚡ <b>Hedge AI is processing L1 data streams...</b>\n<i>This usually takes ~10 seconds.</i>",
+    "hedge_title": "🛡️ <b>Hedge Chat</b>",
+    "hedge_desc": "Hedge Chat is an AI assistant that provides instant context and risk management for every trade and alert.\n\nStyle is pulled from your AI Overview custom prompt.",
     "hedge_btn_toggle": "Master Switch: {state}",
     "hedge_trigger_liqs": "💀 Liquidations",
     "hedge_trigger_fills": "⚡ Major Fills",
@@ -341,7 +341,7 @@ EN = {
 
 # --- RUSSIAN ---
 RU = {
-    "welcome": "👋 <b>Торгуй на Hyperliquid. Доминируй с Velox.</b>\n\nVelox — это ваш институциональный терминал на базе нейросети <b>Velox AI</b>.\n\n/add_wallet <code>address</code> - Добавить кошелёк\n/help - Список команд",
+    "welcome": "👋 <b>Торгуй на Hyperliquid. Доминируй с Velox.</b>\n\nVelox — это ваш институциональный терминал на базе нейросети <b>Hedge AI</b>.\n\n/add_wallet <code>address</code> - Добавить кошелёк\n/help - Список команд",
     "set_wallet": "⚠️ Кошелёк не подключен. Используйте /add_wallet <code>0x...</code>",
     "tracking": "✅ Отслеживание: <code>{wallet}</code>",
     "help_msg": "<b>Доступные команды:</b>\n\n🔹 <b>Портфель</b>\n/add_wallet <code>0x...</code> - Отслеживать кошелёк\n/tag <code>0x...</code> <code>Name</code> - Присвоить имя кошельку\n/funding - Журнал фандинга (24ч)\n/threshold <code>0x...</code> <code>1000</code> - Мин. сумма ($)\n\n🔹 <b>Алерты</b>\n/alert <code>ETH</code> <code>3000</code> - Ценовой алерт\n/f_alert <code>ETH</code> <code>50</code> - Алерт APR\n/oi_alert <code>ETH</code> <code>100</code> - Алерт OI ($M)\n/watch <code>SOL</code> - Список наблюдения\n/unwatch <code>SOL</code> - Удалить из наблюдения\n/set_prox <code>1.0</code> - Порог 'Цена рядом' %\n/set_vol <code>2.0</code> - Порог волатильности %\n/set_whale <code>250000</code> - Мин. сумма кита\n\n🔹 <b>Рынок</b>\n/overview - AI Обзор Рынка\n/overview_settings - Настройки отчетов\n\n🔹 <b>Прочее</b>\n/start - Главное меню\n/export - Экспорт в CSV",
@@ -389,7 +389,7 @@ RU = {
     "balance_title": "🏦 <b>Балансы и Портфель</b>",
     "positions_title": "🎰 <b>Открытые Позиции</b>",
     "orders_title": "🧾 <b>Активные Ордера</b>",
-    "market_title": "🧠 <b>Velox AI: Анализ Рынка</b>",
+    "market_title": "🧠 <b>Hedge AI: Анализ Рынка</b>",
     "settings_title": "⚙️ <b>Настройки</b>",
     "lang_title": "🌍 <b>Язык / Language</b>",
     "pnl_title": "🧮 <b>PnL Анализ</b>",
@@ -472,8 +472,8 @@ RU = {
     
     # Market Alerts
     "btn_market_alerts": "🔔 Рыночные Алерты",
-    "market_alerts_title": "Отчеты Velox AI",
-    "market_alerts_msg": "Настройте расписание AI-отчетов по рынку.\nВы будете получать подробные дашборды от Velox AI.\nПримечание: Все время указывается в <b>UTC</b>.",
+    "market_alerts_title": "Отчеты Hedge AI",
+    "market_alerts_msg": "Настройте расписание AI-отчетов по рынку.\nВы будете получать подробные дашборды от Hedge AI.\nПримечание: Все время указывается в <b>UTC</b>.",
     "add_time_prompt": "⌨️ Введите время в формате <b>ЧЧ:ММ</b> (UTC):\nПример: <code>09:00</code> или <code>18:30</code>",
     "invalid_time": "❌ Неверный формат. Используйте ЧЧ:ММ (например, 09:30)",
     "market_alert_added": "✅ Отчет запланирован на <b>{time} UTC</b>",
@@ -491,7 +491,7 @@ RU = {
     "market_report_funding": "💰 Высокий Фандинг (APR)",
     "market_report_majors": "💎 Основные Активы (Детали)",
     "market_report_watchlist": "⭐ Избранные активы",
-    "market_report_footer": "Обновлено: {time} • Velox AI",
+    "market_report_footer": "Обновлено: {time} • Hedge AI",
     
     # Buttons
     "btn_balance": "🏦 Баланс",
@@ -544,14 +544,14 @@ RU = {
     # Categories
     "cat_portfolio": "💼 Портфель",
     "cat_trading": "⚡ Торговля",
-    "cat_market": "🧠 Velox AI",
+    "cat_market": "🧠 Hedge AI",
     "cat_settings": "⚙️ Настройки",
     
     "menu_portfolio": "💼 <b>Меню: Портфель</b>",
     "menu_trading": "⚡ <b>Меню: Торговля</b>",
-    "menu_market": "🧠 <b>Меню: Velox AI Market</b>",
+    "menu_market": "🧠 <b>Меню: Hedge AI Market</b>",
 
-    "btn_market_overview": "🧠 Аналитика Velox AI",
+    "btn_market_overview": "🧠 Аналитика Hedge AI",
     "btn_share": "🖼️ Поделиться PnL",
     "btn_wallets": "👛 Кошельки",
     "btn_refresh": "🔄 Обновить",
@@ -631,8 +631,8 @@ RU = {
     "fng_greed": "Жадность",
     "fng_extreme_greed": "Чрезвычайная жадность",
     "btn_fear_greed": "🧠 Страх и жадность",
-    "btn_velox_ai_settings": "🧠 Velox AI",
-    "btn_velox_hedge_settings": "🛡️ Velox Hedge",
+    "btn_velox_ai_settings": "🧠 Hedge AI",
+    "btn_velox_hedge_settings": "🛡️ Hedge Chat",
 
     # Ledger
     "deposit_alert": "💰 <b>Депозит</b>",
@@ -645,9 +645,9 @@ RU = {
     "funding_total": "Итого: <b>${val}</b>", 
     "funding_row": "• {time} {sym}: <b>${val}</b>",
     "funding_empty": "<i>Нет выплат фандинга.</i>",
-    "ai_generating": "⚡ <b>Velox AI: Обработка потоков данных L1...</b>\n<i>Это займет около 10 секунд.</i>",
-    "hedge_title": "🛡️ <b>Velox Hedge</b>",
-    "hedge_desc": "Velox Hedge — это аналитический слой, который дает мгновенный контекст и риск-менеджмент для каждой сделки и алерта.\n\nСтиль берется из вашего кастомного промпта в настройках Velox AI.",
+    "ai_generating": "⚡ <b>Hedge AI: Обработка потоков данных L1...</b>\n<i>Это займет около 10 секунд.</i>",
+    "hedge_title": "🛡️ <b>Hedge Chat</b>",
+    "hedge_desc": "Hedge Chat — это AI-ассистент, который дает мгновенный контекст и риск-менеджмент для каждой сделки и алерта.\n\nСтиль берется из вашего кастомного промпта в настройках Hedge AI.",
     "hedge_btn_toggle": "Мастер-выключатель: {state}",
     "hedge_trigger_liqs": "💀 Ликвидации",
     "hedge_trigger_fills": "⚡ Крупные сделки",

@@ -79,9 +79,9 @@ def _main_menu_kb(lang):
     kb = InlineKeyboardBuilder()
     # Row 0: Terminal
     kb.row(InlineKeyboardButton(text="🖥️ Terminal", callback_data="cb_terminal"))
-    # Row 0.5: VELOX AI & Hedge
+    # Row 0.5: Hedge AI & Chat
     kb.row(
-        InlineKeyboardButton(text="🧠 Velox AI", callback_data="cb_ai_overview_menu"),
+        InlineKeyboardButton(text="🧠 Hedge AI", callback_data="cb_ai_overview_menu"),
         InlineKeyboardButton(text="🛡️ Hedge Chat", callback_data="cb_hedge_chat_start")
     )
     # Row 1: Portfolio & Trading

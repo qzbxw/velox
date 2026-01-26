@@ -1,11 +1,11 @@
-# ⚡ Velox & 🧠 Velox AI: Institutional Hyperliquid Terminal
+# ⚡ Velox & 🧠 Hedge AI: Institutional Hyperliquid Terminal
 
-![Velox AI](https://img.shields.io/badge/Velox-AI-blueviolet?style=for-the-badge)
+![Hedge AI](https://img.shields.io/badge/Velox-Hedge_AI-blueviolet?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Production-success?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
-**Velox & Velox AI** is a dual-core institutional trading system built for **Hyperliquid L1**. It combines a high-performance, real-time tracking terminal (**Velox**) with an autonomous quantitative analyst (**Velox AI**) powered by Google Gemini.
+**Velox x Hedge AI** is a dual-core institutional trading system built for **Hyperliquid L1**. It combines a high-performance, real-time tracking terminal (**Velox**) with an autonomous quantitative analyst (**Hedge AI**) powered by Google Gemini.
 
 ---
 
@@ -55,24 +55,24 @@ Velox does not send text walls. It uses **Playwright (Chromium)** to render HTML
 
 ---
 
-# 🧠 Part 2: Velox AI
+# 🧠 Part 2: Hedge AI
 **The Quantitative Analyst.**
-Velox AI is not a chatbot; it is an event-driven analytical layer injected into the terminal.
+Hedge AI is not a chatbot; it is an event-driven analytical layer injected into the terminal.
 
 ### 1. ⚡ Contextual Insights
-When a major event occurs, Velox AI analyzes it instantly and adds a "Commentary" layer:
+When a major event occurs, Hedge AI analyzes it instantly and adds a "Commentary" layer:
 *   **On Liquidation**: Analyzes *why* it happened (volatility spike vs. slow bleed) and suggests collateral adjustments.
 *   **On Whale Trade**: contextualizes the trade (e.g., "Whale bought $500k SOL near resistance, possible breakout").
 *   **On New Listing**: Scrapes project info and provides a rapid fundamental summary.
 
 ### 2. 📰 Autonomous Market Reports
-Velox AI scrapes global data sources to generate human-readable reports:
+Hedge AI scrapes global data sources to generate human-readable reports:
 *   **Data Sources**: Hyperliquid L1 Data (OI, Vol, Basis), **Farside Investors** (BTC/ETH ETF Flows), and RSS News Feeds (CoinDesk, Decrypt).
 *   **Scheduled Reports**:
     *   **Morning Brief (06:00 UTC)**: Overnight moves + ETF flows.
     *   **Evening Wrap (18:00 UTC)**: Day's session summary.
     *   **Weekly Digest (Sunday)**: Net PnL, realized gains, and net flow analysis.
-*   **Custom Persona**: You can configure Velox AI's personality (e.g., "Brief & Professional" or "Degen Slang") via `/overview_settings`.
+*   **Custom Persona**: You can configure Hedge AI's personality (e.g., "Brief & Professional" or "Degen Slang") via `/overview_settings`.
 
 ### 3. 💬 AI Chat
 An interactive interface where you can ask questions about your specific portfolio:
@@ -150,7 +150,7 @@ make help          # All commands
 | `/watch` | `/watch HYPE` | Add asset to **Volatility Scanner** (±2% moves). |
 | `/set_whale` | `/set_whale 100000` | Set min USD threshold for global **Whale Watcher**. |
 
-### 🔹 Velox AI & Market
+### 🔹 Hedge AI & Market
 | Command | Usage | Description |
 | :--- | :--- | :--- |
 | `/overview` | `/overview` | Force-generate an AI Market Report now. |
@@ -166,4 +166,4 @@ make help          # All commands
 
 ---
 
-*Velox x Velox AI*
+*Velox x Hedge AI*

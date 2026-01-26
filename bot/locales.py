@@ -221,12 +221,12 @@ EN = {
     # Categories
     "cat_portfolio": "💼 Portfolio",
     "cat_trading": "⚡ Trading",
-    "cat_market": "🧠 Hedge AI",
+    "cat_market": "📊 Market",
     "cat_settings": "⚙️ Settings",
     
     "menu_portfolio": "💼 <b>Portfolio Menu</b>",
     "menu_trading": "⚡ <b>Trading Menu</b>",
-    "menu_market": "🧠 <b>Hedge AI: Market Intelligence</b>",
+    "menu_market": "📊 <b>Market Intelligence</b>",
 
     "btn_market_overview": "🧠 Hedge AI Analysis",
     "btn_share": "🖼️ Share PnL",
@@ -544,7 +544,7 @@ RU = {
     # Categories
     "cat_portfolio": "💼 Портфель",
     "cat_trading": "⚡ Торговля",
-    "cat_market": "🧠 Hedge AI",
+    "cat_market": "📊 Market",
     "cat_settings": "⚙️ Настройки",
     
     "menu_portfolio": "💼 <b>Меню: Портфель</b>",

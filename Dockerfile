@@ -12,10 +12,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright and its system dependencies
-# This command automatically handles all the libs we were trying to list manually
-RUN playwright install chromium
+# Install Playwright system dependencies and chromium
+# These layers will be cached as long as requirements.txt is unchanged
 RUN playwright install-deps chromium
+RUN playwright install chromium
 
 COPY . .
 

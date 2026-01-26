@@ -22,7 +22,7 @@ jobs:
             cd ${{ secrets.DEPLOY_PATH }}
             git pull origin main
             docker compose down
-            docker compose build --no-cache
+            docker compose build
             docker compose up -d
             sleep 3
             docker compose ps

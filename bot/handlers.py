@@ -3588,6 +3588,15 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
 
         # Process Market Data for Prompt
         market_data = {}
+
+        # Calculate global metrics
+        total_volume = sum(float(ac.get("dayNtlVlm", 0)) for ac in asset_ctxs)
+        total_oi = sum(float(ac.get("openInterest", 0)) * float(ac.get("markPx", 0)) for ac in asset_ctxs)
+
+        market_data["global_volume"] = pretty_float(total_volume, 0)
+        market_data["total_oi"] = pretty_float(total_oi, 0)
+
+        # BTC/ETH data
         for sym in ["BTC", "ETH"]:
             idx = next((i for i, u in enumerate(universe) if u.get("name") == sym), -1)
             if idx != -1 and idx < len(asset_ctxs):
@@ -3599,9 +3608,24 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
             else:
                 market_data[sym] = {"price": "0", "change": 0.0}
 
-        # Flow data (legacy support for prompt, but zeroed out visually)
-        market_data["btc_etf_flow"] = 0
-        market_data["eth_etf_flow"] = 0
+        # ETF Flow data
+        market_data["etf_flows"] = {
+            "btc_flow": 0,
+            "eth_flow": 0
+        }
+
+        # Calculate Top Gainers/Losers
+        movers = []
+        for i in range(min(len(universe), len(asset_ctxs))):
+            ac = asset_ctxs[i]
+            p = float(ac.get("markPx", 0))
+            prev = float(ac.get("prevDayPx", 0) or p)
+            change = ((p - prev)/prev)*100 if prev else 0
+            movers.append({"name": universe[i]["name"], "change": round(change, 2)})
+
+        movers.sort(key=lambda x: x["change"], reverse=True)
+        market_data["top_gainers"] = movers[:5]
+        market_data["top_losers"] = movers[-5:][::-1]
 
         # --- Calculate Top Movers for Image ---
         # Sort by Change %

@@ -19,7 +19,7 @@ docker compose down
 
 # Rebuild images
 echo -e "${BLUE}🔨 Rebuilding images...${NC}"
-docker compose build --no-cache
+docker compose build
 
 # Start containers
 echo -e "${BLUE}🚀 Starting containers...${NC}"

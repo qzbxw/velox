@@ -51,7 +51,7 @@ async def main():
         BotCommand(command="start", description="Main Menu"),
         BotCommand(command="help", description="Show Commands"),
         BotCommand(command="add_wallet", description="Track Wallet"),
-        BotCommand(command="overview", description="Hedge AI Market Overview"),
+        BotCommand(command="overview", description="Velox AI Market Overview"),
         BotCommand(command="funding", description="Funding Log"),
         BotCommand(command="alert", description="Price Alert"),
         BotCommand(command="watch", description="Watchlist"),

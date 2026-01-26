@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class MarketOverview:
     def __init__(self):
-        self.gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={settings.GEMINI_API_KEY}"
+        self.gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={settings.GEMINI_API_KEY}"
         self.rss_feeds = [
             "https://decrypt.co/feed",
             "https://www.coindesk.com/arc/outboundfeeds/rss/",
@@ -242,7 +242,7 @@ class MarketOverview:
         target_lang = "Russian" if lang == "ru" else "English"
         
         prompt = f"""
-        You are VELOX HEDGE, an institutional AI analyst. 
+        You are VELOX AI, an institutional AI analyst. 
         Analyze the current market state on Hyperliquid L1.
         
         PERIOD: {period_name}
@@ -261,7 +261,7 @@ class MarketOverview:
         {news_text}
         
         RESPONSE REQUIREMENTS:
-        1. "summary": A sharp, professional analysis of the market (max 500 chars). Use <b>bold</b> for key assets.
+        1. "summary": A sharp, professional analysis of the market (max 500 chars). Use **bold** (markdown) for key assets.
         2. "sentiment": A one-word sentiment label (BULLISH, BEARISH, NEUTRAL, CAUTIOUS, EXPLOSIVE).
         3. "next_event": What should the trader watch for next? (max 100 chars).
         
@@ -374,7 +374,7 @@ class MarketOverview:
         
         # 4. Construct specialized prompt
         prompt = f"""
-        You are VELOX HEDGE, an elite AI risk manager.
+        You are VELOX AI, an elite AI risk manager.
         USER STYLE/PROMPT: {custom_style}
         TARGET LANGUAGE: {target_lang}
         
@@ -394,7 +394,7 @@ class MarketOverview:
         else:
             prompt += f"\nACTION: Provide a very brief (max 300 chars), sharp, and actionable insight about this event. Connect it to the user's portfolio or current market news if possible."
 
-        prompt += "\nOUTPUT: Plain text only, no JSON, no headers. Use HTML bolding <b>text</b> for emphasis."
+        prompt += "\nOUTPUT: Plain text only, no JSON, no headers. Use Markdown **bolding** for emphasis."
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],

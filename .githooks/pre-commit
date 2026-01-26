@@ -1,0 +1,49 @@
+#!/bin/bash
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo -e "${YELLOW}🔍 Running pre-commit checks...${NC}"
+
+# Check if .env exists (prevent accidental commit)
+if git diff --cached --name-only | grep -q "^\.env$"; then
+    echo -e "${RED}❌ Error: .env file is staged for commit!${NC}"
+    echo -e "${YELLOW}💡 Use .env.example instead${NC}"
+    exit 1
+fi
+
+# Check Python syntax
+echo -e "${YELLOW}🐍 Checking Python syntax...${NC}"
+python_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$')
+
+if [ -n "$python_files" ]; then
+    for file in $python_files; do
+        python3 -m py_compile "$file" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ Syntax error in: $file${NC}"
+            exit 1
+        fi
+    done
+    echo -e "${GREEN}✅ Python syntax OK${NC}"
+fi
+
+# Check for common issues
+echo -e "${YELLOW}🔎 Checking for common issues...${NC}"
+
+# Check for print statements (should use logger)
+if git diff --cached | grep -E "^\+.*print\(" >/dev/null; then
+    echo -e "${YELLOW}⚠️  Warning: Found print() statements. Consider using logger instead.${NC}"
+fi
+
+# Check for hardcoded tokens/keys
+if git diff --cached | grep -iE "^\+.*(api_key|token|password|secret).*=.*['\"][^'\"]{20,}" >/dev/null; then
+    echo -e "${RED}❌ Error: Possible hardcoded credentials detected!${NC}"
+    echo -e "${YELLOW}💡 Use environment variables instead${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ All checks passed!${NC}"
+exit 0

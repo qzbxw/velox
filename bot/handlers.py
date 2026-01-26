@@ -81,7 +81,7 @@ def _main_menu_kb(lang):
     kb.row(InlineKeyboardButton(text="🖥️ Terminal", callback_data="cb_terminal"))
     # Row 0.5: VELOX AI & Hedge
     kb.row(
-        InlineKeyboardButton(text="🧠 Hedge AI", callback_data="cb_ai_overview_menu"),
+        InlineKeyboardButton(text="🧠 Velox AI", callback_data="cb_ai_overview_menu"),
         InlineKeyboardButton(text="🛡️ Hedge Chat", callback_data="cb_hedge_chat_start")
     )
     # Row 1: Portfolio & Trading
@@ -162,8 +162,8 @@ def _settings_kb(lang):
     kb = InlineKeyboardBuilder()
     # Row 0: AI Settings
     kb.row(
-        InlineKeyboardButton(text="🧠 Hedge AI Overview", callback_data="cb_overview_settings_menu"),
-        InlineKeyboardButton(text="🛡️ Velox Hedge", callback_data="cb_hedge_settings_menu")
+        InlineKeyboardButton(text=_t(lang, "btn_velox_ai_settings"), callback_data="cb_overview_settings_menu"),
+        InlineKeyboardButton(text=_t(lang, "btn_velox_hedge_settings"), callback_data="cb_hedge_settings_menu")
     )
     # Row 1: Wallets & Flex
     kb.row(
@@ -225,12 +225,19 @@ async def cmd_start(message: Message):
     wallets = await db.list_wallets(message.chat.id)
     
     text = _t(lang, "welcome")
+    kb = _main_menu_kb(lang)
+
     if not wallets:
         text += "\n\n" + _t(lang, "set_wallet")
+        # Add a quick button for adding wallet if none exist
+        builder = InlineKeyboardBuilder()
+        builder.button(text="👛 " + _t(lang, "btn_wallets"), callback_data="cb_wallets_menu")
+        builder.attach(InlineKeyboardBuilder.from_markup(kb))
+        kb = builder.as_markup()
     else:
         text += "\n\n" + _t(lang, "tracking").format(wallet=f"{wallets[0][:6]}...{wallets[0][-4:]}")
 
-    await message.answer(text, reply_markup=_main_menu_kb(lang), parse_mode="HTML")
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
     await db.add_user(message.chat.id, None)
 
 @router.message(Command("help"))
@@ -245,14 +252,34 @@ async def cmd_add_wallet(message: Message):
     if len(args) < 2:
         await message.answer(_t(lang, "add_wallet_usage"), parse_mode="HTML")
         return
+
     wallet = args[1].lower()
+
+    # Validate Ethereum address format
+    if not wallet.startswith("0x") or len(wallet) != 42:
+        error_msg = "❌ <b>Invalid wallet address!</b>\n\nAddress must:\n• Start with <code>0x</code>\n• Be 42 characters long\n\nExample: <code>0x1234...abcd</code>"
+        if lang == "ru":
+            error_msg = "❌ <b>Неверный формат адреса!</b>\n\nАдрес должен:\n• Начинаться с <code>0x</code>\n• Быть длиной 42 символа\n\nПример: <code>0x1234...abcd</code>"
+        await message.answer(error_msg, parse_mode="HTML")
+        return
+
+    # Validate hex characters
+    try:
+        int(wallet[2:], 16)
+    except ValueError:
+        error_msg = "❌ <b>Invalid wallet address!</b>\n\nAddress contains invalid characters. Only hexadecimal (0-9, a-f) allowed."
+        if lang == "ru":
+            error_msg = "❌ <b>Неверный формат адреса!</b>\n\nАдрес содержит недопустимые символы. Разрешены только hex-символы (0-9, a-f)."
+        await message.answer(error_msg, parse_mode="HTML")
+        return
+
     await db.add_wallet(message.chat.id, wallet)
-    
+
     ws = getattr(message.bot, "ws_manager", None)
     if ws:
         ws.track_wallet(wallet)
         await ws.subscribe_user(wallet)
-        
+
     await message.answer(_t(lang, "tracking").format(wallet=wallet), reply_markup=_back_kb(lang), parse_mode="HTML")
 
 @router.message(Command("tag"))
@@ -786,7 +813,7 @@ async def cb_balance(call: CallbackQuery):
         if spot_bals:
             for b in spot_bals:
                 coin_id = b.get("coin")
-                coin_name = await get_symbol_name(coin_id, is_spot=True)
+                coin_name = html.escape(await get_symbol_name(coin_id, is_spot=True))
                 amount = float(b.get("total", 0) or 0)
                 hold = float(b.get("hold", 0) or 0)
                 
@@ -1066,26 +1093,29 @@ async def cb_positions(call: CallbackQuery):
     # Add Exit Calc buttons for the current page items
     for i, item in enumerate(page_items):
         btn_label = _t(lang, "calc_exit_btn", sym=item['sym'])
-        # Store data in callback_data is size limited, so we use a shorthand
-        # Format: calc_exit:SYM:ENTRY:SIZE:LEV:IS_LONG:LIQ
-        cb_data = f"calc_exit:{item['sym']}:{item['entry']:.4f}:{abs(item['szi']):.4f}:{item['lev']}:{item['szi']>0}:{item['liq']:.2f}"
+        # Shorten callback data to stay within 64 bytes
+        # Format: cx:SYM:PX:SZ:L:IS_LONG:LIQ
+        # Using shorter prefix 'cx' and rounding values
+        is_l = 1 if item['szi'] > 0 else 0
+        cb_data = f"cx:{item['sym']}:{item['entry']:.2f}:{abs(item['szi']):.4f}:{item['lev']:.0f}:{is_l}:{item['liq']:.2f}"
+        
         if len(cb_data) > 64:
-             # Fallback if too long
-             cb_data = f"calc_exit:{item['sym']}:{int(item['entry'])}:{int(abs(item['szi']))}:{int(item['lev'])}:{item['szi']>0}:{int(item['liq'])}"
+             # Further compression: less decimals
+             cb_data = f"cx:{item['sym']}:{item['entry']:.1f}:{abs(item['szi']):.2f}:{item['lev']:.0f}:{is_l}:{item['liq']:.1f}"
         
         kb.inline_keyboard.insert(-1, [InlineKeyboardButton(text=btn_label, callback_data=cb_data)])
 
     await smart_edit(call, text, reply_markup=kb)
 
-@router.callback_query(F.data.startswith("calc_exit:"))
+@router.callback_query(F.data.startswith("cx:"))
 async def cb_calc_exit(call: CallbackQuery, state: FSMContext):
-    # Format: calc_exit:SYM:ENTRY:SIZE:LEV:IS_LONG:LIQ
+    # Format: cx:SYM:PX:SZ:L:IS_LONG:LIQ
     parts = call.data.split(":")
     sym = parts[1]
     entry = float(parts[2])
     size = float(parts[3])
     lev = float(parts[4])
-    is_long = parts[5] == "True"
+    is_long = parts[5] == "1"
     liq_px = float(parts[6]) if len(parts) > 6 else 0.0
     
     lang = await db.get_lang(call.message.chat.id)
@@ -1251,7 +1281,7 @@ async def cb_orders(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await call.message.edit_text(_t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
 
     all_orders = []
@@ -1435,10 +1465,14 @@ async def cb_wallets_menu(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets_full(call.message.chat.id)
     
+    kb = InlineKeyboardBuilder()
     if not wallets:
+        kb.button(text="➕ Add Wallet", callback_data="cb_add_wallet_prompt")
+        kb.button(text=_t(lang, "btn_back"), callback_data="cb_settings")
+        kb.adjust(1)
         await call.message.edit_text(
             f"📭 {_t(lang, 'need_wallet')}",
-            reply_markup=_settings_kb(lang),
+            reply_markup=kb.as_markup(),
             parse_mode="HTML"
         )
         return
@@ -1448,7 +1482,7 @@ async def cb_wallets_menu(call: CallbackQuery):
     
     for w in wallets:
         addr = w["address"]
-        tag = w.get("tag", "No Tag")
+        tag = html.escape(w.get("tag", "No Tag"))
         thresh = w.get("threshold", 0.0)
         
         text += f"• <code>{addr[:6]}...{addr[-4:]}</code>\n"
@@ -1467,6 +1501,25 @@ async def cb_del_wallet(call: CallbackQuery):
     addr = call.data.split(":")[1]
     await db.remove_wallet(call.message.chat.id, addr)
     await cb_wallets_menu(call)
+
+@router.callback_query(F.data == "cb_add_wallet_prompt")
+async def cb_add_wallet_prompt(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    text = (
+        "⌨️ <b>Add Wallet</b>\n\n"
+        "Please send the Hyperliquid wallet address (0x...) as a command:\n"
+        "<code>/add_wallet 0x...</code>\n\n"
+        "<i>Note: We only need your public address. Never share your private keys.</i>"
+    )
+    if lang == "ru":
+        text = (
+            "⌨️ <b>Добавить кошелек</b>\n\n"
+            "Пожалуйста, отправьте адрес кошелька Hyperliquid (0x...) через команду:\n"
+            "<code>/add_wallet 0x...</code>\n\n"
+            "<i>Примечание: Нам нужен только ваш публичный адрес. Никогда не делитесь своими приватными ключами.</i>"
+        )
+    await call.message.edit_text(text, reply_markup=_back_kb(lang, "cb_wallets_menu"), parse_mode="HTML")
+    await call.answer()
 
 @router.callback_query(F.data == "clear_all_alerts")
 async def cb_clear_all_alerts(call: CallbackQuery):
@@ -2112,11 +2165,8 @@ async def cb_market_alerts(call: CallbackQuery):
     kb.adjust(1)
     
     text += f"\n\n<i>{repeat_label if alert_times else ''} {_t(lang, 'daily')} | {_t(lang, 'once')}</i>\n<i>{_t(lang, 'last_update')}: {ts}</i>"
-    
-    try:
-        await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
-    except:
-        pass
+
+    await smart_edit(call, text, reply_markup=kb.as_markup())
 
 @router.callback_query(F.data == "cb_add_market_alert_time")
 async def cb_add_market_alert_time(call: CallbackQuery, state: FSMContext):
@@ -2480,7 +2530,7 @@ async def calc_set_tp(message: Message, state: FSMContext):
                 f"Entry: ${entry}\n"
                 f"Stop Loss: ${sl} ({side})\n"
                 f"Distance: {dist_pct*100:.2f}%\n\n"
-                f"👉 <b>Position Size: \${pretty_float(size_usd, 2)}</b>\n"
+                f"👉 <b>Position Size: ${pretty_float(size_usd, 2)}</b>\n"
                 f"(Qty: {size_usd/entry:.4f})"
             )
             kb = InlineKeyboardBuilder()
@@ -2768,15 +2818,8 @@ async def cb_fear_greed(call: CallbackQuery):
     kb.button(text="🔄 " + _t(lang, "btn_refresh"), callback_data="cb_fear_greed")
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
     kb.adjust(1)
-    
-    # Try to edit if message exists (Refresh logic)
-    try:
-        await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
-    except Exception:
-        # If content identical or can't edit (e.g. was a photo), fallback to smart_edit which handles deletion
-        if "message is not modified" not in str(Exception):
-             await smart_edit(call, text, reply_markup=kb.as_markup())
-             
+
+    await smart_edit(call, text, reply_markup=kb.as_markup())
     await call.answer()
 
 @router.callback_query(F.data == "set_whale_thr_prompt")
@@ -3646,7 +3689,7 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
         img_msg = await bot.send_photo(
              chat_id=chat_id,
              photo=BufferedInputFile(img_buf.read(), filename="overview.png"),
-             caption=f"{header}\n\n<b>VELOX AI</b>",
+             caption=f"{header}\n\n🧠 <b>Velox AI Intelligence</b>",
              parse_mode="HTML"
         )
         
@@ -3970,6 +4013,11 @@ async def process_hedge_chat(message: Message, state: FSMContext):
         response = "⚠️ I am having trouble connecting to my brain. Please try again."
         if lang == "ru": response = "⚠️ Возникли трудности с подключением. Попробуй еще раз."
 
+    # Convert Markdown to HTML for the answer
+    disp_response = html.escape(response)
+    disp_response = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', disp_response)
+    disp_response = re.sub(r'\*(.*?)\*', r'<i>\1</i>', disp_response)
+
     # Add AI response to history
     history.append({"role": "assistant", "content": response})
     
@@ -3982,7 +4030,7 @@ async def process_hedge_chat(message: Message, state: FSMContext):
     kb = InlineKeyboardBuilder()
     kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
     
-    await message.answer(response, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await message.answer(disp_response, reply_markup=kb.as_markup(), parse_mode="HTML")
 
 async def _send_hedge_insight(bot, chat_id, user_id, context_type, event_data, reply_to_id=None):
     """Fires in background to provide AI insight after a fast alert."""
@@ -4007,8 +4055,12 @@ async def _send_hedge_insight(bot, chat_id, user_id, context_type, event_data, r
         )
         
         if comment:
-            text = f"🛡️ <b>Hedge Insight:</b>\n{comment}"
-            if lang == "ru": text = f"🛡️ <b>Velox Hedge:</b>\n{comment}"
+            # Convert Markdown to HTML
+            disp_comment = html.escape(comment)
+            disp_comment = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', disp_comment)
+            disp_comment = re.sub(r'\*(.*?)\*', r'<i>\1</i>', disp_comment)
+
+            text = f"🛡️ <b>Velox AI:</b>\n{disp_comment}"
             
             await bot.send_message(
                 chat_id=chat_id,

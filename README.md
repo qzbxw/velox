@@ -1,11 +1,11 @@
-# ⚡ Velox & 🧠 Hedge AI: Institutional Hyperliquid Terminal
+# ⚡ Velox & 🧠 Velox AI: Institutional Hyperliquid Terminal
 
-![Velox Hedge AI](https://img.shields.io/badge/Velox-Hedge_AI-blueviolet?style=for-the-badge)
+![Velox AI](https://img.shields.io/badge/Velox-AI-blueviolet?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Production-success?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
-**Velox Hedge AI** is a dual-core institutional trading system built for **Hyperliquid L1**. It combines a high-performance, real-time tracking terminal (**Velox**) with an autonomous quantitative analyst (**Hedge AI**) powered by Google Gemini.
+**Velox & Velox AI** is a dual-core institutional trading system built for **Hyperliquid L1**. It combines a high-performance, real-time tracking terminal (**Velox**) with an autonomous quantitative analyst (**Velox AI**) powered by Google Gemini.
 
 ---
 
@@ -55,26 +55,26 @@ Velox does not send text walls. It uses **Playwright (Chromium)** to render HTML
 
 ---
 
-# 🧠 Part 2: Hedge AI
+# 🧠 Part 2: Velox AI
 **The Quantitative Analyst.**
-Hedge AI is not a chatbot; it is an event-driven analytical layer injected into the terminal.
+Velox AI is not a chatbot; it is an event-driven analytical layer injected into the terminal.
 
-### 1. ⚡ Contextual Hedge Insights
-When a major event occurs, Hedge AI analyzes it instantly and adds a "Commentary" layer:
+### 1. ⚡ Contextual Insights
+When a major event occurs, Velox AI analyzes it instantly and adds a "Commentary" layer:
 *   **On Liquidation**: Analyzes *why* it happened (volatility spike vs. slow bleed) and suggests collateral adjustments.
 *   **On Whale Trade**: contextualizes the trade (e.g., "Whale bought $500k SOL near resistance, possible breakout").
 *   **On New Listing**: Scrapes project info and provides a rapid fundamental summary.
 
 ### 2. 📰 Autonomous Market Reports
-Hedge AI scrapes global data sources to generate human-readable reports:
+Velox AI scrapes global data sources to generate human-readable reports:
 *   **Data Sources**: Hyperliquid L1 Data (OI, Vol, Basis), **Farside Investors** (BTC/ETH ETF Flows), and RSS News Feeds (CoinDesk, Decrypt).
 *   **Scheduled Reports**:
     *   **Morning Brief (06:00 UTC)**: Overnight moves + ETF flows.
     *   **Evening Wrap (18:00 UTC)**: Day's session summary.
     *   **Weekly Digest (Sunday)**: Net PnL, realized gains, and net flow analysis.
-*   **Custom Persona**: You can configure Hedge AI's personality (e.g., "Brief & Professional" or "Degen Slang") via `/overview_settings`.
+*   **Custom Persona**: You can configure Velox AI's personality (e.g., "Brief & Professional" or "Degen Slang") via `/overview_settings`.
 
-### 3. 💬 Hedge Chat
+### 3. 💬 AI Chat
 An interactive interface where you can ask questions about your specific portfolio:
 *   *"What is my current exposure to SOL?"*
 *   *"Summarize the last 24h of funding payments."*
@@ -87,25 +87,32 @@ An interactive interface where you can ask questions about your specific portfol
 ### Prerequisites
 *   **Docker** (Recommended) OR Python 3.10+ & MongoDB.
 
-### Option A: Docker (Production)
+### Docker (Recommended)
 ```bash
-# 1. Clone
+# 1. Clone & Configure
 git clone https://github.com/qzbxw/velox.git
 cd velox
-
-# 2. Config
 cp .env.example .env
 # Edit .env with your BOT_TOKEN and GEMINI_API_KEY
 
-# 3. Launch
-docker-compose up -d --build
+# 2. Deploy
+make deploy
 ```
 
-### Option B: Manual (Dev)
+### Manual (No Docker)
 ```bash
 pip install -r requirements.txt
 playwright install chromium
 python -m bot.main
+```
+
+### Quick Commands
+```bash
+make deploy        # Pull, rebuild, restart
+make quick         # Pull & restart (no rebuild)
+make logs          # View logs
+make stop          # Stop bot
+make help          # All commands
 ```
 
 ---
@@ -116,7 +123,7 @@ python -m bot.main
 | :--- | :--- | :--- |
 | `BOT_TOKEN` | Telegram Bot API Token | ✅ |
 | `MONGO_URI` | MongoDB Connection String | ✅ |
-| `GEMINI_API_KEY` | Google Gemini API Key (for Hedge AI features) | ⚠️ (Rec.) |
+| `GEMINI_API_KEY` | Google Gemini API Key (for AI features) | ⚠️ (Rec.) |
 | `HYPERLIQUID_WS_URL` | WebSocket Endpoint (Default: Mainnet) | ✅ |
 | `PROXIMITY_THRESHOLD` | % distance for Limit Order alerts (default: 0.01) | ❌ |
 | `WATCH_ALERT_PCT` | % move for Volatility Scanner (default: 0.02) | ❌ |
@@ -143,7 +150,7 @@ python -m bot.main
 | `/watch` | `/watch HYPE` | Add asset to **Volatility Scanner** (±2% moves). |
 | `/set_whale` | `/set_whale 100000` | Set min USD threshold for global **Whale Watcher**. |
 
-### 🔹 Hedge AI & Market
+### 🔹 Velox AI & Market
 | Command | Usage | Description |
 | :--- | :--- | :--- |
 | `/overview` | `/overview` | Force-generate an AI Market Report now. |
@@ -159,4 +166,4 @@ python -m bot.main
 
 ---
 
-*Velox x Hedge AI*
+*Velox x Velox AI*

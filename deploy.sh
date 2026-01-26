@@ -15,20 +15,20 @@ git pull origin main
 
 # Stop containers
 echo -e "${BLUE}🛑 Stopping containers...${NC}"
-docker-compose down
+docker compose down
 
 # Rebuild images
 echo -e "${BLUE}🔨 Rebuilding images...${NC}"
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # Start containers
 echo -e "${BLUE}🚀 Starting containers...${NC}"
-docker-compose up -d
+docker compose up -d
 
 # Show logs
 echo -e "${BLUE}📋 Checking logs...${NC}"
 sleep 2
-docker-compose logs --tail=50
+docker compose logs --tail=50
 
 echo -e "${GREEN}✅ Deploy complete!${NC}"
-echo -e "${BLUE}Run 'docker-compose logs -f' to follow logs${NC}"
+echo -e "${BLUE}Run 'docker compose logs -f' to follow logs${NC}"

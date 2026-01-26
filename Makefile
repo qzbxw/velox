@@ -24,48 +24,48 @@ deploy:
 quick:
 	@echo "⚡ Quick restart..."
 	@git pull origin main
-	@docker-compose restart bot
+	@docker compose restart bot
 	@echo "✅ Done! Run 'make logs' to check"
 
 start:
 	@echo "🚀 Starting containers..."
-	@docker-compose up -d
-	@docker-compose ps
+	@docker compose up -d
+	@docker compose ps
 
 stop:
 	@echo "🛑 Stopping containers..."
-	@docker-compose down
+	@docker compose down
 
 restart:
 	@echo "🔄 Restarting containers..."
-	@docker-compose restart
-	@docker-compose ps
+	@docker compose restart
+	@docker compose ps
 
 logs:
-	@docker-compose logs -f --tail=100
+	@docker compose logs -f --tail=100
 
 build:
 	@echo "🔨 Building images..."
-	@docker-compose build
+	@docker compose build
 
 clean:
 	@echo "🧹 Cleaning up..."
-	@docker-compose down -v
+	@docker compose down -v
 	@echo "✅ Cleaned!"
 
 dev:
 	@echo "🔧 Starting in dev mode..."
-	@docker-compose -f docker-compose.dev.yml up
+	@docker compose -f docker-compose.dev.yml up
 
 test:
 	@echo "🧪 Running tests..."
-	@docker-compose exec bot python -m pytest
+	@docker compose exec bot python -m pytest
 
 status:
-	@docker-compose ps
+	@docker compose ps
 
 shell:
-	@docker-compose exec bot /bin/bash
+	@docker compose exec bot /bin/bash
 
 db-shell:
-	@docker-compose exec mongo mongosh hyperliquid_bot
+	@docker compose exec mongo mongosh hyperliquid_bot

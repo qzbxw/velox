@@ -80,6 +80,9 @@ class WSManager:
                     self.ws = ws
                     logger.info("Connected to Hyperliquid WS")
 
+                    # Reset whale subscriptions state on new connection
+                    self.top_assets = set()
+
                     await self._load_universe()
                     
                     # Initial subscriptions

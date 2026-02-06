@@ -705,7 +705,7 @@ def generate_ecosystem_dashboard(assets_ctx: list, universe: list, hlp_info: dic
             ax.text(0.1, 0.06, "HLP Vault", color='white', fontsize=14, weight='bold')
             ax.text(0.4, 0.06, f"Price: ${hlp_price}", color='#848e9c', fontsize=14)
             ax.text(0.7, 0.06, "ACTIVE", color='#0ecb81', fontsize=14)
-        except:
+        except Exception:
             ax.text(0.1, 0.06, "HLP Vault", color='white', fontsize=14)
             ax.text(0.7, 0.06, "STABLE", color='#0ecb81', fontsize=14)
     else:
@@ -935,7 +935,7 @@ def prepare_modern_market_data(assets_ctx: list, universe: list, hlp_info: dict 
                 hlp_apr = f"{calc_apr:,.1f}"
             else:
                 hlp_apr = "20.0" # Fallback
-        except:
+        except (TypeError, ValueError):
             hlp_apr = "20.0"
 
     return {
@@ -958,7 +958,7 @@ def pretty_float(x: float, max_decimals: int = 6) -> str:
     """Duplicate helper for analytics standalone usage."""
     try:
         v = float(x)
-    except:
+    except (TypeError, ValueError):
         return "0"
     s = f"{v:.{max_decimals}f}"
     if "." in s:

@@ -20,6 +20,28 @@ from bot.locales import _t
 
 logger = logging.getLogger(__name__)
 
+async def _get_user_wallet_pairs() -> list[tuple[int | str, str]]:
+    """Return deduplicated (user_id, wallet) pairs from current + legacy storage."""
+    pairs: set[tuple[int | str, str]] = set()
+
+    # Primary source: dedicated wallets collection
+    cursor = db.wallets.find({})
+    async for w_doc in cursor:
+        user_id = w_doc.get("user_id")
+        wallet = w_doc.get("address")
+        if user_id and isinstance(wallet, str) and wallet:
+            pairs.add((user_id, wallet.lower()))
+
+    # Legacy source: users.wallet_address
+    users = await db.get_all_users()
+    for user in users:
+        user_id = user.get("user_id")
+        wallet = user.get("wallet_address")
+        if user_id and isinstance(wallet, str) and wallet:
+            pairs.add((user_id, wallet.lower()))
+
+    return sorted(pairs, key=lambda x: (str(x[0]), x[1]))
+
 async def send_market_reports(bot):
     """Checks all users and sends scheduled market reports."""
     now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%H:%M")
@@ -197,13 +219,9 @@ async def send_market_reports(bot):
 async def send_daily_digest(bot):
     """Generate and send daily digest (Equity PnL) to all users."""
     logger.info("Generating daily digest...")
-    users = await db.get_all_users()
-    
-    for user in users:
-        chat_id = user.get("chat_id")
-        wallet = user.get("wallet_address")
-        
-        if not wallet or not chat_id: continue
+    user_wallet_pairs = await _get_user_wallet_pairs()
+
+    for chat_id, wallet in user_wallet_pairs:
         
         portf = await get_user_portfolio(wallet)
         if not portf or not isinstance(portf, dict):
@@ -272,16 +290,12 @@ async def send_daily_digest(bot):
 async def send_weekly_summary(bot):
     """Generate and send weekly summary to all users."""
     logger.info("Generating weekly summary...")
-    users = await db.get_all_users()
+    user_wallet_pairs = await _get_user_wallet_pairs()
     
     end_time = time.time()
     start_time = end_time - (7 * 24 * 60 * 60) # 7 days ago
     
-    for user in users:
-        chat_id = user.get("chat_id")
-        wallet = user.get("wallet_address")
-        
-        if not wallet: continue
+    for chat_id, wallet in user_wallet_pairs:
         
         fills = await db.get_fills(wallet, start_time, end_time)
 

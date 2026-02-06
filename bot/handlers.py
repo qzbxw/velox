@@ -43,8 +43,8 @@ async def smart_edit(call: CallbackQuery, text: str, reply_markup: InlineKeyboar
         if call.message.photo or call.message.document:
             try:
                 await call.message.delete()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"smart_edit delete failed: {e}")
             return await call.message.answer(text, reply_markup=reply_markup, parse_mode="HTML")
         
         # If it's a regular text message, try to edit it
@@ -67,8 +67,8 @@ async def smart_edit_media(call: CallbackQuery, photo: BufferedInputFile, captio
         else:
             try:
                 await call.message.delete()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"smart_edit_media delete failed: {e}")
             return await call.message.answer_photo(photo=photo, caption=caption, reply_markup=reply_markup, parse_mode="HTML")
     except Exception:
         return await call.message.answer_photo(photo=photo, caption=caption, reply_markup=reply_markup, parse_mode="HTML")
@@ -307,7 +307,7 @@ async def cmd_threshold(message: Message):
     wallet = args[1].lower()
     try:
         threshold = float(args[2])
-    except:
+    except ValueError:
         await message.answer(_t(lang, "invalid_number"))
         return
     
@@ -325,7 +325,7 @@ async def cmd_alert(message: Message):
     symbol = html.escape(args[1].upper())
     try:
         target = float(args[2])
-    except:
+    except ValueError:
         await message.answer(_t(lang, "alert_error"))
         return
 
@@ -357,7 +357,7 @@ async def cmd_f_alert(message: Message):
     symbol = args[1].upper()
     try:
         target = float(args[2])
-    except:
+    except ValueError:
         await message.answer(_t(lang, "invalid_number"))
         return
 
@@ -388,7 +388,7 @@ async def cmd_oi_alert(message: Message):
     symbol = args[1].upper()
     try:
         target = float(args[2]) # In Millions USD
-    except:
+    except ValueError:
         await message.answer(_t(lang, "invalid_number"))
         return
 
@@ -543,7 +543,8 @@ async def _generate_export_files(wallet: str):
             coin = f["coin"]
             if coin.startswith("@"):
                 try: coin = await get_symbol_name(coin)
-                except: pass
+                except Exception as e:
+                    logger.debug(f"Export symbol resolve failed for {coin}: {e}")
             
             direction = f["dir"]
             if not direction and f["type"] == "Fill":
@@ -554,24 +555,13 @@ async def _generate_export_files(wallet: str):
             val = px * sz if f["type"] == "Fill" else 0
             
             writer_fills.writerow([dt, coin, direction, px, sz, f"{val:.2f}", f["fee"], f["pnl"], f["tid"], f["liq"], f["type"]])
-        except:
+        except Exception:
             continue
 
     output_fills.seek(0)
     doc_fills = BufferedInputFile(output_fills.getvalue().encode(), filename=f"fills_{wallet[:6]}.csv")
     
     return doc_hist, doc_fills
-
-@router.message(Command("funding"))
-async def cmd_funding(message: Message):
-    await _show_funding_page(message.chat.id, message.chat.id, page=0, edit=False)
-
-@router.callback_query(F.data.startswith("cb_funding:"))
-async def cb_funding_page(call: CallbackQuery):
-    parts = call.data.split(":")
-    page = int(parts[1])
-    await _show_funding_page(call.message.chat.id, call.message.chat.id, page=page, edit=True, msg_id=call.message.message_id)
-    await call.answer()
 
 async def _render_funding_page(bot, chat_id, page=0, edit=False, msg_id=None):
     lang = await db.get_lang(chat_id)
@@ -581,7 +571,8 @@ async def _render_funding_page(bot, chat_id, page=0, edit=False, msg_id=None):
         if edit:
             try:
                 await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=_t(lang, "need_wallet"), parse_mode="HTML")
-            except: pass
+            except Exception as e:
+                logger.debug(f"Funding page edit failed for {chat_id}: {e}")
         else:
             await bot.send_message(chat_id, _t(lang, "need_wallet"), parse_mode="HTML")
         return
@@ -652,8 +643,8 @@ async def _render_funding_page(bot, chat_id, page=0, edit=False, msg_id=None):
     if edit and msg_id:
         try:
             await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=msg_text, reply_markup=kb.as_markup(), parse_mode="HTML")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Funding page edit_text fallback for {chat_id}: {e}")
     else:
         await bot.send_message(chat_id, msg_text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
@@ -682,8 +673,8 @@ async def cmd_export(message: Message):
     for wallet in wallets:
         try:
             await status_msg.edit_text(f"⏳ Exporting {wallet[:6]}... (History & Fills)")
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Export status update failed for {wallet}: {e}")
 
         doc_hist, doc_fills = await _generate_export_files(wallet)
         
@@ -700,8 +691,8 @@ async def cmd_export(message: Message):
             await status_msg.edit_text("❌ No data found for any tracked wallets.")
         else:
             await status_msg.delete()
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"Export status finalize failed: {e}")
 
 
 # --- CALLBACKS ---
@@ -721,8 +712,8 @@ async def cb_export(call: CallbackQuery):
     for wallet in wallets:
         try:
             await status_msg.edit_text(f"⏳ Exporting {wallet[:6]}... (History & Fills)")
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Export callback status update failed for {wallet}: {e}")
 
         doc_hist, doc_fills = await _generate_export_files(wallet)
         
@@ -739,8 +730,8 @@ async def cb_export(call: CallbackQuery):
             await status_msg.edit_text("❌ No data found for any tracked wallets.")
         else:
             await status_msg.delete()
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"Export callback finalize failed: {e}")
 
 
 @router.callback_query(F.data == "cb_menu")
@@ -833,7 +824,7 @@ async def cb_balance(call: CallbackQuery):
                         coin_fills = await db.get_fills_by_coin(wallet, coin_id)
                         from bot.services import calc_avg_entry_from_fills
                         entry = calc_avg_entry_from_fills(coin_fills)
-                    except:
+                    except Exception:
                         entry = 0.0
 
                 pnl_str = ""
@@ -992,11 +983,11 @@ async def cb_positions(call: CallbackQuery):
     if len(parts) == 3:
         context = parts[1]
         try: page = int(parts[2])
-        except: page = 0
+        except Exception: page = 0
     elif len(parts) == 2:
         context = "trading"
         try: page = int(parts[1])
-        except: page = 0
+        except Exception: page = 0
     else:
         context = "trading"
         page = 0
@@ -1263,11 +1254,11 @@ async def cb_orders(call: CallbackQuery):
     if len(parts) == 3:
         context = parts[1]
         try: page = int(parts[2])
-        except: page = 0
+        except Exception: page = 0
     elif len(parts) == 2:
         context = "trading"
         try: page = int(parts[1])
-        except: page = 0
+        except Exception: page = 0
     else:
         context = "trading"
         page = 0
@@ -1835,8 +1826,8 @@ async def cb_market_cleanup(call: CallbackQuery, state: FSMContext):
         if mid == call.message.message_id: continue
         try:
             await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Market cleanup delete failed for {mid}: {e}")
     await state.update_data(market_media_ids=None)
     await cb_sub_market(call)
 
@@ -1879,7 +1870,7 @@ async def cmd_set_vol(message: Message):
         val = float(args[1]) / 100.0 # User enters 2.5, we store 0.025
         await db.update_user_settings(message.chat.id, {"watch_alert_pct": val})
         await message.answer(_t(lang, "vol_set", val=val*100), parse_mode="HTML")
-    except:
+    except ValueError:
         await message.answer(_t(lang, "invalid_number"))
 
 @router.callback_query(F.data.startswith("cb_pnl"))
@@ -2202,8 +2193,8 @@ async def process_market_alert_time(message: Message, state: FSMContext):
     # Cleanup user message
     try:
         await message.delete()
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"Market alert input message delete failed: {e}")
     
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 " + _t(lang, "daily"), callback_data="ma_type:daily")
@@ -2223,7 +2214,8 @@ async def process_market_alert_time(message: Message, state: FSMContext):
                 parse_mode="HTML"
             )
             await state.set_state(MarketAlertStates.waiting_for_type)
-        except:
+        except Exception as e:
+            logger.debug(f"Market alert type edit failed, fallback to send: {e}")
             await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
             await state.set_state(MarketAlertStates.waiting_for_type)
     else:
@@ -2311,8 +2303,10 @@ async def process_alert_symbol(message: Message, state: FSMContext):
     
     prompt = _t(lang, "prompt_target_funding") if a_type == "funding" else _t(lang, "prompt_target_oi")
     
-    try: await message.delete()
-    except: pass
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug(f"Alert symbol message delete failed: {e}")
 
     if msg_id:
         try:
@@ -2323,7 +2317,7 @@ async def process_alert_symbol(message: Message, state: FSMContext):
                 reply_markup=_back_kb(lang, "cb_settings"),
                 parse_mode="HTML"
             )
-        except:
+        except Exception:
             await message.answer(prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
     else:
         await message.answer(prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
@@ -2332,13 +2326,15 @@ async def process_alert_symbol(message: Message, state: FSMContext):
 
 @router.message(AlertStates.waiting_for_target)
 async def process_alert_target(message: Message, state: FSMContext):
-    try: await message.delete()
-    except: pass
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug(f"Alert target message delete #1 failed: {e}")
     
     lang = await db.get_lang(message.chat.id)
     try:
         target = float(message.text.replace(",", "."))
-    except:
+    except ValueError:
         await message.answer(_t(lang, "invalid_number"))
         return
         
@@ -2367,8 +2363,10 @@ async def process_alert_target(message: Message, state: FSMContext):
     dir_icon = "📈" if direction == "above" else "📉"
     success_msg = _t(lang, "funding_alert_set" if a_type == "funding" else "oi_alert_set", symbol=symbol, dir=dir_icon, val=target)
     
-    try: await message.delete()
-    except: pass
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug(f"Alert target message delete #2 failed: {e}")
 
     if msg_id:
         try:
@@ -2379,7 +2377,8 @@ async def process_alert_target(message: Message, state: FSMContext):
                 reply_markup=_settings_kb(lang),
                 parse_mode="HTML"
             )
-        except:
+        except Exception as e:
+            logger.debug(f"Alert target edit failed, fallback to send: {e}")
             await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
     else:
         await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
@@ -2444,8 +2443,10 @@ async def calc_set_balance(message: Message, state: FSMContext):
         val = float(message.text.replace(",", "."))
         await state.update_data(balance=val)
         prompt = _t(lang, "calc_entry")
-        try: await message.delete()
-        except: pass
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.debug(f"Calculator balance message delete failed: {e}")
         if msg_id:
             await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
         else:
@@ -2463,8 +2464,10 @@ async def calc_set_entry(message: Message, state: FSMContext):
         val = float(message.text.replace(",", "."))
         await state.update_data(entry=val)
         prompt = _t(lang, "calc_sl")
-        try: await message.delete()
-        except: pass
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.debug(f"Calculator entry message delete failed: {e}")
         if msg_id:
             await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
         else:
@@ -2486,8 +2489,10 @@ async def calc_set_sl(message: Message, state: FSMContext):
         if data.get("mode") == "reverse":
             prompt = "💰 Enter <b>Risk Amount ($)</b> (e.g. 50):"
             
-        try: await message.delete()
-        except: pass
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.debug(f"Calculator SL message delete failed: {e}")
         
         if msg_id:
             await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
@@ -2506,8 +2511,10 @@ async def calc_set_tp(message: Message, state: FSMContext):
         val = float(message.text.replace(",", "."))
         await state.update_data(tp=val)
         
-        try: await message.delete()
-        except: pass
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.debug(f"Calculator TP message delete failed: {e}")
         
         if data.get("mode") == "reverse":
             # Direct calculation for reverse mode here
@@ -2538,7 +2545,9 @@ async def calc_set_tp(message: Message, state: FSMContext):
             
             if msg_id:
                 try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=res, reply_markup=kb.as_markup(), parse_mode="HTML")
-                except: await message.answer(res, reply_markup=kb.as_markup(), parse_mode="HTML")
+                except Exception as e:
+                    logger.debug(f"Calculator result edit failed, fallback to send: {e}")
+                    await message.answer(res, reply_markup=kb.as_markup(), parse_mode="HTML")
             else:
                 await message.answer(res, reply_markup=kb.as_markup(), parse_mode="HTML")
             await state.clear()
@@ -2615,15 +2624,20 @@ async def calc_calculate(message: Message, state: FSMContext):
             total_profit=pretty_float(total_profit), p50=pretty_float(p50), p100=pretty_float(total_profit)
         ) + liq_warning
         
-        try: await message.delete()
-        except: pass
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.debug(f"Calculator final message delete failed: {e}")
         
         kb = InlineKeyboardBuilder()
         kb.button(text=_t(lang, "btn_back"), callback_data="sub:trading")
         
         if msg_id:
-            try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=msg, reply_markup=kb.as_markup(), parse_mode="HTML")
-            except: await message.answer(msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+            try:
+                await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+            except Exception as e:
+                logger.debug(f"Calculator final edit failed, fallback to send: {e}")
+                await message.answer(msg, reply_markup=kb.as_markup(), parse_mode="HTML")
         else:
             await message.answer(msg, reply_markup=kb.as_markup(), parse_mode="HTML")
         
@@ -2839,7 +2853,7 @@ async def cmd_set_whale(message: Message):
         val = float(args[1])
         await db.update_user_settings(message.chat.id, {"whale_threshold": val})
         await message.answer(_t(lang, "whale_set", val=pretty_float(val)), parse_mode="HTML")
-    except:
+    except ValueError:
         await message.answer(_t(lang, "invalid_number"))
 
 @router.callback_query(F.data == "set_prox_prompt")
@@ -2877,17 +2891,22 @@ async def process_set_prox_state(message: Message, state: FSMContext):
         val = float(message.text.replace(",", ".")) / 100.0
         await db.update_user_settings(message.chat.id, {"prox_alert_pct": val})
         res_text = "✅ " + _t(lang, "prox_set", val=val*100)
-    except:
+    except ValueError:
         res_text = "❌ " + _t(lang, "invalid_number")
     
     await state.clear()
-    try: await message.delete()
-    except: pass
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug(f"Settings prox message delete failed: {e}")
     
     final_text = f"{res_text}\n\n{_t(lang, 'settings_title')}"
     if msg_id:
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
-        except: await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        except Exception as e:
+            logger.debug(f"Settings prox edit failed, fallback to send: {e}")
+            await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
     else:
         await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
 
@@ -2902,17 +2921,22 @@ async def process_set_vol_state(message: Message, state: FSMContext):
         val = float(message.text.replace(",", ".")) / 100.0
         await db.update_user_settings(message.chat.id, {"watch_alert_pct": val})
         res_text = "✅ " + _t(lang, "vol_set", val=val*100)
-    except:
+    except ValueError:
         res_text = "❌ " + _t(lang, "invalid_number")
     
     await state.clear()
-    try: await message.delete()
-    except: pass
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug(f"Settings vol message delete failed: {e}")
     
     final_text = f"{res_text}\n\n{_t(lang, 'settings_title')}"
     if msg_id:
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
-        except: await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        except Exception as e:
+            logger.debug(f"Settings vol edit failed, fallback to send: {e}")
+            await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
     else:
         await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
 
@@ -2927,17 +2951,22 @@ async def process_set_whale_state(message: Message, state: FSMContext):
         val = float(message.text.replace(",", "."))
         await db.update_user_settings(message.chat.id, {"whale_threshold": val})
         res_text = "✅ " + _t(lang, "whale_set", val=pretty_float(val))
-    except:
+    except ValueError:
         res_text = "❌ " + _t(lang, "invalid_number")
     
     await state.clear()
-    try: await message.delete()
-    except: pass
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug(f"Settings whale message delete failed: {e}")
     
     final_text = f"{res_text}\n\n{_t(lang, 'settings_title')}"
     if msg_id:
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
-        except: await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+        except Exception as e:
+            logger.debug(f"Settings whale edit failed, fallback to send: {e}")
+            await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
     else:
         await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
 
@@ -2989,7 +3018,7 @@ async def cmd_set_prox(message: Message):
         val = float(args[1]) / 100.0 # User enters 0.5, we store 0.005
         await db.update_user_settings(message.chat.id, {"prox_alert_pct": val})
         await message.answer(_t(lang, "prox_set", val=val*100), parse_mode="HTML")
-    except:
+    except ValueError:
         await message.answer(_t(lang, "invalid_number"))
 
 @router.callback_query(F.data == "cb_flex_menu")
@@ -3194,7 +3223,7 @@ async def cb_terminal(call: CallbackQuery):
                         coin_fills = await db.get_fills_by_coin(wallet, coin_id)
                         from bot.services import calc_avg_entry_from_fills
                         entry = calc_avg_entry_from_fills(coin_fills)
-                    except:
+                    except Exception:
                         entry = 0.0
                 
                 if entry > 0 and px > 0:
@@ -3361,7 +3390,7 @@ async def cb_positions_img(call: CallbackQuery):
                         coin_fills = await db.get_fills_by_coin(wallet, coin_id)
                         from bot.services import calc_avg_entry_from_fills
                         entry = calc_avg_entry_from_fills(coin_fills)
-                    except:
+                    except Exception:
                         entry = 0.0
                 
                 upnl = 0.0
@@ -3423,8 +3452,10 @@ async def cb_fills(call: CallbackQuery):
     for f in all_fills[:10]:
         coin = f.get("coin", "???")
         if coin.startswith("@"):
-             try: coin = await get_symbol_name(coin, is_spot=True)
-             except: pass
+             try:
+                 coin = await get_symbol_name(coin, is_spot=True)
+             except Exception as e:
+                 logger.debug(f"Recent fills symbol resolve failed for {coin}: {e}")
         
         side = f.get("side", "")
         if f.get("dir"): 
@@ -3757,8 +3788,8 @@ async def cb_ai_cleanup(call: CallbackQuery, state: FSMContext):
         if mid == call.message.message_id: continue
         try:
             await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"AI cleanup delete failed for {mid}: {e}")
     await state.update_data(ai_overview_msg_ids=None)
     await cb_sub_market(call)
 
@@ -3775,8 +3806,8 @@ async def cb_market_overview_refresh(call: CallbackQuery, state: FSMContext):
     for mid in mids:
         try:
             await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"AI refresh cleanup delete failed for {mid}: {e}")
             
     lang = await db.get_lang(call.message.chat.id)
     kb = InlineKeyboardBuilder()
@@ -3876,7 +3907,8 @@ async def cb_overview_settings(call: CallbackQuery, state: FSMContext):
 
     try:
         await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
-    except: pass
+    except Exception as e:
+        logger.debug(f"Overview settings edit failed: {e}")
     await call.answer()
 
 @router.callback_query(F.data == "cb_overview_settings_menu")
@@ -4068,7 +4100,8 @@ async def _send_hedge_insight(bot, chat_id, user_id, context_type, event_data, r
         # Show typing status
         try:
             await bot.send_chat_action(chat_id=chat_id, action="typing")
-        except: pass
+        except Exception as e:
+            logger.debug(f"Hedge insight typing action failed for {chat_id}: {e}")
 
         # AI Generation
         comment = await market_overview.generate_hedge_comment(
@@ -4103,5 +4136,5 @@ async def global_error_handler(event: ErrorEvent):
             await event.update.message.answer("❌ Internal Bot Error. Please try again later.")
         elif event.update.callback_query:
             await event.update.callback_query.answer("❌ Internal Error.", show_alert=True)
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"Global error handler response failed: {e}")

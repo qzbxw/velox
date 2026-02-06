@@ -162,7 +162,7 @@ class MarketOverview:
             if '(' in t and ')' in t:
                 t = '-' + t.replace('(', '').replace(')', '')
             return float(t)
-        except:
+        except (TypeError, ValueError):
             return None
 
     async def fetch_news_rss(self, since_timestamp: float = 0) -> list[dict]:
@@ -218,7 +218,7 @@ class MarketOverview:
                         "published": pub_ts,
                         "summary": getattr(entry, 'summary', '')[:1000]
                     })
-                except Exception as e:
+                except Exception:
                     continue
         
         # Sort by date desc

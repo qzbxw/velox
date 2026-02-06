@@ -359,14 +359,14 @@ async def get_mid_price(symbol: str, original_id: str | None = None) -> float:
     if original_id and str(original_id) in mids:
         try:
             return float(mids[str(original_id)])
-        except:
+        except (TypeError, ValueError):
             pass
 
     # 2. Try symbol name (e.g. "PURR/USDC" or "BTC")
     if sym in mids:
         try:
             return float(mids[sym])
-        except:
+        except (TypeError, ValueError):
             pass
             
     # 3. Special case for Spot: if symbol is "PURR", allMids might have "PURR/USDC"
@@ -375,7 +375,7 @@ async def get_mid_price(symbol: str, original_id: str | None = None) -> float:
         if alt_sym in mids:
             try:
                 return float(mids[alt_sym])
-            except:
+            except (TypeError, ValueError):
                 pass
 
     return 0.0
@@ -555,4 +555,3 @@ def _fng_emoji(value: int) -> str:
         return "😊"  # Greed
     else:
         return "🤑"  # Extreme Greed
-

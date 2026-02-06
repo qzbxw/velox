@@ -106,6 +106,17 @@ class WSManager:
                                 for sym in wl:
                                     if isinstance(sym, str) and sym:
                                         self.watch_subscribers[sym.upper()].add(chat_id)
+
+                    # Load watchlist from dedicated collection (primary storage)
+                    wl_cursor = db.watchlist.find({})
+                    async for wl_doc in wl_cursor:
+                        chat_id = wl_doc.get("user_id")
+                        symbols = wl_doc.get("symbols", [])
+                        if not chat_id or not isinstance(symbols, list):
+                            continue
+                        for sym in symbols:
+                            if isinstance(sym, str) and sym:
+                                self.watch_subscribers[sym.upper()].add(chat_id)
                     
                     # Also load from dedicated wallets collection
                     cursor = db.wallets.find({})
@@ -231,8 +242,8 @@ class WSManager:
                             "val": val,
                             "px": px
                         }, reply_to_id=sent_msg.message_id)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to send whale alert to {user_id}: {e}")
 
 
     async def _load_universe(self):
@@ -286,8 +297,8 @@ class WSManager:
             if self.ws:
                 try:
                     await self.ws.send(json.dumps({"method": "ping"}))
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"WS ping failed: {e}")
 
     async def _refresh_alerts_loop(self):
         """Fetch alerts and user settings from DB periodically."""
@@ -400,8 +411,8 @@ class WSManager:
             from bot.services import _SYMBOL_CACHE
             if coin in _SYMBOL_CACHE["spot"].values() or coin in _SYMBOL_CACHE["perp"].values():
                 return True
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Symbol cache lookup failed for {coin}: {e}")
             
         return False
 
@@ -512,7 +523,8 @@ class WSManager:
                             "new_coin": sym
                         }, reply_to_id=sent_msg.message_id)
                     await asyncio.sleep(0.05)
-                except: pass
+                except Exception as e:
+                    logger.warning(f"Failed to broadcast listing {sym} to {u.get('user_id')}: {e}")
 
     async def handle_mids(self, mids):
         for coin, price in mids.items():
@@ -596,7 +608,8 @@ class WSManager:
                             "target": target,
                             "type": a_type
                         }, reply_to_id=sent_msg.message_id)
-                except: pass
+                except Exception as e:
+                    logger.warning(f"Failed to send market stats alert {aid} to {user_id}: {e}")
 
     async def _check_custom_alerts(self):
         """Check all active custom alerts against current prices."""
@@ -639,7 +652,7 @@ class WSManager:
     async def _send_rich_alert(self, user_id: int, symbol: str, current_price: float, target: float, direction: str):
         try:
             lang = await db.get_lang(user_id)
-        except:
+        except Exception:
             lang = "en"
 
         from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -1054,7 +1067,7 @@ class WSManager:
                         from datetime import datetime
                         ts = datetime.fromtimestamp(int(fill_time) / 1000)
                         msg += f"🕐 {ts.strftime('%H:%M:%S')}\n"
-                    except:
+                    except (TypeError, ValueError, OSError):
                         pass
 
                 msg += f"\n👛 Wallet: {wallet_display}"
@@ -1123,11 +1136,13 @@ class WSManager:
             users = await db.get_users_by_wallet(user_wallet)
             for user in users:
                 chat_id = user.get("chat_id")
+                if not chat_id:
+                    continue
                 lang = "ru"
                 try:
                     lang = await db.get_lang(chat_id)
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to resolve language for {chat_id}: {e}")
                 
                 for o in new_orders_to_alert:
                     coin_raw, px = self._extract_order_fields(o)
@@ -1196,10 +1211,13 @@ class WSManager:
             users = await db.get_users_by_wallet(user_wallet)
             for user in users:
                 chat_id = user.get('chat_id')
+                if not chat_id:
+                    continue
                 lang = "ru"
                 try:
                     lang = await db.get_lang(chat_id)
-                except:
+                except Exception as e:
+                    logger.debug(f"Failed to resolve language for {chat_id}: {e}")
                     lang = "ru"
                     
                 msg = _t(lang, "liq_risk_title") + "\n" + _t(lang, "liq_risk_msg", 
@@ -1216,8 +1234,8 @@ class WSManager:
                             "equity": account_value,
                             "wallet": user_wallet
                         }, reply_to_id=sent_msg.message_id)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to send margin alert to {chat_id}: {e}")
 
     async def _ledger_loop(self):
         """Monitor deposits and withdrawals via REST polling."""
@@ -1274,7 +1292,7 @@ class WSManager:
                         amount = delta.get("usdc") or delta.get("amount") or 0.0
                         try:
                             amount = float(amount)
-                        except:
+                        except (TypeError, ValueError):
                             amount = 0.0
                         
                         # Determine Alert Key
@@ -1290,7 +1308,9 @@ class WSManager:
                         # Notify Users
                         users = await db.get_users_by_wallet(wallet)
                         for user in users:
-                            chat_id = user["chat_id"]
+                            chat_id = user.get("chat_id")
+                            if not chat_id:
+                                continue
                             lang = await db.get_lang(chat_id)
                             
                             title = _t(lang, key)
@@ -1303,7 +1323,8 @@ class WSManager:
                                 from datetime import datetime
                                 ts_dt = datetime.fromtimestamp(int(event.get("time", 0)) / 1000)
                                 msg += f"\n🕐 {ts_dt.strftime('%H:%M:%S')}"
-                            except: pass
+                            except Exception as e:
+                                logger.debug(f"Failed to format ledger timestamp for {wallet}: {e}")
 
                             try:
                                 sent_msg = await self.bot.send_message(chat_id, msg, parse_mode="HTML")
@@ -1313,7 +1334,8 @@ class WSManager:
                                         "amount": amount,
                                         "wallet": wallet
                                     }, reply_to_id=sent_msg.message_id)
-                            except: pass
+                            except Exception as e:
+                                logger.warning(f"Failed to send ledger alert to {chat_id}: {e}")
                             
                     # Update DB
                     if new_max_time > last_time:

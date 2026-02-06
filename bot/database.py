@@ -1,6 +1,7 @@
 import motor.motor_asyncio
 import time
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from bot.config import settings
 
 class Database:
@@ -19,6 +20,7 @@ class Database:
         # Unique index for fills to avoid duplicates
         await self.fills.create_index([("oid", 1)], unique=True)
         # Indexes for frequent lookups
+        await self.wallets.create_index([("user_id", 1), ("address", 1)], unique=True)
         await self.wallets.create_index([("address", 1)])
         await self.wallets.create_index([("user_id", 1)])
         await self.users.create_index([("user_id", 1)], unique=True)
@@ -38,15 +40,21 @@ class Database:
     async def add_wallet(self, user_id, wallet_address):
         """Add a wallet to the separate wallets collection."""
         wallet = wallet_address.lower()
-        existing = await self.wallets.find_one({"user_id": user_id, "address": wallet})
-        if not existing:
-            await self.wallets.insert_one({
-                "user_id": user_id,
-                "address": wallet,
-                "added_at": time.time(),
-                "tag": None,
-                "threshold": 0.0  # Min USD value for notifications
-            })
+        try:
+            await self.wallets.update_one(
+                {"user_id": user_id, "address": wallet},
+                {"$setOnInsert": {
+                    "user_id": user_id,
+                    "address": wallet,
+                    "added_at": time.time(),
+                    "tag": None,
+                    "threshold": 0.0  # Min USD value for notifications
+                }},
+                upsert=True
+            )
+        except DuplicateKeyError:
+            # Safe no-op in race conditions with concurrent add requests.
+            return
 
     async def update_wallet_settings(self, user_id, wallet_address, tag=None, threshold=None):
         update_data = {}
@@ -209,7 +217,7 @@ class Database:
             oid = ObjectId(alert_id) if isinstance(alert_id, str) else alert_id
             res = await self.alerts.delete_one({"_id": oid})
             return res.deleted_count > 0
-        except Exception as e:
+        except Exception:
             # You can add logging here if needed
             return False
 

@@ -31,6 +31,7 @@ import math
 import csv
 import io
 import datetime
+import json
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -4041,7 +4042,9 @@ async def cb_hedge_chat_start(call: CallbackQuery, state: FSMContext):
         
     await smart_edit(call, text, reply_markup=kb.as_markup())
     await state.set_state(HedgeChatStates.chatting)
-    await state.update_data(history=[])
+    mem = await db.get_hedge_memory(call.message.chat.id, limit=10)
+    history = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in mem if m.get("content")]
+    await state.update_data(history=history)
     await call.answer()
 
 @router.message(HedgeChatStates.chatting, ~F.text.startswith("/"))
@@ -4055,6 +4058,12 @@ async def process_hedge_chat(message: Message, state: FSMContext):
     
     # Add user message to history
     history.append({"role": "user", "content": message.text})
+    await db.append_hedge_memory(
+        message.chat.id,
+        role="user",
+        content=message.text,
+        meta={"context_type": "chat"}
+    )
     
     # Generate Response
     response = await market_overview.generate_hedge_comment(
@@ -4076,6 +4085,12 @@ async def process_hedge_chat(message: Message, state: FSMContext):
 
     # Add AI response to history
     history.append({"role": "assistant", "content": response})
+    await db.append_hedge_memory(
+        message.chat.id,
+        role="assistant",
+        content=response,
+        meta={"context_type": "chat"}
+    )
     
     # Keep history short (last 10 messages)
     if len(history) > 10:
@@ -4112,6 +4127,22 @@ async def _send_hedge_insight(bot, chat_id, user_id, context_type, event_data, r
         )
         
         if comment:
+            try:
+                event_txt = json.dumps(event_data, ensure_ascii=False)[:700]
+            except Exception:
+                event_txt = str(event_data)[:700]
+            await db.append_hedge_memory(
+                user_id,
+                role="system",
+                content=f"{context_type}: {event_txt}",
+                meta={"context_type": context_type}
+            )
+            await db.append_hedge_memory(
+                user_id,
+                role="assistant",
+                content=comment,
+                meta={"context_type": context_type}
+            )
             # Convert Markdown to HTML
             disp_comment = html.escape(comment)
             disp_comment = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', disp_comment)

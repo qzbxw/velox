@@ -24,7 +24,16 @@ class MarketOverview:
             "https://decrypt.co/feed",
             "https://www.coindesk.com/arc/outboundfeeds/rss/",
             "https://cointelegraph.com/rss",
-            "https://cryptopanic.com/news/rss/"
+            "https://cryptopanic.com/news/rss/",
+            "https://www.theblock.co/rss.xml",
+            "https://bitcoinmagazine.com/.rss/full/",
+            "https://blog.coinbase.com/feed",
+            "https://www.binance.com/en/feed/rss",
+            "https://messari.io/rss",
+            "https://www.coinglass.com/learn/rss.xml",
+            "https://www.newsbtc.com/feed/",
+            "https://cryptoslate.com/feed/",
+            "https://u.today/rss"
         ]
         # Common browser headers to avoid 403 Forbidden
         self.headers = {
@@ -39,6 +48,10 @@ class MarketOverview:
             "Pragma": "no-cache",
             "Cache-Control": "no-cache",
         }
+        self._toxic_patterns = [
+            r"\bidiot\b", r"\bstupid\b", r"\btrash\b", r"\bpoor\b", r"\bloser\b",
+            r"\bni[\w-]*brod\b", r"\bговн\w*\b", r"\bжалк\w*\b", r"\bнищ\w*\b"
+        ]
 
     async def fetch_etf_flows(self) -> dict:
         """
@@ -171,32 +184,42 @@ class MarketOverview:
         """
         articles = []
         
-        async def fetch_feed(url):
+        async def fetch_feed(session: aiohttp.ClientSession, url: str):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, headers=self.headers, timeout=15) as resp:
-                        if resp.status == 200:
-                            content = await resp.text()
-                            feed = feedparser.parse(content)
-                            if feed.bozo:
-                                logger.warning(f"Feedparser bozo exception for {url}: {feed.bozo_exception}")
-                            return feed.entries
-                        else:
-                            logger.warning(f"RSS fetch failed {resp.status} for {url}")
+                async with session.get(url, headers=self.headers, timeout=15) as resp:
+                    if resp.status == 200:
+                        content = await resp.text()
+                        feed = feedparser.parse(content)
+                        if feed.bozo:
+                            logger.warning(f"Feedparser bozo exception for {url}: {feed.bozo_exception}")
+                        return feed.entries
+                    else:
+                        logger.warning(f"RSS fetch failed {resp.status} for {url}")
             except Exception as e:
                 logger.error(f"Failed to fetch RSS {url}: {e}")
             return []
 
-        results = await asyncio.gather(*[fetch_feed(url) for url in self.rss_feeds])
+        async with aiohttp.ClientSession() as session:
+            results = await asyncio.gather(*[fetch_feed(session, url) for url in self.rss_feeds], return_exceptions=True)
         
         seen_links = set()
+        seen_titles = set()
 
         for entries in results:
+            if isinstance(entries, Exception):
+                continue
             if not entries: continue
             for entry in entries:
                 # Deduplicate by link
-                if entry.link in seen_links: continue
-                seen_links.add(entry.link)
+                link = getattr(entry, "link", "") or ""
+                title = (getattr(entry, "title", "") or "").strip()
+                t_norm = re.sub(r"\s+", " ", title.lower())
+                if link in seen_links or (t_norm and t_norm in seen_titles):
+                    continue
+                if link:
+                    seen_links.add(link)
+                if t_norm:
+                    seen_titles.add(t_norm)
 
                 # Parse published time
                 try:
@@ -212,9 +235,9 @@ class MarketOverview:
                         continue
                         
                     articles.append({
-                        "title": entry.title,
-                        "link": entry.link,
-                        "source": self._extract_source(entry.link),
+                        "title": title,
+                        "link": link,
+                        "source": self._extract_source(link),
                         "published": pub_ts,
                         "summary": getattr(entry, 'summary', '')[:1000]
                     })
@@ -230,7 +253,37 @@ class MarketOverview:
         if "coindesk.com" in link: return "CoinDesk"
         if "cointelegraph.com" in link: return "CoinTelegraph"
         if "cryptopanic.com" in link: return "CryptoPanic"
+        if "theblock.co" in link: return "The Block"
+        if "bitcoinmagazine.com" in link: return "Bitcoin Magazine"
+        if "coinbase.com" in link: return "Coinbase Blog"
+        if "binance.com" in link: return "Binance"
+        if "messari.io" in link: return "Messari"
+        if "coinglass.com" in link: return "Coinglass"
+        if "newsbtc.com" in link: return "NewsBTC"
+        if "cryptoslate.com" in link: return "CryptoSlate"
+        if "u.today" in link: return "U.Today"
         return "News"
+
+    def _format_news_digest(self, news: list[dict], limit: int = 10) -> str:
+        if not news:
+            return "No RSS headlines."
+        lines = []
+        for item in news[:limit]:
+            title = (item.get("title") or "").strip()
+            source = (item.get("source") or "News").strip()
+            if not title:
+                continue
+            lines.append(f"- {title} ({source})")
+        return "\n".join(lines) if lines else "No RSS headlines."
+
+    def _sanitize_comment(self, text: str) -> str:
+        if not text:
+            return ""
+        cleaned = re.sub(r"\s+", " ", text).strip()
+        for p in self._toxic_patterns:
+            if re.search(p, cleaned, flags=re.IGNORECASE):
+                return "Risk is elevated. Avoid emotional decisions, reduce size, and wait for confirmation before acting."
+        return cleaned[:900]
 
     async def fetch_news_with_search(self, timeframe: str = "24h", topics: list = None) -> str:
         """
@@ -288,7 +341,7 @@ Provide a concise summary (max 500 words) with key bullet points."""
         except Exception as e:
             logger.error(f"News Agent exception: {e}")
 
-        return "No recent news available."
+        return ""
 
     async def generate_summary(self,
                              market_data: dict,
@@ -319,11 +372,8 @@ Provide a concise summary (max 500 words) with key bullet points."""
                 topics.append(l.get('name', ''))
 
         fresh_news = await self.fetch_news_with_search(timeframe="24h", topics=topics)
-
-        # Fallback: combine with RSS if News Agent fails
-        rss_news = "\n".join([f"- {n['title']} ({n['source']})" for n in news[:5]]) if news else ""
-
-        combined_news = f"**Fresh News (via Google Search):**\n{fresh_news}\n\n**Additional Sources:**\n{rss_news}" if rss_news else fresh_news
+        rss_news = self._format_news_digest(news, limit=10)
+        combined_news = f"RSS HEADLINES:\n{rss_news}\n\nSEARCH DIGEST:\n{fresh_news or 'No search digest'}"
 
         # Step 2: Hedge Agent analyzes everything
         logger.info("Hedge Agent: Analyzing market data + news...")
@@ -353,6 +403,7 @@ Provide a concise summary (max 500 words) with key bullet points."""
         1. "summary": Sharp analysis connecting market movements to news events (max 500 chars). Use **bold** for key assets/events.
         2. "sentiment": One word (BULLISH, BEARISH, NEUTRAL, CAUTIOUS, EXPLOSIVE)
         3. "next_event": What traders should watch next (max 100 chars)
+        4. Professional tone only. No insults, no taunting, no certainty claims like "guaranteed" or "safe".
 
         OUTPUT: Strictly JSON.
         """
@@ -446,9 +497,15 @@ Provide a concise summary (max 500 words) with key bullet points."""
                             all_pos.append(f"{name} {pos.get('szi')}")
             
             portfolio_summary = f"Spot: {', '.join(all_spot[:10])} | Perps: {', '.join(all_pos[:10])}"
+        if not portfolio_summary:
+            portfolio_summary = "No portfolio data."
 
         watchlist = await db.get_watchlist(user_id)
         watchlist_str = ", ".join(watchlist)
+        memory = await db.get_hedge_memory(user_id, limit=12)
+        memory_txt = "\n".join(
+            [f"- {m.get('role', 'system')}: {str(m.get('content', ''))[:220]}" for m in memory if m.get("content")]
+        ) or "No prior context."
 
         # 2. Fetch Style (Prompt Override)
         ov_settings = await db.get_overview_settings(user_id)
@@ -461,13 +518,21 @@ Provide a concise summary (max 500 words) with key bullet points."""
             topics.append(event_symbol)
 
         logger.info(f"Hedge Chat: Fetching news for context_type={context_type}")
+        rss_news = await self.fetch_news_rss(since_timestamp=time.time() - 12 * 3600)
         fresh_news = await self.fetch_news_with_search(timeframe="12h", topics=topics)
+        news_digest = self._format_news_digest(rss_news, limit=8)
 
         target_lang = "Russian" if lang == "ru" else "English"
 
         # 4. Construct RAG prompt
         prompt = f"""
         You are HEDGE AI, an elite AI risk manager with real-time news access.
+        NON-NEGOTIABLE RULES:
+        - Never insult, mock, humiliate, or use toxic language.
+        - Never mention user's "poverty", "small balance", or similar.
+        - Be factual and uncertainty-aware: avoid guaranteed predictions.
+        - Keep output <= 320 characters for non-chat contexts.
+        - If data is weak, say so briefly and give a conservative action.
         USER STYLE/PROMPT: {custom_style}
         TARGET LANGUAGE: {target_lang}
 
@@ -475,8 +540,14 @@ Provide a concise summary (max 500 words) with key bullet points."""
         - Portfolio: {portfolio_summary}
         - Watchlist: {watchlist_str}
 
-        MARKET NEWS (Google Search):
-        {fresh_news}
+        RECENT MEMORY (latest interactions):
+        {memory_txt}
+
+        MARKET NEWS (RSS + Search):
+        RSS:
+        {news_digest}
+        SEARCH:
+        {fresh_news or "No search digest"}
 
         EVENT TYPE: {context_type.upper()}
         EVENT DATA: {json.dumps(event_data)}
@@ -499,7 +570,8 @@ Provide a concise summary (max 500 words) with key bullet points."""
                 async with session.post(self.hedge_agent_url, json=payload, timeout=15) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        return self._sanitize_comment(text)
         except Exception as e:
             logger.error(f"Hedge Chat error: {e}")
         return ""

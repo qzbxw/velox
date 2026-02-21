@@ -313,6 +313,33 @@ class Database:
             upsert=True
         )
 
+    async def get_hedge_memory(self, user_id: int, limit: int = 12) -> list:
+        user = await self.users.find_one({"user_id": user_id}, {"hedge_memory": 1})
+        mem = user.get("hedge_memory", []) if user else []
+        if not isinstance(mem, list):
+            return []
+        return mem[-max(1, limit):]
+
+    async def append_hedge_memory(self, user_id: int, role: str, content: str, meta: dict | None = None):
+        item = {
+            "ts": int(time.time()),
+            "role": role,
+            "content": str(content)[:1000],
+            "meta": meta or {}
+        }
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$push": {"hedge_memory": {"$each": [item], "$slice": -40}}},
+            upsert=True
+        )
+
+    async def clear_hedge_memory(self, user_id: int):
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {"hedge_memory": []}},
+            upsert=True
+        )
+
     # --- WALLET STATES (Ledger Tracking) ---
     async def get_all_watched_addresses(self):
         """Get list of unique wallet addresses currently being watched."""

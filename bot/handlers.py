@@ -35,6 +35,7 @@ import json
 
 router = Router()
 logger = logging.getLogger(__name__)
+HLP_VAULT_ADDR = "0xdf13098394e1832014b0df3f91285497"
 
 async def smart_edit(call: CallbackQuery, text: str, reply_markup: InlineKeyboardMarkup = None):
     """Edits text message or deletes photo and sends new text message."""
@@ -90,9 +91,13 @@ def _main_menu_kb(lang):
         InlineKeyboardButton(text=_t(lang, "cat_portfolio"), callback_data="sub:portfolio"),
         InlineKeyboardButton(text=_t(lang, "cat_trading"), callback_data="sub:trading")
     )
-    # Row 2: Market & Settings
+    # Row 2: Vaults & Market
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "cat_market"), callback_data="sub:market"),
+        InlineKeyboardButton(text=_t(lang, "cat_vaults"), callback_data="sub:vaults"),
+        InlineKeyboardButton(text=_t(lang, "cat_market"), callback_data="sub:market")
+    )
+    # Row 3: Settings
+    kb.row(
         InlineKeyboardButton(text=_t(lang, "cat_settings"), callback_data="cb_settings")
     )
     return kb.as_markup()
@@ -154,6 +159,121 @@ def _market_kb(lang):
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
 
+def _vaults_kb(lang):
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_vaults_overview"), callback_data="cb_vaults_overview"),
+        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data="cb_hlp_snapshot")
+    )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data="cb_vault_reports_menu"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    return kb.as_markup()
+
+def _is_hlp_vault(vault_address: str) -> bool:
+    return HLP_VAULT_ADDR[2:] in str(vault_address or "").lower()
+
+def _vault_display_name(vault_address: str) -> str:
+    v = str(vault_address or "").lower()
+    if not v:
+        return "Vault"
+    if _is_hlp_vault(v):
+        return "HLP"
+    return f"Vault {v[:6]}"
+
+def _vault_cfg_key(wallet: str, vault: str) -> str:
+    return f"{wallet.lower()}|{vault.lower()}"
+
+def _fmt_period_change(current: float, base: float) -> str:
+    diff = current - base
+    pct = (diff / base) * 100 if base > 0 else 0.0
+    icon = "🟢" if diff >= 0 else "🔴"
+    return f"{icon} {pretty_float(diff, 2)} ({pct:+.2f}%)"
+
+async def _collect_user_vault_catalog(user_id: int) -> list[dict]:
+    wallets = await db.list_wallets(user_id)
+    if not wallets:
+        return []
+
+    entries = []
+    seen = set()
+    vault_lists = await asyncio.gather(*(get_user_vault_equities(w) for w in wallets), return_exceptions=True)
+
+    for wallet, vault_equities in zip(wallets, vault_lists):
+        if isinstance(vault_equities, Exception) or not isinstance(vault_equities, list):
+            continue
+        for v in vault_equities:
+            vault = str(v.get("vaultAddress", "")).lower()
+            if not vault:
+                continue
+            key = (wallet.lower(), vault)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append({
+                "wallet": wallet.lower(),
+                "vault": vault,
+                "equity": float(v.get("equity", 0) or 0)
+            })
+
+    entries.sort(key=lambda x: x.get("equity", 0), reverse=True)
+    return entries
+
+DIGEST_TARGETS = [
+    "portfolio_daily",
+    "portfolio_weekly",
+    "hlp_daily",
+    "vault_weekly",
+    "vault_monthly",
+]
+
+def _valid_hhmm(time_str: str) -> str | None:
+    try:
+        parts = str(time_str).strip().split(":")
+        if len(parts) != 2:
+            return None
+        h, m = int(parts[0]), int(parts[1])
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return f"{h:02d}:{m:02d}"
+        return None
+    except Exception:
+        return None
+
+def _digest_label_key(target: str) -> str:
+    return {
+        "portfolio_daily": "digest_portfolio_daily",
+        "portfolio_weekly": "digest_portfolio_weekly",
+        "hlp_daily": "digest_hlp_daily",
+        "vault_weekly": "digest_vault_weekly",
+        "vault_monthly": "digest_vault_monthly",
+    }.get(target, target)
+
+async def _build_digest_settings_ui(user_id: int, lang: str) -> tuple[str, InlineKeyboardMarkup]:
+    cfg = await db.get_digest_settings(user_id)
+    text = f"{_t(lang, 'digest_settings_title')}\n\n{_t(lang, 'digest_settings_msg')}\n\n"
+    kb = InlineKeyboardBuilder()
+
+    for target in DIGEST_TARGETS:
+        dc = cfg.get(target, {})
+        enabled = bool(dc.get("enabled", True))
+        time_str = dc.get("time", "09:00")
+        name = _t(lang, _digest_label_key(target))
+        text += f"• <b>{name}</b>: {'ON' if enabled else 'OFF'} | <code>{time_str} UTC</code>\n"
+
+        kb.row(
+            InlineKeyboardButton(
+                text=f"{'✅' if enabled else '➕'} {name}",
+                callback_data=f"dg_toggle:{target}"
+            ),
+            InlineKeyboardButton(
+                text=f"🕒 {time_str}",
+                callback_data=f"dg_set_time:{target}"
+            )
+        )
+
+    text += f"\n<i>{_t(lang, 'digest_schedule_note')}</i>"
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
+    return text, kb.as_markup()
+
 def _back_kb(lang, target="cb_menu"):
     kb = InlineKeyboardBuilder()
     kb.button(text=_t(lang, "btn_back"), callback_data=target)
@@ -176,18 +296,22 @@ def _settings_kb(lang):
         InlineKeyboardButton(text=_t(lang, "btn_export"), callback_data="cb_export"),
         InlineKeyboardButton(text=_t(lang, "btn_lang"), callback_data="cb_lang_menu")
     )
-    # Row 3: Alert Types (Funding/OI)
+    # Row 3: Digest Settings
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_digest_settings"), callback_data="cb_digest_settings_menu")
+    )
+    # Row 4: Alert Types (Funding/OI)
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_funding_alert"), callback_data="cb_funding_alert_prompt"),
         InlineKeyboardButton(text=_t(lang, "btn_oi_alert"), callback_data="cb_oi_alert_prompt")
     )
-    # Row 4: Thresholds
+    # Row 5: Thresholds
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_prox"), callback_data="set_prox_prompt"),
         InlineKeyboardButton(text=_t(lang, "btn_vol"), callback_data="set_vol_prompt"),
         InlineKeyboardButton(text=_t(lang, "btn_whale"), callback_data="set_whale_prompt")
     )
-    # Row 5: Back
+    # Row 6: Back
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
 
@@ -766,9 +890,284 @@ async def cb_sub_market(call: CallbackQuery):
     await smart_edit(call, _t(lang, "menu_market"), reply_markup=_market_kb(lang))
     await call.answer()
 
+@router.callback_query(F.data == "sub:vaults")
+async def cb_sub_vaults(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    await smart_edit(call, _t(lang, "menu_vaults"), reply_markup=_vaults_kb(lang))
+    await call.answer()
+
 @router.callback_query(F.data == "noop")
 async def cb_noop(call: CallbackQuery):
     await call.answer()
+
+@router.callback_query(F.data == "cb_vaults_overview")
+async def cb_vaults_overview(call: CallbackQuery):
+    await call.answer("Loading vaults...")
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
+    if not wallets:
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:vaults"))
+        return
+
+    sections = []
+    global_total = 0.0
+    vault_count = 0
+
+    vault_lists = await asyncio.gather(*(get_user_vault_equities(w) for w in wallets), return_exceptions=True)
+    for wallet, vault_equities in zip(wallets, vault_lists):
+        if isinstance(vault_equities, Exception) or not isinstance(vault_equities, list):
+            continue
+
+        rows = []
+        wallet_total = 0.0
+        for v in sorted(vault_equities, key=lambda x: float(x.get("equity", 0) or 0), reverse=True):
+            v_addr = str(v.get("vaultAddress", "")).lower()
+            equity = float(v.get("equity", 0) or 0)
+            if not v_addr or equity <= 0:
+                continue
+            wallet_total += equity
+            global_total += equity
+            vault_count += 1
+            rows.append(
+                f"🏛 <b>{_vault_display_name(v_addr)}</b>: ${pretty_float(equity, 2)}\n"
+                f"   <code>{v_addr[:10]}...{v_addr[-8:]}</code>"
+            )
+
+        if rows:
+            sections.append(
+                f"👛 <b>{wallet[:6]}...{wallet[-4:]}</b> • ${pretty_float(wallet_total, 2)}\n" + "\n".join(rows)
+            )
+
+    if not sections:
+        text = f"{_t(lang, 'vaults_title')}\n\n<i>{_t(lang, 'no_vaults')}</i>"
+    else:
+        text = (
+            f"{_t(lang, 'vaults_title')}\n\n"
+            f"💰 <b>{_t(lang, 'total_lbl')}:</b> ${pretty_float(global_total, 2)}\n"
+            f"🏛 <b>{_t(lang, 'vault_positions')}:</b> {vault_count}\n\n"
+            + "\n\n".join(sections)
+        )
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data="cb_vaults_overview"),
+        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data="cb_hlp_snapshot")
+    )
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data="cb_vault_reports_menu")
+    )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="sub:vaults"))
+    await smart_edit(call, text, reply_markup=kb.as_markup())
+
+@router.callback_query(F.data == "cb_hlp_snapshot")
+async def cb_hlp_snapshot(call: CallbackQuery):
+    await call.answer("Loading HLP...")
+    lang = await db.get_lang(call.message.chat.id)
+    user_id = call.message.chat.id
+    wallets = await db.list_wallets(user_id)
+    if not wallets:
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:vaults"))
+        return
+
+    now_ts = int(time.time())
+    periods = {
+        "24h": now_ts - 86400,
+        "7d": now_ts - (7 * 86400),
+        "30d": now_ts - (30 * 86400)
+    }
+
+    vault_lists = await asyncio.gather(*(get_user_vault_equities(w) for w in wallets), return_exceptions=True)
+    hlp_info = await get_hlp_info()
+
+    total_vault_equity = 0.0
+    total_hlp_equity = 0.0
+    wallet_hlp_rows = []
+    current_hlp_by_wallet = {}
+
+    for wallet, vaults in zip(wallets, vault_lists):
+        if isinstance(vaults, Exception) or not isinstance(vaults, list):
+            continue
+
+        wallet_hlp = 0.0
+        for v in vaults:
+            v_addr = str(v.get("vaultAddress", "")).lower()
+            v_eq = float(v.get("equity", 0) or 0)
+            if v_eq <= 0:
+                continue
+            total_vault_equity += v_eq
+            if _is_hlp_vault(v_addr):
+                wallet_hlp += v_eq
+
+        if wallet_hlp > 0:
+            current_hlp_by_wallet[wallet.lower()] = wallet_hlp
+            total_hlp_equity += wallet_hlp
+            wallet_hlp_rows.append(f"• <code>{wallet[:6]}...{wallet[-4:]}</code>: ${pretty_float(wallet_hlp, 2)}")
+            await db.upsert_vault_snapshot(user_id, wallet, HLP_VAULT_ADDR, wallet_hlp, now_ts)
+
+    if total_hlp_equity <= 0:
+        await smart_edit(call, f"{_t(lang, 'hlp_title')}\n\n<i>{_t(lang, 'hlp_not_found')}</i>", reply_markup=_back_kb(lang, "sub:vaults"))
+        return
+
+    period_lines = []
+    for label, ts in periods.items():
+        base_sum = 0.0
+        current_sum = 0.0
+        covered = 0
+        total = len(current_hlp_by_wallet)
+        for wallet, current_eq in current_hlp_by_wallet.items():
+            doc = await db.get_latest_vault_snapshot_before(user_id, wallet, HLP_VAULT_ADDR, ts)
+            if not doc:
+                continue
+            base_sum += float(doc.get("equity", 0) or 0)
+            current_sum += current_eq
+            covered += 1
+
+        key = "hlp_change_24h" if label == "24h" else ("hlp_change_7d" if label == "7d" else "hlp_change_30d")
+        if covered == 0:
+            period_lines.append(f"{_t(lang, key)}: {_t(lang, 'vault_change_na')}")
+        else:
+            change = _fmt_period_change(current_sum, base_sum)
+            if covered < total:
+                change = f"~ {change} ({_t(lang, 'hlp_partial_history')})"
+            period_lines.append(f"{_t(lang, key)}: {change}")
+
+    summary = hlp_info.get("summary", {}) if isinstance(hlp_info, dict) else {}
+    share_px = float(summary.get("sharePx", 0) or 0)
+    account_value = float(summary.get("accountValue", 0) or 0)
+    day_pnl = float(hlp_info.get("dayPnl", 0) or 0) if isinstance(hlp_info, dict) else 0.0
+    apr = (day_pnl / account_value) * 365 * 100 if account_value > 0 else 0.0
+
+    hlp_share = (total_hlp_equity / total_vault_equity) * 100 if total_vault_equity > 0 else 0.0
+    concentration_note = _t(lang, "hlp_concentration_high") if hlp_share >= 70 else _t(lang, "hlp_concentration_ok")
+
+    text = (
+        f"{_t(lang, 'hlp_title')}\n\n"
+        f"💰 {_t(lang, 'hlp_my_equity')}: <b>${pretty_float(total_hlp_equity, 2)}</b>\n"
+        f"📊 {_t(lang, 'hlp_vault_share')}: <b>{hlp_share:.1f}%</b>\n"
+        f"{concentration_note}\n\n"
+        f"{_t(lang, 'hlp_share_price')}: <b>${pretty_float(share_px, 4)}</b>\n"
+        f"{_t(lang, 'hlp_tvl')}: <b>${pretty_float(account_value, 0)}</b>\n"
+        f"{_t(lang, 'hlp_day_pnl')}: <b>{pretty_float(day_pnl, 2)}</b>\n"
+        f"{_t(lang, 'hlp_est_apr')}: <b>{apr:+.2f}%</b>\n\n"
+        + "\n".join(period_lines)
+        + "\n\n"
+        + "\n".join(wallet_hlp_rows)
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data="cb_hlp_snapshot"),
+        InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data="cb_vault_reports_menu")
+    )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="sub:vaults"))
+    await smart_edit(call, text, reply_markup=kb.as_markup())
+
+@router.callback_query(F.data == "cb_vault_reports_menu")
+async def cb_vault_reports_menu(call: CallbackQuery):
+    try:
+        await call.answer()
+    except Exception:
+        pass
+    lang = await db.get_lang(call.message.chat.id)
+    user_id = call.message.chat.id
+
+    catalog = await _collect_user_vault_catalog(user_id)
+    await db.set_vault_report_catalog(user_id, catalog)
+    cfg = await db.get_vault_report_settings(user_id)
+    configs = cfg.get("configs", {})
+    digest_cfg = await db.get_digest_settings(user_id)
+    hlp_daily_enabled = bool(digest_cfg.get("hlp_daily", {}).get("enabled", True))
+    hlp_daily_time = str(digest_cfg.get("hlp_daily", {}).get("time", "09:05"))
+
+    text = f"{_t(lang, 'vault_reports_title')}\n\n{_t(lang, 'vault_reports_msg')}\n\n"
+    kb = InlineKeyboardBuilder()
+    text += f"{_t(lang, 'vault_reports_hlp_daily')}: <b>{'ON' if hlp_daily_enabled else 'OFF'}</b> • <code>{hlp_daily_time} UTC</code>\n\n"
+    kb.row(
+        InlineKeyboardButton(
+            text=f"☀️ HLP Daily {'✅' if hlp_daily_enabled else '➕'}",
+            callback_data="vrep:hlp_daily"
+        )
+    )
+
+    if not catalog:
+        text += f"<i>{_t(lang, 'no_vaults')}</i>"
+    else:
+        for idx, item in enumerate(catalog):
+            wallet = item["wallet"]
+            vault = item["vault"]
+            eq = float(item.get("equity", 0) or 0)
+            key = _vault_cfg_key(wallet, vault)
+            flags = configs.get(key, {})
+            weekly_on = bool(flags.get("weekly", False))
+            monthly_on = bool(flags.get("monthly", False))
+
+            text += (
+                f"{idx + 1}. <b>{_vault_display_name(vault)}</b> • <code>{wallet[:6]}...{wallet[-4:]}</code>\n"
+                f"   {_t(lang, 'equity')}: ${pretty_float(eq, 2)}\n"
+            )
+            kb.row(
+                InlineKeyboardButton(
+                    text=f"W {'✅' if weekly_on else '➕'}",
+                    callback_data=f"vrep:w:{idx}"
+                ),
+                InlineKeyboardButton(
+                    text=f"M {'✅' if monthly_on else '➕'}",
+                    callback_data=f"vrep:m:{idx}"
+                )
+            )
+
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data="cb_vault_reports_menu"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_digest_settings"), callback_data="cb_digest_settings_menu"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="sub:vaults"))
+    text += f"\n<i>{_t(lang, 'vault_reports_hint')}</i>"
+    await smart_edit(call, text, reply_markup=kb.as_markup())
+
+@router.callback_query(F.data.startswith("vrep:"))
+async def cb_toggle_vault_report(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    if call.data == "vrep:hlp_daily":
+        enabled = await db.toggle_digest_enabled(call.message.chat.id, "hlp_daily")
+        state_lbl = "ON" if enabled else "OFF"
+        await call.answer(_t(lang, "vault_report_daily_toggled").format(state=state_lbl))
+        await cb_vault_reports_menu(call)
+        return
+
+    parts = call.data.split(":")
+    if len(parts) != 3:
+        await call.answer("Invalid toggle")
+        return
+
+    period_short = parts[1]
+    try:
+        idx = int(parts[2])
+    except ValueError:
+        await call.answer("Invalid toggle")
+        return
+
+    period = "weekly" if period_short == "w" else ("monthly" if period_short == "m" else "")
+    if not period:
+        await call.answer("Invalid period")
+        return
+
+    cfg = await db.get_vault_report_settings(call.message.chat.id)
+    catalog = cfg.get("catalog", [])
+    if idx < 0 or idx >= len(catalog):
+        await call.answer(_t(lang, "vault_catalog_expired"))
+        await cb_vault_reports_menu(call)
+        return
+
+    item = catalog[idx]
+    wallet = str(item.get("wallet", "")).lower()
+    vault = str(item.get("vault", "")).lower()
+    if not wallet or not vault:
+        await call.answer("Invalid vault")
+        return
+
+    enabled = await db.toggle_vault_report_setting(call.message.chat.id, wallet, vault, period)
+    period_lbl = _t(lang, "vault_reports_weekly") if period == "weekly" else _t(lang, "vault_reports_monthly")
+    state_lbl = "ON" if enabled else "OFF"
+    await call.answer(_t(lang, "vault_report_toggled").format(period=period_lbl, state=state_lbl))
+    await cb_vault_reports_menu(call)
 
 @router.callback_query(F.data.startswith("cb_balance"))
 async def cb_balance(call: CallbackQuery):
@@ -852,7 +1251,7 @@ async def cb_balance(call: CallbackQuery):
                 v_equity = float(v.get("equity", 0))
                 if v_equity > 1:
                     vault_total += v_equity
-                    disp_name = "HLP" if "df13098394e1832014b0df3f91285497" in v_name.lower() else f"Vault {v_name[:6]}"
+                    disp_name = _vault_display_name(v_name)
                     vault_lines.append(f"🏛 <b>{disp_name}</b>: ${pretty_float(v_equity, 2)}")
 
         # 3. Perps Logic
@@ -1402,6 +1801,39 @@ async def cb_orders(call: CallbackQuery):
 async def cb_settings(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     await smart_edit(call, _t(lang, "settings_title"), reply_markup=_settings_kb(lang))
+    await call.answer()
+
+@router.callback_query(F.data == "cb_digest_settings_menu")
+async def cb_digest_settings_menu(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    text, kb = await _build_digest_settings_ui(call.message.chat.id, lang)
+    await smart_edit(call, text, reply_markup=kb)
+    await call.answer()
+
+@router.callback_query(F.data.startswith("dg_toggle:"))
+async def cb_digest_toggle(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    target = call.data.split(":", 1)[1]
+    if target not in DIGEST_TARGETS:
+        await call.answer("Invalid digest")
+        return
+    enabled = await db.toggle_digest_enabled(call.message.chat.id, target)
+    state_lbl = "ON" if enabled else "OFF"
+    await call.answer(_t(lang, "digest_toggle_done").format(state=state_lbl))
+    text, kb = await _build_digest_settings_ui(call.message.chat.id, lang)
+    await smart_edit(call, text, reply_markup=kb)
+
+@router.callback_query(F.data.startswith("dg_set_time:"))
+async def cb_digest_set_time(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_lang(call.message.chat.id)
+    target = call.data.split(":", 1)[1]
+    if target not in DIGEST_TARGETS:
+        await call.answer("Invalid digest")
+        return
+    await state.update_data(digest_target=target, digest_menu_msg_id=call.message.message_id)
+    prompt = _t(lang, "digest_time_prompt").format(name=_t(lang, _digest_label_key(target)))
+    await smart_edit(call, prompt, reply_markup=_back_kb(lang, "cb_digest_settings_menu"))
+    await state.set_state(SettingsStates.waiting_for_digest_time)
     await call.answer()
 
 @router.callback_query(F.data == "cb_lang_menu")
@@ -2119,6 +2551,7 @@ class SettingsStates(StatesGroup):
     waiting_for_whale = State()
     waiting_for_ov_time = State()
     waiting_for_ov_prompt = State()
+    waiting_for_digest_time = State()
 
 class MarketAlertStates(StatesGroup):
     waiting_for_time = State()
@@ -2970,6 +3403,50 @@ async def process_set_whale_state(message: Message, state: FSMContext):
             await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
     else:
         await message.answer(final_text, reply_markup=_settings_kb(lang), parse_mode="HTML")
+
+@router.message(SettingsStates.waiting_for_digest_time)
+async def process_digest_time_state(message: Message, state: FSMContext):
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
+    target = data.get("digest_target")
+    if target not in DIGEST_TARGETS:
+        await state.clear()
+        await message.answer("❌ Invalid digest target.")
+        return
+
+    parsed = _valid_hhmm(message.text.strip())
+    if not parsed:
+        await message.answer(_t(lang, "digest_invalid_time"), parse_mode="HTML")
+        return
+
+    await db.set_digest_time(message.chat.id, target, parsed)
+    await state.clear()
+
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.debug(f"Digest time input message delete failed: {e}")
+
+    text, kb = await _build_digest_settings_ui(message.chat.id, lang)
+    msg_id = data.get("digest_menu_msg_id")
+    if msg_id:
+        try:
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                text=text,
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+            return
+        except Exception as e:
+            logger.debug(f"Digest settings menu edit failed: {e}")
+
+    await message.answer(
+        f"{_t(lang, 'digest_time_saved').format(time=parsed)}\n\n{text}",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
 
 @router.message(SettingsStates.waiting_for_ov_time)
 async def process_ov_time(message: Message, state: FSMContext):

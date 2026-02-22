@@ -14,6 +14,7 @@ class Database:
         self.watchlist = self.db.watchlist
         self.alerts = self.db.alerts  # New collection for price alerts
         self.wallet_states = self.db.wallet_states  # Tracks last update times
+        self.vault_snapshots = self.db.vault_snapshots  # Historical vault equity snapshots
 
     async def init_db(self):
         """Initialize database indexes for performance and integrity."""
@@ -26,6 +27,8 @@ class Database:
         await self.users.create_index([("user_id", 1)], unique=True)
         await self.alerts.create_index([("user_id", 1)])
         await self.alerts.create_index([("symbol", 1)])
+        await self.vault_snapshots.create_index([("user_id", 1), ("wallet", 1), ("vault_address", 1), ("snapshot_day", 1)], unique=True)
+        await self.vault_snapshots.create_index([("snapshot_ts", -1)])
 
     async def add_user(self, user_id, wallet_address=None):
         existing = await self.users.find_one({"user_id": user_id})
@@ -241,6 +244,171 @@ class Database:
     async def get_user_settings(self, user_id):
         user = await self.users.find_one({"user_id": user_id})
         return user if user else {}
+
+    # --- DIGEST SETTINGS ---
+    def _digest_defaults(self) -> dict:
+        return {
+            "portfolio_daily": {"enabled": True, "time": "09:00"},
+            "portfolio_weekly": {"enabled": True, "time": "23:59", "day_of_week": "sun"},
+            "hlp_daily": {"enabled": True, "time": "09:05"},
+            "vault_weekly": {"enabled": True, "time": "23:50", "day_of_week": "sun"},
+            "vault_monthly": {"enabled": True, "time": "00:20", "day": 1}
+        }
+
+    async def get_digest_settings(self, user_id: int) -> dict:
+        user = await self.users.find_one({"user_id": user_id}, {"digest_settings": 1})
+        defaults = self._digest_defaults()
+        raw = user.get("digest_settings", {}) if user else {}
+        if not isinstance(raw, dict):
+            raw = {}
+
+        out = {}
+        for key, def_cfg in defaults.items():
+            cur = raw.get(key, {})
+            if not isinstance(cur, dict):
+                cur = {}
+            item = dict(def_cfg)
+            item.update({k: v for k, v in cur.items() if v is not None})
+            item["enabled"] = bool(item.get("enabled", def_cfg.get("enabled", True)))
+            item["time"] = str(item.get("time", def_cfg.get("time", "09:00")))
+            out[key] = item
+        return out
+
+    async def toggle_digest_enabled(self, user_id: int, digest_key: str) -> bool:
+        cfg = await self.get_digest_settings(user_id)
+        if digest_key not in cfg:
+            return False
+        new_value = not bool(cfg[digest_key].get("enabled", True))
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {f"digest_settings.{digest_key}.enabled": new_value}},
+            upsert=True
+        )
+        return new_value
+
+    async def set_digest_time(self, user_id: int, digest_key: str, time_str: str):
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {f"digest_settings.{digest_key}.time": str(time_str)}},
+            upsert=True
+        )
+
+    # --- VAULT REPORT SETTINGS ---
+    async def get_vault_report_settings(self, user_id: int) -> dict:
+        user = await self.users.find_one({"user_id": user_id}, {"vault_reports": 1})
+        default = {
+            "configs": {},            # "{wallet}|{vault}": {"weekly": bool, "monthly": bool}
+            "catalog": [],            # latest discovered vault entries for UI toggles
+            "catalog_updated_at": 0,
+            "hlp_daily_enabled": True
+        }
+        if not user:
+            return default
+
+        cfg = user.get("vault_reports", default)
+        if not isinstance(cfg, dict):
+            return default
+
+        configs = cfg.get("configs", {})
+        catalog = cfg.get("catalog", [])
+        catalog_updated_at = cfg.get("catalog_updated_at", 0)
+        hlp_daily_enabled = cfg.get("hlp_daily_enabled", True)
+
+        if not isinstance(configs, dict):
+            configs = {}
+        if not isinstance(catalog, list):
+            catalog = []
+        if not isinstance(catalog_updated_at, (int, float)):
+            catalog_updated_at = 0
+        if not isinstance(hlp_daily_enabled, bool):
+            hlp_daily_enabled = True
+
+        return {
+            "configs": configs,
+            "catalog": catalog,
+            "catalog_updated_at": int(catalog_updated_at),
+            "hlp_daily_enabled": hlp_daily_enabled
+        }
+
+    async def set_vault_report_catalog(self, user_id: int, catalog: list[dict]):
+        safe_catalog = []
+        for item in catalog or []:
+            wallet = str(item.get("wallet", "")).lower()
+            vault = str(item.get("vault", "")).lower()
+            equity = float(item.get("equity", 0) or 0)
+            if wallet and vault:
+                safe_catalog.append({
+                    "wallet": wallet,
+                    "vault": vault,
+                    "equity": equity
+                })
+
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "vault_reports.catalog": safe_catalog,
+                "vault_reports.catalog_updated_at": int(time.time())
+            }},
+            upsert=True
+        )
+
+    async def toggle_vault_report_setting(self, user_id: int, wallet: str, vault_address: str, period: str) -> bool:
+        period = str(period or "").lower()
+        if period not in ("weekly", "monthly"):
+            return False
+
+        key = f"{wallet.lower()}|{vault_address.lower()}"
+        cfg = await self.get_vault_report_settings(user_id)
+        current = bool(cfg.get("configs", {}).get(key, {}).get(period, False))
+        new_value = not current
+
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {f"vault_reports.configs.{key}.{period}": new_value}},
+            upsert=True
+        )
+        return new_value
+
+    async def toggle_hlp_daily_report(self, user_id: int) -> bool:
+        cfg = await self.get_vault_report_settings(user_id)
+        current = bool(cfg.get("hlp_daily_enabled", True))
+        new_value = not current
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {"vault_reports.hlp_daily_enabled": new_value}},
+            upsert=True
+        )
+        return new_value
+
+    # --- VAULT SNAPSHOTS ---
+    async def upsert_vault_snapshot(self, user_id: int, wallet: str, vault_address: str, equity: float, snapshot_ts: int | None = None):
+        ts = int(snapshot_ts if snapshot_ts is not None else time.time())
+        day = time.strftime("%Y-%m-%d", time.gmtime(ts))
+        await self.vault_snapshots.update_one(
+            {
+                "user_id": user_id,
+                "wallet": wallet.lower(),
+                "vault_address": vault_address.lower(),
+                "snapshot_day": day
+            },
+            {"$set": {
+                "equity": float(equity),
+                "snapshot_ts": ts,
+                "updated_at": int(time.time())
+            }},
+            upsert=True
+        )
+
+    async def get_latest_vault_snapshot_before(self, user_id: int, wallet: str, vault_address: str, before_ts: int):
+        return await self.vault_snapshots.find_one(
+            {
+                "user_id": user_id,
+                "wallet": wallet.lower(),
+                "vault_address": vault_address.lower(),
+                "snapshot_ts": {"$lte": int(before_ts)}
+            },
+            sort=[("snapshot_ts", -1)]
+        )
 
     async def get_overview_settings(self, user_id: int) -> dict:
         """

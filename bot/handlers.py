@@ -21,6 +21,11 @@ from bot.analytics import (
     prepare_orders_table_data
 )
 from bot.market_overview import market_overview
+from bot.delta_neutral import (
+    collect_delta_neutral_snapshot,
+    apply_delta_monitoring,
+    format_dashboard_text,
+)
 import markdown
 from bot.renderer import render_html_to_image
 import logging
@@ -86,6 +91,8 @@ def _main_menu_kb(lang):
         InlineKeyboardButton(text="🧠 Hedge AI", callback_data="cb_ai_overview_menu"),
         InlineKeyboardButton(text="🛡️ Hedge Chat", callback_data="cb_hedge_chat_start")
     )
+    # Row 0.75: Delta Neutral
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_delta_neutral"), callback_data="cb_delta_neutral"))
     # Row 1: Portfolio & Trading
     kb.row(
         InlineKeyboardButton(text=_t(lang, "cat_portfolio"), callback_data="sub:portfolio"),
@@ -279,6 +286,29 @@ def _back_kb(lang, target="cb_menu"):
     kb.button(text=_t(lang, "btn_back"), callback_data=target)
     return kb.as_markup()
 
+
+async def _build_delta_neutral_dashboard(user_id: int, bot, interval_hours: float = 0.0, emit_alerts: bool = False):
+    wallets = await db.list_wallets(user_id)
+    if not wallets:
+        return None, None
+
+    ws = getattr(bot, "ws_manager", None) if bot else None
+    user_cfg = await db.get_user_settings(user_id)
+    prev_state = user_cfg.get("delta_state", {}) if isinstance(user_cfg, dict) else {}
+
+    snapshot = await collect_delta_neutral_snapshot(wallets, ws=ws)
+    _, new_state = apply_delta_monitoring(
+        snapshot,
+        previous_state=prev_state,
+        interval_hours=interval_hours,
+        emit_alerts=emit_alerts,
+    )
+    await db.update_user_settings(user_id, {"delta_state": new_state})
+
+    lang = await db.get_lang(user_id)
+    text = format_dashboard_text(snapshot, lang=lang)
+    return text, snapshot
+
 def _settings_kb(lang):
     kb = InlineKeyboardBuilder()
     # Row 0: AI Settings
@@ -369,6 +399,16 @@ async def cmd_start(message: Message):
 async def cmd_help(message: Message):
     lang = await db.get_lang(message.chat.id)
     await message.answer(_t(lang, "help_msg"), parse_mode="HTML")
+
+
+@router.message(Command("status"))
+async def cmd_status(message: Message):
+    lang = await db.get_lang(message.chat.id)
+    text, _ = await _build_delta_neutral_dashboard(message.chat.id, message.bot, interval_hours=0.0, emit_alerts=False)
+    if not text:
+        await message.answer(_t(lang, "need_wallet"), parse_mode="HTML")
+        return
+    await message.answer(text, parse_mode="HTML")
 
 @router.message(Command("add_wallet"))
 async def cmd_add_wallet(message: Message):
@@ -883,6 +923,26 @@ async def cb_sub_trading(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     await smart_edit(call, _t(lang, "menu_trading"), reply_markup=_trading_kb(lang))
     await call.answer()
+
+
+@router.callback_query(F.data == "cb_delta_neutral")
+async def cb_delta_neutral(call: CallbackQuery):
+    await call.answer("Loading...")
+    lang = await db.get_lang(call.message.chat.id)
+    text, _ = await _build_delta_neutral_dashboard(call.message.chat.id, call.message.bot, interval_hours=0.0, emit_alerts=False)
+    if not text:
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "cb_menu"))
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data="cb_delta_neutral_refresh"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    await smart_edit(call, text, reply_markup=kb.as_markup())
+
+
+@router.callback_query(F.data == "cb_delta_neutral_refresh")
+async def cb_delta_neutral_refresh(call: CallbackQuery):
+    await cb_delta_neutral(call)
 
 @router.callback_query(F.data == "sub:market")
 async def cb_sub_market(call: CallbackQuery):

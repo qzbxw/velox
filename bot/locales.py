@@ -21,7 +21,7 @@ EN = {
     "welcome": "👋 <b>Trade on Hyperliquid. Dominate with Velox.</b>\n\nVelox is your institutional command center, powered by the <b>Hedge AI</b> neural engine.\n\n/add_wallet <code>address</code> - Track wallet\n/help - Show commands",
     "set_wallet": "⚠️ No wallet connected. Use /add_wallet <code>0x...</code>",
     "tracking": "✅ Tracking: <code>{wallet}</code>",
-    "help_msg": "<b>Available Commands:</b>\n\n🔹 <b>Portfolio</b>\n/add_wallet <code>0x...</code> - Track wallet\n/tag <code>0x...</code> <code>Name</code> - Rename wallet\n/funding - Funding Log (24h)\n/threshold <code>0x...</code> <code>1000</code> - Min fill USD to alert\n\n🔹 <b>Alerts</b>\n/alert <code>ETH</code> <code>3000</code> - Price alert\n/f_alert <code>ETH</code> <code>50</code> - Funding APR alert\n/oi_alert <code>ETH</code> <code>100</code> - OI ($M) alert\n/watch <code>SOL</code> - Add to watchlist\n/unwatch <code>SOL</code> - Remove from watchlist\n/set_prox <code>0.5</code> - Proximity alert %\n/set_vol <code>2.0</code> - Volatility alert %\n/set_whale <code>250000</code> - Whale alert min USD\n\n🔹 <b>Market</b>\n/overview - AI Market Overview\n/overview_settings - Configure AI Reports\n\n🔹 <b>Misc</b>\n/start - Main Menu\n/export - Export PnL history CSV",
+    "help_msg": "<b>Available Commands:</b>\n\n🔹 <b>Portfolio</b>\n/add_wallet <code>0x...</code> - Track wallet\n/tag <code>0x...</code> <code>Name</code> - Rename wallet\n/funding - Funding Log (24h)\n/threshold <code>0x...</code> <code>1000</code> - Min fill USD to alert\n\n🔹 <b>Alerts</b>\n/alert <code>ETH</code> <code>3000</code> - Price alert\n/f_alert <code>ETH</code> <code>50</code> - Funding APR alert\n/oi_alert <code>ETH</code> <code>100</code> - OI ($M) alert\n/watch <code>SOL</code> - Add to watchlist\n/unwatch <code>SOL</code> - Remove from watchlist\n/set_prox <code>0.5</code> - Proximity alert %\n/set_vol <code>2.0</code> - Volatility alert %\n/set_whale <code>250000</code> - Whale alert min USD\n\n🔹 <b>Market</b>\n/overview - AI Market Overview\n/overview_settings - Configure AI Reports\n\n🔹 <b>Misc</b>\n/start - Main Menu\n/status - Delta-Neutral dashboard\n/export - Export PnL history CSV",
     
     # Alerts - Management
     "alert_added": "✅ Alert set: <b>{symbol}</b> {dir} <b>${price}</b>",
@@ -208,6 +208,7 @@ EN = {
     "btn_prox": "⚡ Prox %",
     "btn_vol": "🌊 Vol %",
     "btn_whale": "🐋 Whale $",
+    "btn_delta_neutral": "⚖️ Delta Neutral",
     
     # New keys
     "no_open_positions": "📭 No open positions.",
@@ -392,7 +393,7 @@ RU = {
     "welcome": "👋 <b>Торгуй на Hyperliquid. Доминируй с Velox.</b>\n\nVelox — это ваш институциональный терминал на базе нейросети <b>Hedge AI</b>.\n\n/add_wallet <code>address</code> - Добавить кошелёк\n/help - Список команд",
     "set_wallet": "⚠️ Кошелёк не подключен. Используйте /add_wallet <code>0x...</code>",
     "tracking": "✅ Отслеживание: <code>{wallet}</code>",
-    "help_msg": "<b>Доступные команды:</b>\n\n🔹 <b>Портфель</b>\n/add_wallet <code>0x...</code> - Отслеживать кошелёк\n/tag <code>0x...</code> <code>Name</code> - Присвоить имя кошельку\n/funding - Журнал фандинга (24ч)\n/threshold <code>0x...</code> <code>1000</code> - Мин. сумма ($)\n\n🔹 <b>Алерты</b>\n/alert <code>ETH</code> <code>3000</code> - Ценовой алерт\n/f_alert <code>ETH</code> <code>50</code> - Алерт APR\n/oi_alert <code>ETH</code> <code>100</code> - Алерт OI ($M)\n/watch <code>SOL</code> - Список наблюдения\n/unwatch <code>SOL</code> - Удалить из наблюдения\n/set_prox <code>1.0</code> - Порог 'Цена рядом' %\n/set_vol <code>2.0</code> - Порог волатильности %\n/set_whale <code>250000</code> - Мин. сумма кита\n\n🔹 <b>Рынок</b>\n/overview - AI Обзор Рынка\n/overview_settings - Настройки отчетов\n\n🔹 <b>Прочее</b>\n/start - Главное меню\n/export - Экспорт в CSV",
+    "help_msg": "<b>Доступные команды:</b>\n\n🔹 <b>Портфель</b>\n/add_wallet <code>0x...</code> - Отслеживать кошелёк\n/tag <code>0x...</code> <code>Name</code> - Присвоить имя кошельку\n/funding - Журнал фандинга (24ч)\n/threshold <code>0x...</code> <code>1000</code> - Мин. сумма ($)\n\n🔹 <b>Алерты</b>\n/alert <code>ETH</code> <code>3000</code> - Ценовой алерт\n/f_alert <code>ETH</code> <code>50</code> - Алерт APR\n/oi_alert <code>ETH</code> <code>100</code> - Алерт OI ($M)\n/watch <code>SOL</code> - Список наблюдения\n/unwatch <code>SOL</code> - Удалить из наблюдения\n/set_prox <code>1.0</code> - Порог 'Цена рядом' %\n/set_vol <code>2.0</code> - Порог волатильности %\n/set_whale <code>250000</code> - Мин. сумма кита\n\n🔹 <b>Рынок</b>\n/overview - AI Обзор Рынка\n/overview_settings - Настройки отчетов\n\n🔹 <b>Прочее</b>\n/start - Главное меню\n/status - Delta-Neutral дашборд\n/export - Экспорт в CSV",
     
     # Alerts - Management
     "alert_added": "✅ Алерт установлен: <b>{symbol}</b> {dir} <b>${price}</b>",
@@ -579,6 +580,7 @@ RU = {
     "btn_prox": "⚡ Сближ. %",
     "btn_vol": "🌊 Волат. %",
     "btn_whale": "🐋 Кит $ ",
+    "btn_delta_neutral": "⚖️ Delta Neutral",
 
     # New keys
     "no_open_positions": "📭 Нет открытых позиций.",

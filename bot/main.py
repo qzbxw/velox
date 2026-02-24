@@ -50,6 +50,7 @@ async def main():
     commands = [
         BotCommand(command="start", description="Main Menu"),
         BotCommand(command="help", description="Show Commands"),
+        BotCommand(command="status", description="Delta-Neutral Dashboard"),
         BotCommand(command="add_wallet", description="Track Wallet"),
         BotCommand(command="overview", description="Hedge AI Market Overview"),
         BotCommand(command="funding", description="Funding Log"),

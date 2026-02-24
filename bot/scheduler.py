@@ -8,6 +8,11 @@ from bot.services import (
 from bot.analytics import prepare_modern_market_data
 from bot.market_overview import market_overview
 from bot.renderer import render_html_to_image
+from bot.delta_neutral import (
+    collect_delta_neutral_snapshot,
+    apply_delta_monitoring,
+    format_alert_digest,
+)
 import datetime
 import asyncio
 import logging
@@ -938,6 +943,56 @@ async def send_scheduled_overviews(bot):
     except Exception as e:
         logger.error(f"Scheduled overview broadcast failed: {e}", exc_info=True)
 
+
+async def run_delta_neutral_alerts(bot):
+    """Periodic delta-neutral monitor and safety alerts."""
+    logger.info("Running delta-neutral monitor...")
+    users = await db.get_all_users()
+    if not users:
+        return
+
+    pairs = await _get_user_wallet_pairs()
+    wallets_by_user: dict[int | str, list[str]] = {}
+    for user_id, wallet in pairs:
+        wallets_by_user.setdefault(user_id, []).append(wallet)
+
+    if not wallets_by_user:
+        return
+
+    ws = getattr(bot, "ws_manager", None)
+    perps_ctx = await get_perps_context()
+    now_ts = int(time.time())
+
+    for user in users:
+        user_id = user.get("user_id")
+        if not user_id:
+            continue
+        wallets = wallets_by_user.get(user_id, [])
+        if not wallets:
+            continue
+
+        try:
+            snapshot = await collect_delta_neutral_snapshot(wallets, ws=ws, perps_ctx=perps_ctx)
+            prev_state = user.get("delta_state", {})
+            alerts, new_state = apply_delta_monitoring(
+                snapshot,
+                previous_state=prev_state,
+                now_ts=now_ts,
+                interval_hours=0.5,
+                emit_alerts=True,
+            )
+            await db.update_user_settings(user_id, {"delta_state": new_state})
+
+            if not alerts:
+                continue
+
+            lang = user.get("lang", "en")
+            msg = format_alert_digest(alerts, lang=lang)
+            if msg:
+                await bot.send_message(user_id, msg, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Delta-neutral monitor failed for user {user_id}: {e}")
+
 def setup_scheduler(bot):
     scheduler = AsyncIOScheduler()
 
@@ -970,6 +1025,13 @@ def setup_scheduler(bot):
         send_scheduled_overviews,
         'cron',
         minute=0, # Check at top of every hour
+        args=[bot]
+    )
+
+    scheduler.add_job(
+        run_delta_neutral_alerts,
+        'cron',
+        minute='*/30',
         args=[bot]
     )
     

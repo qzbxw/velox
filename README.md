@@ -1,9 +1,5 @@
 # ⚡ Velox: Complete Technical Documentation & Architectural Blueprint
 
-**Version:** 2.0 (Institutional Build)  
-**Core Ecosystem:** Hyperliquid L1  
-**Tech Stack:** Python 3.10+, Aiogram 3.x, MongoDB (Motor AsyncIO), Playwright (Headless Chromium), Google Gemini 1.5 Flash (GenAI SDK), Matplotlib, APScheduler.
-
 This document serves as the **ultimate, exhaustive technical manual** for the Velox project. It contains every detail necessary for an AI or lead engineer to fully understand the project's logic, database schemas, alert mechanisms, RAG infrastructure, and rendering pipelines.
 
 ---

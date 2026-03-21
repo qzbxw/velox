@@ -913,7 +913,7 @@ async def send_scheduled_overviews(bot):
                     "eth": market_data["ETH"],
                     "sentiment": sentiment,
                     "fng": fng if fng and not isinstance(fng, Exception) else {"value": 0, "classification": "N/A"},
-                    "gemini_model": "3 Flash Preview",
+                    "gemini_model": "gemini-3.1-flash-lite-preview",
                     
                     # New Data Fields
                     "top_gainer": {"sym": top_gainer, "val": top_gainer_pct},

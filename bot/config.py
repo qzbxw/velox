@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = Field("", description="Google Gemini API Key")
     FARSIDE_BTC_URL: str = Field("https://farside.co.uk/btc/", description="Farside BTC ETF Flow URL")
     FARSIDE_ETH_URL: str = Field("https://farside.co.uk/eth/", description="Farside ETH ETF Flow URL")
+    PAY_SUPPORT_CONTACT: str = Field("", description="Telegram handle or URL for payment support")
     
     # App Config
     PROXIMITY_THRESHOLD: float = Field(0.01, description="Legacy proximity threshold (fraction, 0.01=1%)")

@@ -285,6 +285,131 @@ class MarketOverview:
                 return "Risk is elevated. Avoid emotional decisions, reduce size, and wait for confirmation before acting."
         return cleaned[:900]
 
+    def _is_stable_asset(self, symbol: str) -> bool:
+        s = str(symbol or "").upper().replace(" (MARGIN)", "").strip()
+        return s in {"USDC", "USDT", "USDE", "FDUSD", "DAI", "USD"}
+
+    def _normalize_symbol(self, symbol: str) -> str:
+        s = str(symbol or "").upper().replace(" (MARGIN)", "").strip()
+        if s.startswith("@"):
+            s = s[1:]
+        if "/" in s:
+            s = s.split("/", 1)[0]
+        return s
+
+    async def _build_user_context_snapshot(self, wallets: list[str]) -> dict:
+        from bot.services import get_spot_balances, get_perps_state, get_symbol_name
+
+        if not wallets:
+            return {
+                "summary": "No wallet data.",
+                "positions": [],
+                "position_symbols": set(),
+                "stable_assets": [],
+                "risk_assets": [],
+                "has_open_positions": False,
+            }
+
+        results = await asyncio.gather(*[
+            asyncio.gather(get_spot_balances(wallet), get_perps_state(wallet), return_exceptions=True)
+            for wallet in wallets
+        ])
+
+        positions = []
+        risk_assets = []
+        stable_assets = []
+        margin_rows = []
+
+        for wallet, result in zip(wallets, results):
+            if not isinstance(result, (list, tuple)) or len(result) != 2:
+                continue
+
+            spot, perps = result
+
+            if isinstance(spot, list):
+                for balance in spot:
+                    total = float(balance.get("total", 0) or 0)
+                    if total <= 0:
+                        continue
+
+                    coin_id = balance.get("coin")
+                    symbol = await get_symbol_name(coin_id, is_spot=True)
+                    item = f"{symbol}={pretty_float(total, 4)}"
+
+                    if self._is_stable_asset(symbol):
+                        stable_assets.append(item)
+                    else:
+                        risk_assets.append(item)
+
+            if isinstance(perps, dict):
+                margin_summary = perps.get("marginSummary", {}) or {}
+                equity = float(margin_summary.get("accountValue", 0) or 0)
+                margin_used = float(margin_summary.get("totalMarginUsed", 0) or 0)
+                ntl = float(margin_summary.get("totalNtlPos", 0) or 0)
+
+                if equity > 0:
+                    util = (margin_used / equity) * 100 if equity > 0 else 0.0
+                    margin_rows.append(
+                        f"{wallet[:6]}... util {util:.0f}% | eq ${pretty_float(equity, 0)} | ntl ${pretty_float(ntl, 0)}"
+                    )
+
+                for wrapper in perps.get("assetPositions", []) or []:
+                    pos = wrapper.get("position", {}) or {}
+                    size = float(pos.get("szi", 0) or 0)
+                    if size == 0:
+                        continue
+
+                    coin_id = pos.get("coin")
+                    symbol = await get_symbol_name(coin_id, is_spot=False)
+                    entry = float(pos.get("entryPx", 0) or 0)
+                    leverage = float((pos.get("leverage") or {}).get("value", 0) or 0)
+                    liquidation = float(pos.get("liquidationPx", 0) or 0)
+                    upnl = float(
+                        pos.get("unrealizedPnl", pos.get("unrealizedPnlUsd", pos.get("returnOnEquity", 0))) or 0
+                    )
+                    notional = abs(float(pos.get("positionValue", 0) or 0)) or abs(size * entry)
+
+                    positions.append({
+                        "symbol": symbol,
+                        "wallet": wallet,
+                        "side": "LONG" if size > 0 else "SHORT",
+                        "size": size,
+                        "entry": entry,
+                        "leverage": leverage,
+                        "liquidation": liquidation,
+                        "upnl": upnl,
+                        "notional": notional,
+                    })
+
+        positions.sort(key=lambda item: item.get("notional", 0), reverse=True)
+        risk_assets = risk_assets[:8]
+        stable_assets = stable_assets[:4]
+        margin_rows = margin_rows[:4]
+
+        position_lines = []
+        for item in positions[:8]:
+            liq_part = f" | liq {pretty_float(item['liquidation'], 2)}" if item["liquidation"] > 0 else ""
+            lev_part = f"{item['leverage']:.1f}x" if item["leverage"] > 0 else "spot"
+            position_lines.append(
+                f"{item['symbol']} {item['side']} size {pretty_float(abs(item['size']), 4)} @ {pretty_float(item['entry'], 2)} | {lev_part}{liq_part}"
+            )
+
+        summary_parts = [
+            f"Open perps ({len(positions)}): " + (", ".join(position_lines) if position_lines else "none"),
+            "Risk assets: " + (", ".join(risk_assets) if risk_assets else "none"),
+            "Stable assets: " + (", ".join(stable_assets) if stable_assets else "none"),
+            "Margin: " + (" ; ".join(margin_rows) if margin_rows else "no margin data"),
+        ]
+
+        return {
+            "summary": "\n".join(summary_parts),
+            "positions": positions,
+            "position_symbols": {self._normalize_symbol(item.get("symbol", "")) for item in positions if item.get("symbol")},
+            "stable_assets": stable_assets,
+            "risk_assets": risk_assets,
+            "has_open_positions": bool(positions),
+        }
+
     async def fetch_news_with_search(self, timeframe: str = "24h", topics: list = None) -> str:
         """
         News Agent: Collects fresh crypto news via Google Search grounding.
@@ -463,48 +588,21 @@ Provide a concise summary (max 500 words) with key bullet points."""
         context_type: 'liquidation', 'fill', 'proximity', 'volatility', 'whale', 'margin', 'listing', 'ledger', 'funding', 'chat'
         """
         from bot.database import db
-        from bot.services import get_user_portfolio, get_spot_balances, get_perps_state
         
         # 1. Fetch User Context
         wallets = await db.list_wallets(user_id)
-        portfolio_summary = ""
-        
-        if wallets:
-            # Parallel fetch for all wallets
-            results = await asyncio.gather(*[
-                asyncio.gather(get_spot_balances(w), get_perps_state(w), return_exceptions=True) 
-                for w in wallets
-            ])
-            
-            all_spot = []
-            all_pos = []
-            
-            for spot, perps in results:
-                if isinstance(spot, list):
-                    for b in spot:
-                        if float(b.get('total', 0)) > 0:
-                            coin_id = b.get('coin')
-                            from bot.services import get_symbol_name
-                            name = await get_symbol_name(coin_id, is_spot=True)
-                            all_spot.append(f"{name}={b.get('total')}")
-                if isinstance(perps, dict) and perps.get('assetPositions'):
-                    for p in perps['assetPositions']:
-                        pos = p['position']
-                        if float(pos.get('szi', 0)) != 0:
-                            coin_id = pos.get('coin')
-                            from bot.services import get_symbol_name
-                            name = await get_symbol_name(coin_id, is_spot=False)
-                            all_pos.append(f"{name} {pos.get('szi')}")
-            
-            portfolio_summary = f"Spot: {', '.join(all_spot[:10])} | Perps: {', '.join(all_pos[:10])}"
-        if not portfolio_summary:
-            portfolio_summary = "No portfolio data."
+        snapshot = await self._build_user_context_snapshot(wallets)
+        portfolio_summary = snapshot["summary"]
 
-        watchlist = await db.get_watchlist(user_id)
-        watchlist_str = ", ".join(watchlist)
+        watchlist = await db.get_watchlist(user_id) or []
+        watchlist_str = ", ".join(watchlist) if watchlist else "empty"
         memory = await db.get_hedge_memory(user_id, limit=12)
+        if context_type == "chat":
+            memory_items = memory
+        else:
+            memory_items = [m for m in memory if m.get("role") in ("system", "user")]
         memory_txt = "\n".join(
-            [f"- {m.get('role', 'system')}: {str(m.get('content', ''))[:220]}" for m in memory if m.get("content")]
+            [f"- {m.get('role', 'system')}: {str(m.get('content', ''))[:220]}" for m in memory_items if m.get("content")]
         ) or "No prior context."
 
         # 2. Fetch Style (Prompt Override)
@@ -512,7 +610,13 @@ Provide a concise summary (max 500 words) with key bullet points."""
         custom_style = ov_settings.get("prompt_override", "Professional and sharp.")
         
         # 3. Fetch Fresh News via News Agent
-        event_symbol = event_data.get('symbol', event_data.get('sym', ''))
+        event_symbol = self._normalize_symbol(event_data.get('symbol', event_data.get('sym', '')))
+        matching_positions = [
+            p for p in snapshot["positions"]
+            if self._normalize_symbol(p.get("symbol", "")) == event_symbol
+        ] if event_symbol else []
+        watchlist_match = bool(event_symbol and event_symbol in {self._normalize_symbol(w) for w in watchlist})
+
         topics = ["crypto market"]
         if event_symbol:
             topics.append(event_symbol)
@@ -524,21 +628,44 @@ Provide a concise summary (max 500 words) with key bullet points."""
 
         target_lang = "Russian" if lang == "ru" else "English"
 
+        if matching_positions:
+            match_summary = "; ".join(
+                [
+                    f"{p['symbol']} {p['side']} {pretty_float(abs(p['size']), 4)} @ {pretty_float(p['entry'], 2)} | {p['leverage']:.1f}x"
+                    for p in matching_positions[:4]
+                ]
+            )
+            relevance_hint = f"Direct exposure detected in open perps: {match_summary}"
+        elif event_symbol and watchlist_match:
+            relevance_hint = f"No open perp in {event_symbol}, but the symbol is in the user's watchlist."
+        elif event_symbol and snapshot["has_open_positions"]:
+            relevance_hint = f"No direct {event_symbol} perp position. Compare this event against current open perps before giving advice."
+        elif snapshot["has_open_positions"]:
+            relevance_hint = "User has open perp positions. Frame the event through current directional exposure and margin."
+        else:
+            relevance_hint = "No open perp positions. Avoid generic comfort lines; focus on whether the event creates a setup worth watching."
+
         # 4. Construct RAG prompt
         prompt = f"""
-        You are HEDGE AI, an elite AI risk manager with real-time news access.
+        You are VELOX ASSISTANT, an elite market and risk assistant with real-time news access.
         NON-NEGOTIABLE RULES:
         - Never insult, mock, humiliate, or use toxic language.
         - Never mention user's "poverty", "small balance", or similar.
         - Be factual and uncertainty-aware: avoid guaranteed predictions.
         - Keep output <= 320 characters for non-chat contexts.
         - If data is weak, say so briefly and give a conservative action.
+        - Never say "risk zero", "no risk", "safe because of USDC", or any equivalent.
+        - Do not default to commenting on stablecoin balance unless it is directly relevant to the event.
+        - If the user has open positions, prioritize those positions over idle spot balances.
+        - Use the event symbol, side, leverage, liquidation, margin, or watchlist relevance when available.
+        - If there is no direct exposure, say that briefly and then give the most relevant next action.
         USER STYLE/PROMPT: {custom_style}
         TARGET LANGUAGE: {target_lang}
 
         USER CONTEXT:
         - Portfolio: {portfolio_summary}
         - Watchlist: {watchlist_str}
+        - Event relevance hint: {relevance_hint}
 
         RECENT MEMORY (latest interactions):
         {memory_txt}
@@ -554,15 +681,24 @@ Provide a concise summary (max 500 words) with key bullet points."""
         """
         
         if context_type == 'chat':
-            prompt += f"\nCHAT HISTORY:\n{json.dumps(history if history else [])}\nACTION: Reply to the user's latest message considering all context. Be helpful, concise, and professional."
+            prompt += (
+                f"\nCHAT HISTORY:\n{json.dumps(history if history else [])}\n"
+                "ACTION: Reply to the user's latest message considering all context. "
+                "If the user asks about risk or positions, anchor your answer in their actual open positions first, then cash/watchlist context."
+            )
         else:
-            prompt += f"\nACTION: Provide a very brief (max 300 chars), sharp, and actionable insight about this event. Connect it to the user's portfolio or current market news if possible."
+            prompt += (
+                "\nACTION: Provide a very brief (max 300 chars), sharp, and actionable insight about this event. "
+                "Start with direct portfolio relevance. If there is direct exposure, mention the matching position or risk first. "
+                "If there is no direct exposure, say that once and pivot to a concrete watch/hedge/entry-risk idea. "
+                "Avoid generic reassurance."
+            )
 
         prompt += "\nOUTPUT: Plain text only, no JSON, no headers. Use Markdown **bolding** for emphasis."
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.7}
+            "generationConfig": {"temperature": 0.45}
         }
 
         try:

@@ -1,4 +1,5 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from bot.billing import get_plan_config, normalize_plan
 from bot.database import db
 from bot.services import (
     get_spot_balances, get_user_portfolio, pretty_float, get_perps_context, 
@@ -25,6 +26,13 @@ from bot.locales import _t
 
 logger = logging.getLogger(__name__)
 HLP_VAULT_ADDR = "0xdf13098394e1832014b0df3f91285497"
+DIGEST_TARGETS = [
+    "portfolio_daily",
+    "portfolio_weekly",
+    "hlp_daily",
+    "vault_weekly",
+    "vault_monthly",
+]
 
 async def _get_user_wallet_pairs() -> list[tuple[int | str, str]]:
     """Return deduplicated (user_id, wallet) pairs from current + legacy storage."""
@@ -105,7 +113,7 @@ async def _send_vault_periodic_summary(bot, period: str, days: int, target_user_
         if target_user_ids is not None and user_id not in target_user_ids:
             continue
 
-        lang = user.get("lang", "en")
+        lang = user.get("lang", "ru")
         vault_reports = user.get("vault_reports", {})
         configs = vault_reports.get("configs", {}) if isinstance(vault_reports, dict) else {}
         if not isinstance(configs, dict) or not configs:
@@ -230,7 +238,7 @@ async def send_daily_hlp_digest(bot, target_user_ids: set[int | str] | None = No
         if not wallets:
             continue
 
-        lang = user.get("lang", "en")
+        lang = user.get("lang", "ru")
         digest_settings = await db.get_digest_settings(user_id)
         hlp_daily_enabled = bool(digest_settings.get("hlp_daily", {}).get("enabled", True))
         if not hlp_daily_enabled:
@@ -334,27 +342,37 @@ async def send_scheduled_digests(bot):
         user_id = u.get("user_id")
         if not user_id:
             continue
+        subscription = await db.get_billing_subscription(user_id)
+        plan_cfg = get_plan_config(normalize_plan(subscription.get("plan")))
+        if not bool(plan_cfg["features"].get("digests", False)):
+            continue
+
         cfg = await db.get_digest_settings(user_id)
+        digest_slots = plan_cfg["limits"].get("digest_slots")
+        enabled_targets = [target for target in DIGEST_TARGETS if bool(cfg.get(target, {}).get("enabled", False))]
+        if digest_slots is not None:
+            enabled_targets = enabled_targets[:digest_slots]
+        enabled_target_set = set(enabled_targets)
 
         pd = cfg.get("portfolio_daily", {})
-        if pd.get("enabled") and pd.get("time") == now_hhmm:
+        if "portfolio_daily" in enabled_target_set and pd.get("time") == now_hhmm:
             due_portfolio_daily.add(user_id)
 
         pw = cfg.get("portfolio_weekly", {})
-        if pw.get("enabled") and pw.get("time") == now_hhmm and str(pw.get("day_of_week", "sun")).lower() == now_dow:
+        if "portfolio_weekly" in enabled_target_set and pw.get("time") == now_hhmm and str(pw.get("day_of_week", "sun")).lower() == now_dow:
             due_portfolio_weekly.add(user_id)
 
         hd = cfg.get("hlp_daily", {})
-        if hd.get("enabled") and hd.get("time") == now_hhmm:
+        if "hlp_daily" in enabled_target_set and hd.get("time") == now_hhmm:
             due_hlp_daily.add(user_id)
 
         vw = cfg.get("vault_weekly", {})
-        if vw.get("enabled") and vw.get("time") == now_hhmm and str(vw.get("day_of_week", "sun")).lower() == now_dow:
+        if "vault_weekly" in enabled_target_set and vw.get("time") == now_hhmm and str(vw.get("day_of_week", "sun")).lower() == now_dow:
             due_vault_weekly.add(user_id)
 
         vm = cfg.get("vault_monthly", {})
         vm_day = int(vm.get("day", 1) or 1)
-        if vm.get("enabled") and vm.get("time") == now_hhmm and vm_day == now_dom:
+        if "vault_monthly" in enabled_target_set and vm.get("time") == now_hhmm and vm_day == now_dom:
             due_vault_monthly.add(user_id)
 
     if due_portfolio_daily:
@@ -457,7 +475,7 @@ async def send_market_reports(bot):
     
     for user in users_to_alert:
         chat_id = user["user_id"]
-        lang = user.get("lang", "en")
+        lang = user.get("lang", "ru")
         
         # 1. Get detailed info for Majors
         majors_text = ""
@@ -986,7 +1004,7 @@ async def run_delta_neutral_alerts(bot):
             if not alerts:
                 continue
 
-            lang = user.get("lang", "en")
+            lang = user.get("lang", "ru")
             msg = format_alert_digest(alerts, lang=lang)
             if msg:
                 await bot.send_message(user_id, msg, parse_mode="HTML")

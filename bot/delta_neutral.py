@@ -2,6 +2,7 @@ import asyncio
 import time
 from collections import defaultdict
 
+from bot.locales import _t
 from bot.services import (
     extract_avg_entry_from_balance,
     get_mid_price,
@@ -583,42 +584,40 @@ def _fmt_signed_pct(rate_decimal: float) -> str:
 
 
 def format_dashboard_text(snapshot: dict, lang: str = "ru") -> str:
-    is_ru = str(lang or "ru").lower().startswith("ru")
     t = snapshot.get("totals", {})
     coins = snapshot.get("coins", [])
 
-    if is_ru:
-        lines = [
-            "📊 <b>Delta-Neutral Dashboard</b>",
-            "━━━━━━━━━━━━━━━━━━━",
-            f"💰 Портфель (без буфера): <b>${pretty_float(t.get('portfolio_no_buffer', 0), 2)}</b>",
-            f"⚖️ Дельта: <b>${pretty_float(t.get('delta_usd', 0), 2)}</b> ({t.get('delta_pct', 0):.2f}%) {t.get('delta_icon', '✅')}",
-            f"📊 Margin: <b>{t.get('margin_health_pct', 0):.1f}%</b> {t.get('margin_icon', '🟢')}",
-            f"💸 Фандинг 24ч: <b>${pretty_float(t.get('funding_today', 0), 2)}</b>",
-            f"💸 Фандинг 7д: <b>${pretty_float(t.get('funding_week', 0), 2)}</b>",
-            f"💸 Фандинг 30д: <b>${pretty_float(t.get('funding_30d', 0), 2)}</b>",
-            f"💸 Фандинг всего: <b>${pretty_float(t.get('funding_total', 0), 2)}</b>",
-        ]
-        if t.get("best_symbol"):
-            lines.append(
-                f"🏆 Платит больше сейчас: <b>{t['best_symbol']}</b> ({_fmt_signed_pct_hour(t.get('best_rate', 0))})"
+    lines = [
+        _t(lang, "delta_dashboard_title"),
+        "━━━━━━━━━━━━━━━━━━━",
+        _t(lang, "delta_dashboard_portfolio", value=pretty_float(t.get("portfolio_no_buffer", 0), 2)),
+        _t(
+            lang,
+            "delta_dashboard_delta",
+            value=pretty_float(t.get("delta_usd", 0), 2),
+            pct=t.get("delta_pct", 0),
+            icon=t.get("delta_icon", "✅"),
+        ),
+        _t(
+            lang,
+            "delta_dashboard_margin",
+            pct=t.get("margin_health_pct", 0),
+            icon=t.get("margin_icon", "🟢"),
+        ),
+        _t(lang, "delta_dashboard_funding_24h", value=pretty_float(t.get("funding_today", 0), 2)),
+        _t(lang, "delta_dashboard_funding_7d", value=pretty_float(t.get("funding_week", 0), 2)),
+        _t(lang, "delta_dashboard_funding_30d", value=pretty_float(t.get("funding_30d", 0), 2)),
+        _t(lang, "delta_dashboard_funding_total", value=pretty_float(t.get("funding_total", 0), 2)),
+    ]
+    if t.get("best_symbol"):
+        lines.append(
+            _t(
+                lang,
+                "delta_dashboard_best_rate",
+                symbol=t["best_symbol"],
+                rate=_fmt_signed_pct_hour(t.get("best_rate", 0)),
             )
-    else:
-        lines = [
-            "📊 <b>Delta-Neutral Dashboard</b>",
-            "━━━━━━━━━━━━━━━━━━━",
-            f"💰 Portfolio (no buffer): <b>${pretty_float(t.get('portfolio_no_buffer', 0), 2)}</b>",
-            f"⚖️ Delta: <b>${pretty_float(t.get('delta_usd', 0), 2)}</b> ({t.get('delta_pct', 0):.2f}%) {t.get('delta_icon', '✅')}",
-            f"📊 Margin: <b>{t.get('margin_health_pct', 0):.1f}%</b> {t.get('margin_icon', '🟢')}",
-            f"💸 Funding 24h: <b>${pretty_float(t.get('funding_today', 0), 2)}</b>",
-            f"💸 Funding 7d: <b>${pretty_float(t.get('funding_week', 0), 2)}</b>",
-            f"💸 Funding 30d: <b>${pretty_float(t.get('funding_30d', 0), 2)}</b>",
-            f"💸 Funding total: <b>${pretty_float(t.get('funding_total', 0), 2)}</b>",
-        ]
-        if t.get("best_symbol"):
-            lines.append(
-                f"🏆 Highest payer now: <b>{t['best_symbol']}</b> ({_fmt_signed_pct_hour(t.get('best_rate', 0))})"
-            )
+        )
 
     if coins:
         lines.append("")

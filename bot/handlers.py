@@ -3,8 +3,10 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, BufferedInputFile, InputMediaPhoto, ErrorEvent
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, BufferedInputFile, InputMediaPhoto, ErrorEvent, LabeledPrice, PreCheckoutQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.billing import TEST_BILLING_ADMIN_IDS, PLAN_MONTH_OPTIONS, get_plan_config, get_plan_price, get_plan_price_options, get_plan_star_price, get_plan_star_price_options, get_plan_title, normalize_plan
+from bot.config import settings
 from bot.database import db
 from bot.locales import _t
 from bot.services import (
@@ -82,31 +84,257 @@ async def smart_edit_media(call: CallbackQuery, photo: BufferedInputFile, captio
 
 # --- UI Helpers ---
 
+BILLING_USAGE_OVERVIEW = "overview_runs"
+BILLING_USAGE_ASSISTANT = "assistant_messages"
+BILLING_USAGE_EXPORTS = "exports"
+BILLING_USAGE_SHARE_PNL = "share_pnl_cards"
+
+
+def _count_enabled_digests(cfg: dict) -> int:
+    return sum(1 for target in DIGEST_TARGETS if bool((cfg.get(target) or {}).get("enabled", False)))
+
+
+async def _get_billing_state(user_id: int) -> dict:
+    subscription = await db.get_billing_subscription(user_id)
+    plan = normalize_plan(subscription.get("plan"))
+    usage = await db.get_daily_usage(user_id)
+    wallets = await db.list_wallets(user_id)
+    watchlist = await db.get_watchlist(user_id)
+    alerts = await db.get_user_alerts(user_id)
+    user_settings = await db.get_user_settings(user_id)
+    digest_settings = await db.get_digest_settings(user_id)
+    market_reports = user_settings.get("market_alert_times", []) or []
+
+    return {
+        "plan": plan,
+        "plan_cfg": get_plan_config(plan),
+        "plan_title_en": get_plan_title(plan, "en"),
+        "subscription": subscription,
+        "usage": usage.get("counts", {}),
+        "counts": {
+            "wallets": len(wallets),
+            "watchlist": len(watchlist),
+            "alerts": len(alerts),
+            "market_reports": len(market_reports),
+            "digest_slots": _count_enabled_digests(digest_settings),
+        }
+    }
+
+
+def _limit_value(limit_value) -> str:
+    return "∞" if limit_value is None else str(limit_value)
+
+
+async def _send_billing_gate_message(target, lang: str, text: str, is_callback: bool = False):
+    if is_callback:
+        await target.answer(text, show_alert=True)
+    else:
+        await target.answer(text, parse_mode="HTML")
+
+
+async def _ensure_billing_feature(target, user_id: int, lang: str, feature_key: str, feature_name_key: str, is_callback: bool = False) -> bool:
+    state = await _get_billing_state(user_id)
+    allowed = bool(state["plan_cfg"]["features"].get(feature_key, False))
+    if allowed:
+        return True
+
+    text = _t(
+        lang,
+        "billing_feature_locked",
+        feature=_t(lang, feature_name_key),
+        plan=get_plan_title("pro", lang)
+    )
+    await _send_billing_gate_message(target, lang, text, is_callback=is_callback)
+    return False
+
+
+async def _ensure_billing_quota(target, user_id: int, lang: str, quota_key: str, current_value: int, feature_name_key: str, is_callback: bool = False) -> bool:
+    state = await _get_billing_state(user_id)
+    limit_value = state["plan_cfg"]["limits"].get(quota_key)
+    if limit_value is None or current_value < limit_value:
+        return True
+
+    text = _t(
+        lang,
+        "billing_limit_reached",
+        feature=_t(lang, feature_name_key),
+        current=current_value,
+        limit=limit_value,
+        plan=get_plan_title("pro", lang)
+    )
+    await _send_billing_gate_message(target, lang, text, is_callback=is_callback)
+    return False
+
+
+async def _consume_billing_usage(target, user_id: int, lang: str, usage_key: str, limit_key: str, feature_name_key: str, is_callback: bool = False) -> bool:
+    state = await _get_billing_state(user_id)
+    current_value = int(state["usage"].get(usage_key, 0) or 0)
+    limit_value = state["plan_cfg"]["limits"].get(limit_key)
+    if limit_value is not None and current_value >= limit_value:
+        text = _t(
+            lang,
+            "billing_daily_limit_reached",
+            feature=_t(lang, feature_name_key),
+            current=current_value,
+            limit=limit_value,
+            plan=get_plan_title("pro", lang)
+        )
+        await _send_billing_gate_message(target, lang, text, is_callback=is_callback)
+        return False
+
+    await db.increment_daily_usage(user_id, usage_key, 1)
+    return True
+
+
+async def _ensure_billing_digest_slot(target, user_id: int, lang: str, current_value: int, is_callback: bool = False) -> bool:
+    state = await _get_billing_state(user_id)
+    limit_value = state["plan_cfg"]["limits"].get("digest_slots")
+    if limit_value is None or current_value < limit_value:
+        return True
+
+    text = _t(
+        lang,
+        "billing_digest_limit_reached",
+        feature=_t(lang, "billing_feature_digest_slots"),
+        current=current_value,
+        limit=limit_value,
+        plan=get_plan_title("pro_plus", lang)
+    )
+    await _send_billing_gate_message(target, lang, text, is_callback=is_callback)
+    return False
+
+
+def _build_stars_invoice_payload(user_id: int, plan: str, months: int) -> str:
+    return f"billing:stars:{int(user_id)}:{normalize_plan(plan)}:{int(months)}"
+
+
+def _parse_stars_invoice_payload(payload: str) -> tuple[int, str, int] | None:
+    try:
+        prefix, kind, user_id, plan, months = str(payload).split(":")
+        if prefix != "billing" or kind != "stars":
+            return None
+        return int(user_id), normalize_plan(plan), int(months)
+    except Exception:
+        return None
+
+
+async def _build_billing_ui(user_id: int, lang: str) -> tuple[str, InlineKeyboardMarkup]:
+    state = await _get_billing_state(user_id)
+    plan = state["plan"]
+    plan_cfg = state["plan_cfg"]
+    usage = state["usage"]
+    counts = state["counts"]
+    sub = state["subscription"]
+
+    active_until = sub.get("active_until")
+    if active_until:
+        active_until_text = datetime.datetime.utcfromtimestamp(active_until).strftime("%Y-%m-%d")
+    elif sub.get("source") == "manual_test":
+        active_until_text = _t(lang, "billing_test_mode")
+    else:
+        active_until_text = _t(lang, "billing_no_expiry")
+
+    free_cfg = get_plan_config("free")
+    pro_cfg = get_plan_config("pro")
+    pro_plus_cfg = get_plan_config("pro_plus")
+
+    text = (
+        f"{_t(lang, 'billing_title')}\n\n"
+        f"{_t(lang, 'billing_current_plan')}: <b>{get_plan_title(plan, lang)}</b>\n"
+        f"{_t(lang, 'billing_active_until')}: <b>{active_until_text}</b>\n\n"
+        f"{_t(lang, 'billing_usage_title')}\n"
+        f"• {_t(lang, 'billing_feature_wallets')}: <b>{counts['wallets']}/{_limit_value(plan_cfg['limits']['wallets'])}</b>\n"
+        f"• {_t(lang, 'billing_feature_watchlist')}: <b>{counts['watchlist']}/{_limit_value(plan_cfg['limits']['watchlist'])}</b>\n"
+        f"• {_t(lang, 'billing_feature_alerts')}: <b>{counts['alerts']}/{_limit_value(plan_cfg['limits']['alerts'])}</b>\n"
+        f"• {_t(lang, 'billing_feature_market_reports')}: <b>{counts['market_reports']}/{_limit_value(plan_cfg['limits']['market_reports'])}</b>\n"
+        f"• {_t(lang, 'billing_feature_overview_runs')}: <b>{usage.get(BILLING_USAGE_OVERVIEW, 0)}/{_limit_value(plan_cfg['limits']['overview_runs_daily'])}</b>\n"
+        f"• {_t(lang, 'billing_feature_assistant_messages')}: <b>{usage.get(BILLING_USAGE_ASSISTANT, 0)}/{_limit_value(plan_cfg['limits']['assistant_messages_daily'])}</b>\n"
+        f"• {_t(lang, 'billing_feature_exports_daily')}: <b>{usage.get(BILLING_USAGE_EXPORTS, 0)}/{_limit_value(plan_cfg['limits']['exports_daily'])}</b>\n"
+        f"• {_t(lang, 'billing_feature_share_pnl_daily')}: <b>{usage.get(BILLING_USAGE_SHARE_PNL, 0)}/{_limit_value(plan_cfg['limits']['share_pnl_daily'])}</b>\n"
+        f"• {_t(lang, 'billing_feature_digest_slots')}: <b>{counts['digest_slots']}/{_limit_value(plan_cfg['limits']['digest_slots'])}</b>\n\n"
+        f"{_t(lang, 'billing_features_title')}\n"
+        f"• {_t(lang, 'billing_feature_terminal')}: <b>{_t(lang, 'billing_yes') if plan_cfg['features']['terminal'] else _t(lang, 'billing_no')}</b>\n"
+        f"• {_t(lang, 'billing_feature_export')}: <b>{_t(lang, 'billing_yes') if plan_cfg['features']['export'] else _t(lang, 'billing_no')}</b>\n"
+        f"• {_t(lang, 'billing_feature_digests')}: <b>{_t(lang, 'billing_yes') if plan_cfg['features']['digests'] else _t(lang, 'billing_no')}</b>\n"
+        f"• {_t(lang, 'billing_feature_vault_reports')}: <b>{_t(lang, 'billing_yes') if plan_cfg['features']['vault_reports'] else _t(lang, 'billing_no')}</b>\n"
+        f"• {_t(lang, 'billing_feature_flex')}: <b>{_t(lang, 'billing_yes') if plan_cfg['features']['flex'] else _t(lang, 'billing_no')}</b>\n"
+        f"• {_t(lang, 'billing_feature_share_pnl')}: <b>{_t(lang, 'billing_yes') if plan_cfg['features']['share_pnl'] else _t(lang, 'billing_no')}</b>\n"
+        f"• {_t(lang, 'billing_feature_ai_settings')}: <b>{_t(lang, 'billing_yes') if plan_cfg['features']['advanced_ai_settings'] else _t(lang, 'billing_no')}</b>\n\n"
+        f"{_t(lang, 'billing_prices_title')}\n"
+        f"• <b>{get_plan_title('free', lang)}</b> — $0 · "
+        f"{free_cfg['limits']['wallets']} {_t(lang, 'billing_feature_wallets').lower()}, "
+        f"{free_cfg['limits']['alerts']} {_t(lang, 'billing_feature_alerts').lower()}, "
+        f"{free_cfg['limits']['overview_runs_daily']} {_t(lang, 'billing_feature_overview_runs').lower()}, "
+        f"{free_cfg['limits']['assistant_messages_daily']} {_t(lang, 'billing_feature_assistant_messages').lower()}\n"
+        f"• <b>{get_plan_title('pro', lang)}</b> — {get_plan_price_options('pro')} · {get_plan_star_price_options('pro')} · "
+        f"{pro_cfg['limits']['wallets']} {_t(lang, 'billing_feature_wallets').lower()}, "
+        f"{pro_cfg['limits']['watchlist']} {_t(lang, 'billing_feature_watchlist').lower()}, "
+        f"{pro_cfg['limits']['alerts']} {_t(lang, 'billing_feature_alerts').lower()}, "
+        f"{pro_cfg['limits']['overview_runs_daily']} {_t(lang, 'billing_feature_overview_runs').lower()}\n"
+        f"• <b>{get_plan_title('pro_plus', lang)}</b> — {get_plan_price_options('pro_plus')} · {get_plan_star_price_options('pro_plus')} · "
+        f"{pro_plus_cfg['limits']['wallets']} {_t(lang, 'billing_feature_wallets').lower()}, "
+        f"{pro_plus_cfg['limits']['watchlist']} {_t(lang, 'billing_feature_watchlist').lower()}, "
+        f"{pro_plus_cfg['limits']['alerts']} {_t(lang, 'billing_feature_alerts').lower()}, "
+        f"{pro_plus_cfg['limits']['overview_runs_daily']} {_t(lang, 'billing_feature_overview_runs').lower()}, "
+        f"{pro_plus_cfg['limits']['assistant_messages_daily']} {_t(lang, 'billing_feature_assistant_messages').lower()}\n\n"
+        f"{_t(lang, 'billing_stars_fee_note')}\n"
+        f"<i>{_t(lang, 'billing_payment_note')}</i>"
+    )
+
+    kb = InlineKeyboardBuilder()
+    for months in PLAN_MONTH_OPTIONS:
+        kb.button(text=f"⭐ Pro {months}M · {get_plan_star_price('pro', months)}", callback_data=f"bill_buy:pro:{months}")
+    for months in PLAN_MONTH_OPTIONS:
+        kb.button(text=f"💎 Pro+ {months}M · {get_plan_star_price('pro_plus', months)}", callback_data=f"bill_buy:pro_plus:{months}")
+
+    if user_id in TEST_BILLING_ADMIN_IDS:
+        kb.button(text="🧪 Free", callback_data="bill_test:set:free")
+        kb.button(text="🧪 Pro", callback_data="bill_test:set:pro")
+        kb.button(text="🧪 Pro+", callback_data="bill_test:set:pro_plus")
+        kb.button(text="🧪 Reset usage", callback_data="bill_test:reset_usage")
+
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_settings")
+    if user_id in TEST_BILLING_ADMIN_IDS:
+        kb.adjust(2, 2, 2, 2, 2, 2, 1)
+    else:
+        kb.adjust(2, 2, 2, 2, 1)
+    return text, kb.as_markup()
+
+def _main_menu_text(lang, wallets):
+    text = _t(lang, "welcome")
+    if wallets:
+        text += "\n\n" + _t(lang, "tracking").format(wallet=f"{wallets[0][:6]}...{wallets[0][-4:]}")
+    else:
+        text += "\n\n" + _t(lang, "set_wallet")
+    return text
+
 def _main_menu_kb(lang):
     kb = InlineKeyboardBuilder()
-    # Row 0: Terminal
-    kb.row(InlineKeyboardButton(text="🖥️ Terminal", callback_data="cb_terminal"))
-    # Row 0.5: Hedge AI & Chat
     kb.row(
-        InlineKeyboardButton(text="🧠 Hedge AI", callback_data="cb_ai_overview_menu"),
-        InlineKeyboardButton(text="🛡️ Hedge Chat", callback_data="cb_hedge_chat_start")
+        InlineKeyboardButton(text=_t(lang, "cat_overview"), callback_data="sub:overview"),
+        InlineKeyboardButton(text=_t(lang, "cat_portfolio"), callback_data="sub:portfolio")
     )
-    # Row 0.75: Delta Neutral
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_delta_neutral"), callback_data="cb_delta_neutral"))
-    # Row 1: Portfolio & Trading
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "cat_portfolio"), callback_data="sub:portfolio"),
-        InlineKeyboardButton(text=_t(lang, "cat_trading"), callback_data="sub:trading")
+        InlineKeyboardButton(text=_t(lang, "cat_trading"), callback_data="sub:trading"),
+        InlineKeyboardButton(text=_t(lang, "cat_vaults"), callback_data="sub:vaults")
     )
-    # Row 2: Vaults & Market
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "cat_vaults"), callback_data="sub:vaults"),
-        InlineKeyboardButton(text=_t(lang, "cat_market"), callback_data="sub:market")
-    )
-    # Row 3: Settings
-    kb.row(
+        InlineKeyboardButton(text=_t(lang, "cat_market"), callback_data="sub:market"),
         InlineKeyboardButton(text=_t(lang, "cat_settings"), callback_data="cb_settings")
     )
+    return kb.as_markup()
+
+def _overview_kb(lang):
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_terminal"), callback_data="cb_terminal"),
+        InlineKeyboardButton(text=_t(lang, "btn_delta_neutral"), callback_data="cb_delta_neutral")
+    )
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_hedge_ai"), callback_data="cb_ai_overview_menu"),
+        InlineKeyboardButton(text=_t(lang, "btn_hedge_chat"), callback_data="cb_hedge_chat_start")
+    )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
 
 def _portfolio_kb(lang):
@@ -256,7 +484,14 @@ def _digest_label_key(target: str) -> str:
 
 async def _build_digest_settings_ui(user_id: int, lang: str) -> tuple[str, InlineKeyboardMarkup]:
     cfg = await db.get_digest_settings(user_id)
-    text = f"{_t(lang, 'digest_settings_title')}\n\n{_t(lang, 'digest_settings_msg')}\n\n"
+    state = await _get_billing_state(user_id)
+    digest_limit = _limit_value(state["plan_cfg"]["limits"].get("digest_slots"))
+    digest_used = _count_enabled_digests(cfg)
+    text = (
+        f"{_t(lang, 'digest_settings_title')}\n\n"
+        f"{_t(lang, 'digest_settings_msg')}\n\n"
+        f"{_t(lang, 'billing_feature_digest_slots')}: <b>{digest_used}/{digest_limit}</b>\n\n"
+    )
     kb = InlineKeyboardBuilder()
 
     for target in DIGEST_TARGETS:
@@ -326,24 +561,58 @@ def _settings_kb(lang):
         InlineKeyboardButton(text=_t(lang, "btn_export"), callback_data="cb_export"),
         InlineKeyboardButton(text=_t(lang, "btn_lang"), callback_data="cb_lang_menu")
     )
-    # Row 3: Digest Settings
+    # Row 3: Billing
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_billing"), callback_data="cb_billing")
+    )
+    # Row 4: Digest Settings
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_digest_settings"), callback_data="cb_digest_settings_menu")
     )
-    # Row 4: Alert Types (Funding/OI)
+    # Row 5: Alert Types (Funding/OI)
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_funding_alert"), callback_data="cb_funding_alert_prompt"),
         InlineKeyboardButton(text=_t(lang, "btn_oi_alert"), callback_data="cb_oi_alert_prompt")
     )
-    # Row 5: Thresholds
+    # Row 6: Thresholds
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_prox"), callback_data="set_prox_prompt"),
         InlineKeyboardButton(text=_t(lang, "btn_vol"), callback_data="set_vol_prompt"),
         InlineKeyboardButton(text=_t(lang, "btn_whale"), callback_data="set_whale_prompt")
     )
-    # Row 6: Back
+    # Row 7: Back
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
+
+def _build_overview_settings_ui(lang: str, cfg: dict, include_back: bool = True) -> tuple[str, InlineKeyboardMarkup]:
+    prompt_status = "✅ Custom" if cfg.get("prompt_override") else "❌ Default"
+    text = (
+        f"⚙️ <b>{_t(lang, 'market_title')} - {_t(lang, 'settings_title')}</b>\n\n"
+        f"<b>Status:</b> {'✅ Enabled' if cfg['enabled'] else '🔴 Disabled'}\n"
+        f"<b>Prompt:</b> {prompt_status}\n\n"
+        f"<b>Schedule (UTC):</b>"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.row(InlineKeyboardButton(text=_t(lang, "ov_btn_toggle"), callback_data="ov_toggle"))
+
+    schedules = cfg.get("schedules", [])
+    if not schedules:
+        text += "\n<i>No scheduled times.</i>"
+    else:
+        for t in sorted(schedules):
+            kb.row(InlineKeyboardButton(text=f"❌ {t}", callback_data=f"ov_del_time:{t}"))
+            text += f"\n• {t}"
+
+    kb.row(
+        InlineKeyboardButton(text="➕ Add Time", callback_data="ov_add_time"),
+        InlineKeyboardButton(text="📝 Set Prompt", callback_data="ov_prompt")
+    )
+
+    if include_back:
+        kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
+
+    return text, kb.as_markup()
 
 def _pagination_kb(lang: str, current_page: int, total_pages: int, callback_prefix: str, back_target: str = "cb_menu") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
@@ -362,9 +631,10 @@ def _pagination_kb(lang: str, current_page: int, total_pages: int, callback_pref
     
     # Extra buttons for Positions
     if "cb_positions" in callback_prefix:
+        context = callback_prefix.split(":", 1)[1] if ":" in callback_prefix else "trading"
         kb.row(
             InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data=f"{callback_prefix}:{current_page}"),
-            InlineKeyboardButton(text=_t(lang, "btn_share"), callback_data="cb_share_pnl_menu")
+            InlineKeyboardButton(text=_t(lang, "btn_share"), callback_data=f"cb_share_pnl_menu:{context}:{current_page}")
         )
     elif "cb_orders" in callback_prefix:
         kb.row(InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data=f"{callback_prefix}:{current_page}"))
@@ -379,18 +649,15 @@ async def cmd_start(message: Message):
     lang = await db.get_lang(message.chat.id)
     wallets = await db.list_wallets(message.chat.id)
     
-    text = _t(lang, "welcome")
+    text = _main_menu_text(lang, wallets)
     kb = _main_menu_kb(lang)
 
     if not wallets:
-        text += "\n\n" + _t(lang, "set_wallet")
         # Add a quick button for adding wallet if none exist
         builder = InlineKeyboardBuilder()
-        builder.button(text="👛 " + _t(lang, "btn_wallets"), callback_data="cb_wallets_menu")
+        builder.button(text=_t(lang, "btn_wallets"), callback_data="cb_wallets_menu")
         builder.attach(InlineKeyboardBuilder.from_markup(kb))
         kb = builder.as_markup()
-    else:
-        text += "\n\n" + _t(lang, "tracking").format(wallet=f"{wallets[0][:6]}...{wallets[0][-4:]}")
 
     await message.answer(text, reply_markup=kb, parse_mode="HTML")
     await db.add_user(message.chat.id, None)
@@ -399,6 +666,22 @@ async def cmd_start(message: Message):
 async def cmd_help(message: Message):
     lang = await db.get_lang(message.chat.id)
     await message.answer(_t(lang, "help_msg"), parse_mode="HTML")
+
+
+@router.message(Command("paysupport"))
+async def cmd_paysupport(message: Message):
+    lang = await db.get_lang(message.chat.id)
+    contact = (settings.PAY_SUPPORT_CONTACT or "").strip()
+    if not contact:
+        contact = "@BotFather"
+    await message.answer(_t(lang, "pay_support_msg", contact=contact), parse_mode="HTML")
+
+
+@router.message(Command("billing"))
+async def cmd_billing(message: Message):
+    lang = await db.get_lang(message.chat.id)
+    text, kb = await _build_billing_ui(message.chat.id, lang)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 
 @router.message(Command("status"))
@@ -437,6 +720,11 @@ async def cmd_add_wallet(message: Message):
             error_msg = "❌ <b>Неверный формат адреса!</b>\n\nАдрес содержит недопустимые символы. Разрешены только hex-символы (0-9, a-f)."
         await message.answer(error_msg, parse_mode="HTML")
         return
+
+    wallets = await db.list_wallets(message.chat.id)
+    if wallet not in wallets:
+        if not await _ensure_billing_quota(message, message.chat.id, lang, "wallets", len(wallets), "billing_feature_wallets"):
+            return
 
     await db.add_wallet(message.chat.id, wallet)
 
@@ -482,6 +770,10 @@ async def cmd_threshold(message: Message):
 @router.message(Command("alert"))
 async def cmd_alert(message: Message):
     lang = await db.get_lang(message.chat.id)
+    alerts = await db.get_user_alerts(message.chat.id)
+    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(alerts), "billing_feature_alerts"):
+        return
+
     args = message.text.split()
     if len(args) < 3:
         await message.answer(_t(lang, "alert_usage"), parse_mode="HTML")
@@ -514,6 +806,10 @@ async def cmd_alert(message: Message):
 @router.message(Command("f_alert"))
 async def cmd_f_alert(message: Message):
     lang = await db.get_lang(message.chat.id)
+    alerts = await db.get_user_alerts(message.chat.id)
+    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(alerts), "billing_feature_alerts"):
+        return
+
     args = message.text.split()
     if len(args) < 3:
         await message.answer("⚠️ Usage: <code>/f_alert ETH 50</code> (Alert if APR > 50% or < -20%)", parse_mode="HTML")
@@ -545,6 +841,10 @@ async def cmd_f_alert(message: Message):
 @router.message(Command("oi_alert"))
 async def cmd_oi_alert(message: Message):
     lang = await db.get_lang(message.chat.id)
+    alerts = await db.get_user_alerts(message.chat.id)
+    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(alerts), "billing_feature_alerts"):
+        return
+
     args = message.text.split()
     if len(args) < 3:
         await message.answer("⚠️ Usage: <code>/oi_alert ETH 100</code> (Alert if OI > $100M)", parse_mode="HTML")
@@ -826,8 +1126,13 @@ async def cb_funding_page(call: CallbackQuery):
 
 @router.message(Command("export"))
 async def cmd_export(message: Message):
-    status_msg = await message.answer("⏳ Exporting data...")
     lang = await db.get_lang(message.chat.id)
+    if not await _ensure_billing_feature(message, message.chat.id, lang, "export", "billing_feature_export"):
+        return
+    if not await _consume_billing_usage(message, message.chat.id, lang, BILLING_USAGE_EXPORTS, "exports_daily", "billing_feature_exports_daily"):
+        return
+
+    status_msg = await message.answer("⏳ Exporting data...")
     wallets = await db.list_wallets(message.chat.id)
     if not wallets:
         await status_msg.edit_text(_t(lang, "need_wallet"))
@@ -864,9 +1169,14 @@ async def cmd_export(message: Message):
 
 @router.callback_query(F.data == "cb_export")
 async def cb_export(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "export", "billing_feature_export", is_callback=True):
+        return
+    if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_EXPORTS, "exports_daily", "billing_feature_exports_daily", is_callback=True):
+        return
+
     await call.answer("Exporting...")
     status_msg = await call.message.answer("⏳ Exporting data...")
-    lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
         await status_msg.edit_text(_t(lang, "need_wallet"))
@@ -905,11 +1215,15 @@ async def cb_menu(call: CallbackQuery, state: FSMContext = None):
         await state.clear()
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
-    text = _t(lang, "welcome")
-    if wallets:
-        text += "\n\n" + _t(lang, "tracking").format(wallet=f"{wallets[0][:6]}...{wallets[0][-4:]}")
+    text = _main_menu_text(lang, wallets)
     
     await smart_edit(call, text, reply_markup=_main_menu_kb(lang))
+    await call.answer()
+
+@router.callback_query(F.data == "sub:overview")
+async def cb_sub_overview(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    await smart_edit(call, _t(lang, "menu_overview"), reply_markup=_overview_kb(lang))
     await call.answer()
 
 @router.callback_query(F.data == "sub:portfolio")
@@ -931,12 +1245,12 @@ async def cb_delta_neutral(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     text, _ = await _build_delta_neutral_dashboard(call.message.chat.id, call.message.bot, interval_hours=0.0, emit_alerts=False)
     if not text:
-        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "cb_menu"))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:overview"))
         return
 
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data="cb_delta_neutral_refresh"))
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="sub:overview"))
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
 
@@ -1124,11 +1438,14 @@ async def cb_hlp_snapshot(call: CallbackQuery):
 
 @router.callback_query(F.data == "cb_vault_reports_menu")
 async def cb_vault_reports_menu(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "vault_reports", "billing_feature_vault_reports", is_callback=True):
+        return
+
     try:
         await call.answer()
     except Exception:
         pass
-    lang = await db.get_lang(call.message.chat.id)
     user_id = call.message.chat.id
 
     catalog = await _collect_user_vault_catalog(user_id)
@@ -1185,7 +1502,16 @@ async def cb_vault_reports_menu(call: CallbackQuery):
 @router.callback_query(F.data.startswith("vrep:"))
 async def cb_toggle_vault_report(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "vault_reports", "billing_feature_vault_reports", is_callback=True):
+        return
+
     if call.data == "vrep:hlp_daily":
+        digest_cfg = await db.get_digest_settings(call.message.chat.id)
+        if not bool(digest_cfg.get("hlp_daily", {}).get("enabled", False)):
+            if not await _ensure_billing_feature(call, call.message.chat.id, lang, "digests", "billing_feature_digests", is_callback=True):
+                return
+            if not await _ensure_billing_digest_slot(call, call.message.chat.id, lang, _count_enabled_digests(digest_cfg), is_callback=True):
+                return
         enabled = await db.toggle_digest_enabled(call.message.chat.id, "hlp_daily")
         state_lbl = "ON" if enabled else "OFF"
         await call.answer(_t(lang, "vault_report_daily_toggled").format(state=state_lbl))
@@ -1590,13 +1916,23 @@ async def cb_calc_exit(call: CallbackQuery, state: FSMContext):
     await state.set_state(CalcStates.sl)
     await call.answer()
 
-@router.callback_query(F.data == "cb_share_pnl_menu")
+@router.callback_query(F.data.startswith("cb_share_pnl_menu"))
 async def cb_share_pnl_menu(call: CallbackQuery):
-    await call.answer("Loading...")
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "share_pnl", "billing_feature_share_pnl", is_callback=True):
+        return
+
+    await call.answer("Loading...")
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
         return
+
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) >= 2 and parts[1] else "trading"
+    try:
+        page = int(parts[2]) if len(parts) >= 3 else 0
+    except Exception:
+        page = 0
         
     kb = InlineKeyboardBuilder()
     
@@ -1627,23 +1963,40 @@ async def cb_share_pnl_menu(call: CallbackQuery):
             sign = "+" if upnl >= 0 else "-"
             label = f"{sym} {sign}${pretty_float(abs(upnl), 0)}"
             
-            kb.button(text=label, callback_data=f"cb_share_pnl:{sym}")
+            kb.button(text=label, callback_data=f"cb_share_pnl:{context}:{page}:{sym}")
             
     if not has_pos:
         await call.answer("No open positions to share.", show_alert=True)
         return
         
-    kb.button(text=_t(lang, "btn_back"), callback_data="cb_positions:0")
+    kb.button(text=_t(lang, "btn_back"), callback_data=f"cb_positions:{context}:{page}")
     kb.adjust(2) # 2 per row
     
     await smart_edit(call, _t(lang, "select_pos"), reply_markup=kb.as_markup())
 
 @router.callback_query(F.data.startswith("cb_share_pnl:"))
 async def cb_share_pnl(call: CallbackQuery):
-    symbol = call.data.split(":")[1]
-    await call.answer(f"Generating card for {symbol}...")
-    
+    parts = call.data.split(":")
+    if len(parts) >= 4:
+        context = parts[1]
+        try:
+            page = int(parts[2])
+        except Exception:
+            page = 0
+        symbol = parts[3]
+    else:
+        context = "trading"
+        page = 0
+        symbol = parts[1]
+
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "share_pnl", "billing_feature_share_pnl", is_callback=True):
+        return
+    if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_SHARE_PNL, "share_pnl_daily", "billing_feature_share_pnl_daily", is_callback=True):
+        return
+
+    await call.answer(f"Generating card for {symbol}...")
+
     wallets = await db.list_wallets(call.message.chat.id)
     ws = getattr(call.message.bot, "ws_manager", None)
     
@@ -1702,7 +2055,7 @@ async def cb_share_pnl(call: CallbackQuery):
     try:
         buf = await render_html_to_image("pnl_card.html", pnl_data)
         photo = BufferedInputFile(buf.read(), filename=f"pnl_{data['symbol']}.png")
-        await smart_edit_media(call, photo, f"🚀 <b>{data['symbol']} Position</b>", reply_markup=_back_kb(lang, "cb_positions:0"))
+        await smart_edit_media(call, photo, f"🚀 <b>{data['symbol']} Position</b>", reply_markup=_back_kb(lang, f"cb_positions:{context}:{page}"))
     except Exception as e:
         logger.error(f"Error rendering PnL card: {e}")
         await call.message.answer("❌ Error generating image.")
@@ -1863,9 +2216,124 @@ async def cb_settings(call: CallbackQuery):
     await smart_edit(call, _t(lang, "settings_title"), reply_markup=_settings_kb(lang))
     await call.answer()
 
+
+@router.callback_query(F.data == "cb_billing")
+async def cb_billing(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    text, kb = await _build_billing_ui(call.message.chat.id, lang)
+    await smart_edit(call, text, reply_markup=kb)
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("bill_buy:"))
+async def cb_billing_buy(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    _, plan, months_str = call.data.split(":")
+    months = int(months_str)
+    plan = normalize_plan(plan)
+    amount = get_plan_star_price(plan, months)
+    if amount <= 0:
+        await call.answer("Stars price is not configured.", show_alert=True)
+        return
+
+    await call.message.bot.send_invoice(
+        chat_id=call.message.chat.id,
+        title=_t(lang, "billing_invoice_title", plan=get_plan_title(plan, lang)),
+        description=_t(lang, "billing_invoice_desc", plan=get_plan_title(plan, lang), months=months),
+        payload=_build_stars_invoice_payload(call.message.chat.id, plan, months),
+        currency="XTR",
+        prices=[LabeledPrice(label=f"{get_plan_title(plan, lang)} {months}M", amount=amount)],
+        provider_token=""
+    )
+    await call.answer()
+
+
+
+
+@router.pre_checkout_query()
+async def on_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
+    payload = _parse_stars_invoice_payload(pre_checkout_query.invoice_payload)
+    if not payload:
+        await pre_checkout_query.answer(ok=False, error_message="Invalid billing payload.")
+        return
+
+    payload_user_id, plan, months = payload
+    expected_amount = get_plan_star_price(plan, months)
+    if payload_user_id != pre_checkout_query.from_user.id or expected_amount <= 0 or int(pre_checkout_query.total_amount) != expected_amount:
+        await pre_checkout_query.answer(ok=False, error_message="Invoice validation failed.")
+        return
+
+    await pre_checkout_query.answer(ok=True)
+
+
+@router.message(F.successful_payment)
+async def on_successful_payment(message: Message):
+    payment = message.successful_payment
+    if not payment:
+        return
+
+    payload = _parse_stars_invoice_payload(payment.invoice_payload)
+    if not payload:
+        return
+
+    lang = await db.get_lang(message.chat.id)
+    payload_user_id, plan, months = payload
+    if payload_user_id != message.chat.id:
+        return
+
+    inserted = await db.record_billing_payment({
+        "user_id": message.chat.id,
+        "plan": plan,
+        "months": months,
+        "currency": payment.currency,
+        "total_amount": int(payment.total_amount),
+        "telegram_payment_charge_id": payment.telegram_payment_charge_id,
+        "provider_payment_charge_id": getattr(payment, "provider_payment_charge_id", ""),
+        "invoice_payload": payment.invoice_payload,
+        "created_at": int(time.time()),
+        "source": "telegram_stars",
+    })
+    if not inserted:
+        return
+
+    active_until = await db.activate_billing_subscription(message.chat.id, plan, months, source="telegram_stars")
+    until_text = datetime.datetime.utcfromtimestamp(active_until).strftime("%Y-%m-%d")
+    await message.answer(
+        _t(lang, "billing_payment_success", plan=get_plan_title(plan, lang), months=months, date=until_text),
+        parse_mode="HTML"
+    )
+
+
+@router.callback_query(F.data.startswith("bill_test:"))
+async def cb_billing_test(call: CallbackQuery):
+    if call.message.chat.id not in TEST_BILLING_ADMIN_IDS:
+        await call.answer("Forbidden", show_alert=True)
+        return
+
+    lang = await db.get_lang(call.message.chat.id)
+    parts = call.data.split(":")
+    action = parts[1]
+
+    if action == "set":
+        plan = normalize_plan(parts[2] if len(parts) > 2 else "free")
+        await db.set_billing_subscription(call.message.chat.id, plan, months=None, source="manual_test")
+        await call.answer(_t(lang, "billing_plan_set", plan=get_plan_title(plan, lang)), show_alert=True)
+    elif action == "reset_usage":
+        await db.reset_daily_usage(call.message.chat.id)
+        await call.answer(_t(lang, "billing_usage_reset"), show_alert=True)
+    else:
+        await call.answer("Unsupported", show_alert=True)
+        return
+
+    text, kb = await _build_billing_ui(call.message.chat.id, lang)
+    await smart_edit(call, text, reply_markup=kb)
+
 @router.callback_query(F.data == "cb_digest_settings_menu")
 async def cb_digest_settings_menu(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "digests", "billing_feature_digests", is_callback=True):
+        return
+
     text, kb = await _build_digest_settings_ui(call.message.chat.id, lang)
     await smart_edit(call, text, reply_markup=kb)
     await call.answer()
@@ -1873,10 +2341,18 @@ async def cb_digest_settings_menu(call: CallbackQuery):
 @router.callback_query(F.data.startswith("dg_toggle:"))
 async def cb_digest_toggle(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "digests", "billing_feature_digests", is_callback=True):
+        return
+
     target = call.data.split(":", 1)[1]
     if target not in DIGEST_TARGETS:
         await call.answer("Invalid digest")
         return
+    cfg = await db.get_digest_settings(call.message.chat.id)
+    current_enabled = bool(cfg.get(target, {}).get("enabled", False))
+    if not current_enabled:
+        if not await _ensure_billing_digest_slot(call, call.message.chat.id, lang, _count_enabled_digests(cfg), is_callback=True):
+            return
     enabled = await db.toggle_digest_enabled(call.message.chat.id, target)
     state_lbl = "ON" if enabled else "OFF"
     await call.answer(_t(lang, "digest_toggle_done").format(state=state_lbl))
@@ -1886,6 +2362,9 @@ async def cb_digest_toggle(call: CallbackQuery):
 @router.callback_query(F.data.startswith("dg_set_time:"))
 async def cb_digest_set_time(call: CallbackQuery, state: FSMContext):
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "digests", "billing_feature_digests", is_callback=True):
+        return
+
     target = call.data.split(":", 1)[1]
     if target not in DIGEST_TARGETS:
         await call.answer("Invalid digest")
@@ -1955,13 +2434,13 @@ async def cb_wallets_menu(call: CallbackQuery):
         kb.button(text=_t(lang, "btn_back"), callback_data="cb_settings")
         kb.adjust(1)
         await call.message.edit_text(
-            f"📭 {_t(lang, 'need_wallet')}",
+            _t(lang, "need_wallet"),
             reply_markup=kb.as_markup(),
             parse_mode="HTML"
         )
         return
 
-    text = f"👛 <b>{_t(lang, 'btn_wallets')}</b>\n\n"
+    text = f"<b>{_t(lang, 'btn_wallets')}</b>\n\n"
     kb = InlineKeyboardBuilder()
     
     for w in wallets:
@@ -2065,6 +2544,10 @@ async def cb_set_quick_alert(call: CallbackQuery):
     target = float(parts[3])
     
     lang = await db.get_lang(call.message.chat.id)
+    alerts = await db.get_user_alerts(call.message.chat.id)
+    if not await _ensure_billing_quota(call, call.message.chat.id, lang, "alerts", len(alerts), "billing_feature_alerts", is_callback=True):
+        return
+
     await db.add_price_alert(call.message.chat.id, symbol, target, direction)
     
     await call.answer(_t(lang, "alert_added", symbol=symbol, dir=direction, price=pretty_float(target)), show_alert=True)
@@ -2083,6 +2566,11 @@ async def cmd_watch(message: Message):
     if len(symbol) > 10 or not symbol.isalnum():
         await message.answer(_t(lang, "watch_invalid"))
         return
+
+    watchlist = await db.get_watchlist(message.chat.id)
+    if symbol not in watchlist:
+        if not await _ensure_billing_quota(message, message.chat.id, lang, "watchlist", len(watchlist), "billing_feature_watchlist"):
+            return
 
     await db.add_watch_symbol(message.chat.id, symbol)
     
@@ -2191,8 +2679,11 @@ async def cb_market(call: CallbackQuery):
 
 @router.callback_query(F.data == "cb_market_overview")
 async def cb_market_overview(call: CallbackQuery, state: FSMContext):
-    await call.answer("Generating Market Insights...")
     lang = await db.get_lang(call.message.chat.id)
+    if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs", is_callback=True):
+        return
+
+    await call.answer("Generating Market Insights...")
     
     # Fetch market data
     ctx, hlp_info = await asyncio.gather(
@@ -2656,6 +3147,11 @@ async def cb_market_alerts(call: CallbackQuery):
 @router.callback_query(F.data == "cb_add_market_alert_time")
 async def cb_add_market_alert_time(call: CallbackQuery, state: FSMContext):
     lang = await db.get_lang(call.message.chat.id)
+    billing_state = await _get_billing_state(call.message.chat.id)
+    current_reports = billing_state["counts"]["market_reports"]
+    if not await _ensure_billing_quota(call, call.message.chat.id, lang, "market_reports", current_reports, "billing_feature_market_reports", is_callback=True):
+        return
+
     await state.update_data(menu_msg_id=call.message.message_id)
     
     kb = InlineKeyboardBuilder()
@@ -2836,6 +3332,10 @@ async def process_alert_target(message: Message, state: FSMContext):
     symbol = data.get("symbol")
     a_type = data.get("alert_type")
     msg_id = data.get("menu_msg_id")
+
+    alerts = await db.get_user_alerts(message.chat.id)
+    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(alerts), "billing_feature_alerts"):
+        return
     
     # Determine direction
     ctx = await get_perps_context()
@@ -3249,7 +3749,7 @@ async def cb_whales(call: CallbackQuery):
     wl_only = user_settings.get("whale_watchlist_only", False)
     
     status = _t(lang, "whale_alerts_on") if is_on else _t(lang, "whale_alerts_off")
-    wl_status = f"👁️ Watchlist Only: ON" if wl_only else _t(lang, "whales_all_assets")
+    wl_status = _t(lang, "whale_watchlist_only_on") if wl_only else _t(lang, "whales_all_assets")
     
     text = f"{_t(lang, 'whales_title')}\n\n"
     text += _t(lang, "whale_intro") + "\n\n"
@@ -3323,7 +3823,7 @@ async def cb_fear_greed(call: CallbackQuery):
     text += f"<i>Source: Alternative.me Crypto Fear & Greed Index</i>"
     
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 " + _t(lang, "btn_refresh"), callback_data="cb_fear_greed")
+    kb.button(text=_t(lang, "btn_refresh"), callback_data="cb_fear_greed")
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
     kb.adjust(1)
 
@@ -3562,6 +4062,8 @@ async def cmd_set_prox(message: Message):
 @router.callback_query(F.data == "cb_flex_menu")
 async def cb_flex_menu(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "flex", "billing_feature_flex", is_callback=True):
+        return
     
     kb = InlineKeyboardBuilder()
     kb.button(text=_t(lang, "flex_period_day"), callback_data="cb_flex_gen:day")
@@ -3575,10 +4077,12 @@ async def cb_flex_menu(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("cb_flex_gen:"))
 async def cb_flex_gen(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "flex", "billing_feature_flex", is_callback=True):
+        return
+
     period = call.data.split(":")[1]
     await call.answer("Generating...")
-    
-    lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     
     if not wallets:
@@ -3719,11 +4223,14 @@ async def cb_flex_gen(call: CallbackQuery):
 
 @router.callback_query(F.data == "cb_terminal")
 async def cb_terminal(call: CallbackQuery):
-    await call.answer("Loading Terminal...")
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "terminal", "billing_feature_terminal", is_callback=True):
+        return
+
+    await call.answer("Loading Terminal...")
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await call.message.answer("No wallet tracked.")
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:overview"))
         return
 
     ws = getattr(call.message.bot, "ws_manager", None)
@@ -3855,7 +4362,7 @@ async def cb_terminal(call: CallbackQuery):
         caption = "🖥️ <b>Velox Terminal</b>"
         if len(wallets) > 1: caption += f" ({len(wallets)} wallets)"
         
-        await smart_edit_media(call, photo, caption, reply_markup=_main_menu_kb(lang))
+        await smart_edit_media(call, photo, caption, reply_markup=_back_kb(lang, "sub:overview"))
     except Exception as e:
         logger.error(f"Error rendering terminal: {e}")
         await call.message.answer("❌ Error generating terminal.")
@@ -4282,7 +4789,7 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
         img_msg = await bot.send_photo(
              chat_id=chat_id,
              photo=BufferedInputFile(img_buf.read(), filename="overview.png"),
-             caption=f"{header}\n\n🧠 <b>Velox AI Intelligence</b>",
+             caption=f"{header}\n\n🧠 <b>Velox Insight</b>",
              parse_mode="HTML"
         )
         
@@ -4329,14 +4836,22 @@ async def cb_ai_cleanup(call: CallbackQuery, state: FSMContext):
         except Exception as e:
             logger.debug(f"AI cleanup delete failed for {mid}: {e}")
     await state.update_data(ai_overview_msg_ids=None)
-    await cb_sub_market(call)
+    await cb_sub_overview(call)
 
 @router.message(Command("overview"))
 async def cmd_overview(message: Message):
+    lang = await db.get_lang(message.chat.id)
+    if not await _consume_billing_usage(message, message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs"):
+        return
+
     await _send_ai_overview(message.bot, message.chat.id, message.from_user.id)
 
 @router.callback_query(F.data == "cb_market_overview_refresh")
 async def cb_market_overview_refresh(call: CallbackQuery, state: FSMContext):
+    lang = await db.get_lang(call.message.chat.id)
+    if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs", is_callback=True):
+        return
+
     await call.answer()
     # Clean up previous messages first if they exist
     data = await state.get_data()
@@ -4347,50 +4862,28 @@ async def cb_market_overview_refresh(call: CallbackQuery, state: FSMContext):
         except Exception as e:
             logger.debug(f"AI refresh cleanup delete failed for {mid}: {e}")
             
-    lang = await db.get_lang(call.message.chat.id)
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
     status_msg = await call.message.answer(_t(lang, "ai_generating"), reply_markup=kb.as_markup(), parse_mode="HTML")
     await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg)
 
 @router.message(Command("overview_settings"))
 async def cmd_overview_settings(message: Message):
     lang = await db.get_lang(message.chat.id)
+    if not await _ensure_billing_feature(message, message.chat.id, lang, "advanced_ai_settings", "billing_feature_ai_settings"):
+        return
+
     cfg = await db.get_overview_settings(message.from_user.id)
-    
-    prompt_status = "✅ Custom" if cfg.get('prompt_override') else "❌ Default"
-    
-    text = (
-        f"⚙️ <b>{_t(lang, 'market_title')} - {_t(lang, 'settings_title')}</b>\n\n"
-        f"<b>Status:</b> {'✅ Enabled' if cfg['enabled'] else '🔴 Disabled'}\n"
-        f"<b>Prompt:</b> {prompt_status}\n\n"
-        f"<b>Schedule (UTC):</b>"
-    )
-    
-    kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text=_t(lang, "ov_btn_toggle"), callback_data="ov_toggle"))
-    
-    # List times
-    schedules = cfg.get("schedules", [])
-    if not schedules:
-        text += "\n<i>No scheduled times.</i>"
-    else:
-        for t in sorted(schedules):
-            kb.row(InlineKeyboardButton(text=f"❌ {t}", callback_data=f"ov_del_time:{t}"))
-            text += f"\n• {t}"
-            
-    kb.row(
-        InlineKeyboardButton(text="➕ Add Time", callback_data="ov_add_time"),
-        InlineKeyboardButton(text="📝 Set Prompt", callback_data="ov_prompt")
-    )
-    
-    await message.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    text, kb = _build_overview_settings_ui(lang, cfg, include_back=False)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @router.callback_query(F.data.startswith("ov_"))
 async def cb_overview_settings(call: CallbackQuery, state: FSMContext):
     action = call.data
     user_id = call.from_user.id
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "advanced_ai_settings", "billing_feature_ai_settings", is_callback=True):
+        return
     
     if action == "ov_add_time":
         await state.update_data(menu_msg_id=call.message.message_id)
@@ -4416,79 +4909,34 @@ async def cb_overview_settings(call: CallbackQuery, state: FSMContext):
             cfg["schedules"].remove(t)
             
     await db.update_overview_settings(user_id, cfg)
-    
-    # Refresh message
-    prompt_status = "✅ Custom" if cfg.get('prompt_override') else "❌ Default"
-    text = (
-        f"⚙️ <b>{_t(lang, 'market_title')} - {_t(lang, 'settings_title')}</b>\n\n"
-        f"<b>Status:</b> {'✅ Enabled' if cfg['enabled'] else '🔴 Disabled'}\n"
-        f"<b>Prompt:</b> {prompt_status}\n\n"
-        f"<b>Schedule (UTC):</b>"
-    )
-    
-    kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text=_t(lang, "ov_btn_toggle"), callback_data="ov_toggle"))
-    
-    schedules = cfg.get("schedules", [])
-    if not schedules:
-        text += "\n<i>No scheduled times.</i>"
-    else:
-        for t in sorted(schedules):
-            kb.row(InlineKeyboardButton(text=f"❌ {t}", callback_data=f"ov_del_time:{t}"))
-            text += f"\n• {t}"
-            
-    kb.row(
-        InlineKeyboardButton(text="➕ Add Time", callback_data="ov_add_time"),
-        InlineKeyboardButton(text="📝 Set Prompt", callback_data="ov_prompt")
-    )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
+    text, kb = _build_overview_settings_ui(lang, cfg)
 
     try:
-        await call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     except Exception as e:
         logger.debug(f"Overview settings edit failed: {e}")
     await call.answer()
 
 @router.callback_query(F.data == "cb_overview_settings_menu")
 async def cb_overview_settings_menu(call: CallbackQuery):
-    await call.answer()
     lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "advanced_ai_settings", "billing_feature_ai_settings", is_callback=True):
+        return
+
+    await call.answer()
     cfg = await db.get_overview_settings(call.from_user.id)
-    
-    prompt_status = "✅ Custom" if cfg.get('prompt_override') else "❌ Default"
-    
-    text = (
-        f"⚙️ <b>{_t(lang, 'market_title')} - {_t(lang, 'settings_title')}</b>\n\n"
-        f"<b>Status:</b> {'✅ Enabled' if cfg['enabled'] else '🔴 Disabled'}\n"
-        f"<b>Prompt:</b> {prompt_status}\n\n"
-        f"<b>Schedule (UTC):</b>"
-    )
-    
-    kb = InlineKeyboardBuilder()
-    kb.row(InlineKeyboardButton(text=_t(lang, "ov_btn_toggle"), callback_data="ov_toggle"))
-    
-    schedules = cfg.get("schedules", [])
-    if not schedules:
-        text += "\n<i>No scheduled times.</i>"
-    else:
-        for t in sorted(schedules):
-            kb.row(InlineKeyboardButton(text=f"❌ {t}", callback_data=f"ov_del_time:{t}"))
-            text += f"\n• {t}"
-            
-    kb.row(
-        InlineKeyboardButton(text="➕ Add Time", callback_data="ov_add_time"),
-        InlineKeyboardButton(text="📝 Set Prompt", callback_data="ov_prompt")
-    )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
-    
-    await smart_edit(call, text, reply_markup=kb.as_markup())
+    text, kb = _build_overview_settings_ui(lang, cfg)
+    await smart_edit(call, text, reply_markup=kb)
 
 @router.callback_query(F.data == "cb_ai_overview_menu")
 async def cb_ai_overview_menu(call: CallbackQuery):
-    await call.answer()
     lang = await db.get_lang(call.message.chat.id)
+    if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs", is_callback=True):
+        return
+
+    await call.answer()
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
     status_msg = await call.message.answer(_t(lang, "ai_generating"), reply_markup=kb.as_markup(), parse_mode="HTML")
     await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg)
 
@@ -4548,11 +4996,19 @@ async def _hedge_settings_render(call: CallbackQuery, user_id: int):
 
 @router.callback_query(F.data == "cb_hedge_settings_menu")
 async def cb_hedge_settings_menu(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "advanced_ai_settings", "billing_feature_ai_settings", is_callback=True):
+        return
+
     await _hedge_settings_render(call, call.message.chat.id)
     await call.answer()
 
 @router.callback_query(F.data.startswith("hedge_toggle"))
 async def cb_hedge_toggle(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_feature(call, call.message.chat.id, lang, "advanced_ai_settings", "billing_feature_ai_settings", is_callback=True):
+        return
+
     user_id = call.message.chat.id
     cfg = await db.get_hedge_settings(user_id)
     
@@ -4571,11 +5027,11 @@ async def cb_hedge_toggle(call: CallbackQuery):
 async def cb_hedge_chat_start(call: CallbackQuery, state: FSMContext):
     lang = await db.get_lang(call.message.chat.id)
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
     
-    text = "🛡️ <b>Velox Hedge Chat</b>\n\nI am your AI risk manager. I have full context of your portfolio, watchlist, and latest market news.\n\nHow can I help you today?"
+    text = "🛡️ <b>Velox Assistant</b>\n\nI’m your market and risk assistant. I have context on your portfolio, watchlist, and current market conditions.\n\nHow can I help you today?"
     if lang == "ru":
-        text = "🛡️ <b>Velox Hedge Chat</b>\n\nЯ твой ИИ риск-менеджер. У меня есть полный контекст твоего портфеля, вотчлиста и последних новостей рынка.\n\nЧем я могу помочь сегодня?"
+        text = "🛡️ <b>Velox Assistant</b>\n\nЯ твой помощник по рынку и риск-менеджменту. У меня есть контекст по твоему портфелю, вотчлисту и текущей ситуации на рынке.\n\nЧем я могу помочь сегодня?"
         
     await smart_edit(call, text, reply_markup=kb.as_markup())
     await state.set_state(HedgeChatStates.chatting)
@@ -4587,6 +5043,9 @@ async def cb_hedge_chat_start(call: CallbackQuery, state: FSMContext):
 @router.message(HedgeChatStates.chatting, ~F.text.startswith("/"))
 async def process_hedge_chat(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
+    if not await _consume_billing_usage(message, message.chat.id, lang, BILLING_USAGE_ASSISTANT, "assistant_messages_daily", "billing_feature_assistant_messages"):
+        return
+
     data = await state.get_data()
     history = data.get("history", [])
     
@@ -4636,7 +5095,7 @@ async def process_hedge_chat(message: Message, state: FSMContext):
     await state.update_data(history=history)
     
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_back"), callback_data="cb_menu")
+    kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
     
     await message.answer(disp_response, reply_markup=kb.as_markup(), parse_mode="HTML")
 
@@ -4685,7 +5144,7 @@ async def _send_hedge_insight(bot, chat_id, user_id, context_type, event_data, r
             disp_comment = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', disp_comment)
             disp_comment = re.sub(r'\*(.*?)\*', r'<i>\1</i>', disp_comment)
 
-            text = f"🛡️ <b>Velox AI:</b>\n{disp_comment}"
+            text = f"🛡️ <b>Velox Assistant:</b>\n{disp_comment}"
             
             await bot.send_message(
                 chat_id=chat_id,

@@ -15,6 +15,7 @@ class Database:
         self.alerts = self.db.alerts  # New collection for price alerts
         self.wallet_states = self.db.wallet_states  # Tracks last update times
         self.vault_snapshots = self.db.vault_snapshots  # Historical vault equity snapshots
+        self.billing_payments = self.db.billing_payments
 
     async def init_db(self):
         """Initialize database indexes for performance and integrity."""
@@ -29,6 +30,8 @@ class Database:
         await self.alerts.create_index([("symbol", 1)])
         await self.vault_snapshots.create_index([("user_id", 1), ("wallet", 1), ("vault_address", 1), ("snapshot_day", 1)], unique=True)
         await self.vault_snapshots.create_index([("snapshot_ts", -1)])
+        await self.billing_payments.create_index([("telegram_payment_charge_id", 1)], unique=True)
+        await self.billing_payments.create_index([("user_id", 1), ("created_at", -1)])
 
     async def add_user(self, user_id, wallet_address=None):
         existing = await self.users.find_one({"user_id": user_id})
@@ -245,14 +248,116 @@ class Database:
         user = await self.users.find_one({"user_id": user_id})
         return user if user else {}
 
+    # --- BILLING / USAGE ---
+    async def get_billing_subscription(self, user_id: int) -> dict:
+        user = await self.users.find_one({"user_id": user_id}, {"billing": 1})
+        billing = user.get("billing", {}) if user else {}
+        if not isinstance(billing, dict):
+            billing = {}
+
+        plan = str(billing.get("plan", "free") or "free").lower()
+        active_until = billing.get("active_until")
+        source = billing.get("source", "free")
+        updated_at = int(billing.get("updated_at", 0) or 0)
+
+        if plan != "free" and active_until and float(active_until) < time.time():
+            plan = "free"
+            active_until = None
+
+        return {
+            "plan": plan,
+            "active_until": active_until,
+            "source": source,
+            "updated_at": updated_at,
+        }
+
+    async def set_billing_subscription(self, user_id: int, plan: str, months: int | None = None, source: str = "manual"):
+        plan = str(plan or "free").lower()
+        active_until = None
+        if plan != "free" and months:
+            active_until = int(time.time() + (int(months) * 30 * 24 * 60 * 60))
+
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "billing.plan": plan,
+                "billing.active_until": active_until,
+                "billing.source": source,
+                "billing.updated_at": int(time.time()),
+            }},
+            upsert=True
+        )
+
+    async def activate_billing_subscription(self, user_id: int, plan: str, months: int, source: str = "stars"):
+        current = await self.get_billing_subscription(user_id)
+        now_ts = int(time.time())
+        base_ts = max(now_ts, int(current.get("active_until") or 0))
+        active_until = base_ts + (int(months) * 30 * 24 * 60 * 60)
+
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "billing.plan": str(plan or "free").lower(),
+                "billing.active_until": active_until,
+                "billing.source": source,
+                "billing.updated_at": now_ts,
+            }},
+            upsert=True
+        )
+        return active_until
+
+    async def record_billing_payment(self, payment_data: dict) -> bool:
+        try:
+            await self.billing_payments.insert_one(payment_data)
+            return True
+        except DuplicateKeyError:
+            return False
+
+    async def get_daily_usage(self, user_id: int) -> dict:
+        user = await self.users.find_one({"user_id": user_id}, {"usage_daily": 1})
+        usage = user.get("usage_daily", {}) if user else {}
+        if not isinstance(usage, dict):
+            return {"date": time.strftime("%Y-%m-%d", time.gmtime()), "counts": {}}
+
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        if usage.get("date") != today or not isinstance(usage.get("counts"), dict):
+            return {"date": today, "counts": {}}
+
+        return {"date": today, "counts": usage.get("counts", {})}
+
+    async def increment_daily_usage(self, user_id: int, key: str, amount: int = 1) -> int:
+        usage = await self.get_daily_usage(user_id)
+        counts = dict(usage.get("counts", {}))
+        counts[key] = int(counts.get(key, 0) or 0) + int(amount)
+
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "usage_daily.date": usage["date"],
+                "usage_daily.counts": counts,
+            }},
+            upsert=True
+        )
+        return counts[key]
+
+    async def reset_daily_usage(self, user_id: int):
+        await self.users.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "usage_daily.date": time.strftime("%Y-%m-%d", time.gmtime()),
+                "usage_daily.counts": {},
+            }},
+            upsert=True
+        )
+
     # --- DIGEST SETTINGS ---
     def _digest_defaults(self) -> dict:
         return {
-            "portfolio_daily": {"enabled": True, "time": "09:00"},
-            "portfolio_weekly": {"enabled": True, "time": "23:59", "day_of_week": "sun"},
-            "hlp_daily": {"enabled": True, "time": "09:05"},
-            "vault_weekly": {"enabled": True, "time": "23:50", "day_of_week": "sun"},
-            "vault_monthly": {"enabled": True, "time": "00:20", "day": 1}
+            "portfolio_daily": {"enabled": False, "time": "09:00"},
+            "portfolio_weekly": {"enabled": False, "time": "23:59", "day_of_week": "sun"},
+            "hlp_daily": {"enabled": False, "time": "09:05"},
+            "vault_weekly": {"enabled": False, "time": "23:50", "day_of_week": "sun"},
+            "vault_monthly": {"enabled": False, "time": "00:20", "day": 1}
         }
 
     async def get_digest_settings(self, user_id: int) -> dict:

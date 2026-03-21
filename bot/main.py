@@ -52,10 +52,12 @@ async def main():
         BotCommand(command="help", description="Show Commands"),
         BotCommand(command="status", description="Delta-Neutral Dashboard"),
         BotCommand(command="add_wallet", description="Track Wallet"),
-        BotCommand(command="overview", description="Hedge AI Market Overview"),
+        BotCommand(command="overview", description="Velox Market Overview"),
         BotCommand(command="funding", description="Funding Log"),
         BotCommand(command="alert", description="Price Alert"),
         BotCommand(command="watch", description="Watchlist"),
+        BotCommand(command="billing", description="Plans & Limits"),
+        BotCommand(command="paysupport", description="Payment Support"),
         BotCommand(command="export", description="Export CSV"),
     ]
     await bot.set_my_commands(commands)

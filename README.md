@@ -86,7 +86,7 @@ Instead of relying solely on Telegram text, Velox generates UI components locall
 
 ---
 
-## 🧠 5. The RAG AI Ecosystem (Gemini 1.5 Flash)
+## 🧠 5. The RAG AI Ecosystem (gemini-3.1-flash-lite-preview)
 
 Velox uses a highly advanced, multi-tiered Prompt Engineering setup using Google's Gemini API.
 
@@ -96,11 +96,11 @@ Triggered via `/overview` or cron jobs (Morning/Evening schedules).
     *   **Farside ETF Scraper**: Uses BeautifulSoup to parse HTML from `farside.co.uk/btc/` and `eth/`, finding the exact daily flow in millions.
     *   **Hyperliquid Stats**: Calculates 24h Global Volume and Total Open Interest.
     *   **Fear & Greed Index**: REST call to `alternative.me`.
-2.  **News Agent (Google Grounding)**: 
-    *   Fires a distinct prompt asking Gemini to "Search Google for the latest 24h crypto news related to [Top Gainers, BTC, ETH]".
+2.  **News Agent (Google Search Tooling)**: 
+    *   Fires a distinct prompt using the `google_search` tool to ground responses in current crypto events.
     *   Also ingests 13 hardcoded RSS feeds (CoinDesk, The Block, Decrypt, etc.) utilizing `feedparser`.
 3.  **Synthesis (Hedge Agent)**: 
-    *   Receives the numerical data + the text digest.
+    *   Receives the numerical data + the text digest with `groundingMetadata` for source transparency.
     *   Prompt explicitly demands a 500-char summary, a single-word sentiment (BULLISH/BEARISH/NEUTRAL/EXPLOSIVE), and the "next_event" to watch.
 
 ### B. Velox Assistant (Hedge Insight)
@@ -188,9 +188,19 @@ Velox uses `AsyncIOScheduler` located in `bot/scheduler.py` to manage background
 ## 💳 10. Billing Limits & Quota Logic (`billing.py`)
 
 Velox enforces hard quotas per subscription tier. 
-*   **Free Tier**: 1 Wallet, 7 Watchlist items, 5 Active Alerts, 3 `/overview` runs per day, 10 AI Assistant Insights per day. (Terminal Visuals: OFF).
-*   **Pro Tier ($12 or 850 Telegram Stars)**: 3 Wallets, 30 Alerts, 80 AI Insights/day. (Terminal Visuals: ON).
-*   **Pro+ Tier ($24 or 1700 Telegram Stars)**: 10 Wallets, 120 Alerts, 400 AI Insights/day. (Terminal Visuals: ON).
+
+| Feature | **Free** | **Pro ($12 / 850⭐)** | **Pro+ ($24 / 1700⭐)** |
+| :--- | :---: | :---: | :---: |
+| **Tracked Wallets** | 1 | 3 | 10 |
+| **Watchlist Symbols** | 7 | 30 | 150 |
+| **Active Alerts** | 5 | 30 | 120 |
+| **Market Reports Slots** | 1 | 4 | 12 |
+| **Daily Overview Runs** | 3 | 25 | 120 |
+| **Daily AI Assistant Messages** | 10 | 80 | 400 |
+| **Automated Digest Slots** | 0 | 3 | 5 |
+| **Terminal Visuals** | ❌ | ✅ | ✅ |
+| **CSV Exports** | ❌ | ✅ | ✅ |
+| **Shareable PnL Cards** | ❌ | ✅ | ✅ |
 
 *Usage tracking resets automatically every day based on UTC timestamps stored in `usage_daily`.*
 

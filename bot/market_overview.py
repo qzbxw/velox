@@ -412,7 +412,7 @@ class MarketOverview:
 
     async def fetch_news_with_search(self, timeframe: str = "24h", topics: list = None) -> str:
         """
-        News Agent: Collects fresh crypto news via Google Search grounding.
+        News Agent: Collects fresh crypto news via Google Search tool.
         Returns: Structured news summary from Google Search
         """
         if topics is None:
@@ -420,7 +420,7 @@ class MarketOverview:
 
         topic_str = ", ".join(topics)
 
-        prompt = f"""You are a News Agent. Search Google for the latest {timeframe} crypto news related to: {topic_str}.
+        prompt = f"""You are a News Agent. Search for the latest {timeframe} crypto news related to: {topic_str}.
 
 Focus on:
 - Major price movements and market events
@@ -429,20 +429,13 @@ Focus on:
 - Institutional activity (ETFs, large purchases)
 - Technical developments
 
-Provide a concise summary (max 500 words) with key bullet points."""
+Provide a concise summary with key bullet points."""
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "tools": [{
-                "googleSearchRetrieval": {
-                    "dynamicRetrievalConfig": {
-                        "mode": "MODE_DYNAMIC",
-                        "dynamicThreshold": 0.7
-                    }
-                }
-            }],
+            "tools": [{"google_search": {}}],
             "generationConfig": {
-                "temperature": 0.3,
+                "temperature": 0.0,
                 "maxOutputTokens": 1024
             }
         }
@@ -452,13 +445,14 @@ Provide a concise summary (max 500 words) with key bullet points."""
                 async with session.post(self.news_agent_url, json=payload, timeout=25) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        candidate = data["candidates"][0]
+                        text = candidate["content"]["parts"][0]["text"].strip()
 
-                        # Extract grounding metadata if available
-                        grounding_meta = data.get("candidates", [{}])[0].get("groundingMetadata", {})
-                        sources = grounding_meta.get("groundingChunks", [])
-
-                        logger.info(f"News Agent found {len(sources)} sources")
+                        # Extract grounding metadata if available for transparency
+                        grounding_meta = candidate.get("groundingMetadata", {})
+                        if grounding_meta:
+                            logger.info(f"News Agent received groundingMetadata with {len(grounding_meta.get('groundingChunks', []))} chunks")
+                            
                         return text
                     else:
                         error_text = await resp.text()
@@ -476,67 +470,56 @@ Provide a concise summary (max 500 words) with key bullet points."""
                              style: str = "detailed",
                              lang: str = "en") -> dict:
         """
-        Hedge Agent: RAG system that combines market data + fresh news from News Agent.
-
-        Flow:
-        1. News Agent collects fresh crypto news via Google Search
-        2. Hedge Agent analyzes market data + news and generates final response
+        Hedge Agent: RAG system that combines market data + fresh news.
         """
         target_lang = "Russian" if lang == "ru" else "English"
 
-        # Step 1: Get fresh news from News Agent (with Google Search grounding)
-        logger.info("News Agent: Fetching fresh crypto news...")
+        # Step 1: Get fresh news from News Agent
+        logger.info("News Agent: Fetching grounded crypto news...")
         topics = ["Hyperliquid", "Bitcoin", "Ethereum", "crypto market"]
 
         # Add top gainers/losers to search topics
         if market_data.get('top_gainers'):
             for g in market_data['top_gainers'][:2]:
                 topics.append(g.get('name', ''))
-        if market_data.get('top_losers'):
-            for l in market_data['top_losers'][:2]:
-                topics.append(l.get('name', ''))
-
+        
         fresh_news = await self.fetch_news_with_search(timeframe="24h", topics=topics)
         rss_news = self._format_news_digest(news, limit=10)
         combined_news = f"RSS HEADLINES:\n{rss_news}\n\nSEARCH DIGEST:\n{fresh_news or 'No search digest'}"
 
         # Step 2: Hedge Agent analyzes everything
-        logger.info("Hedge Agent: Analyzing market data + news...")
+        logger.info("Hedge Agent: Generating grounded analysis...")
         prompt = f"""
-        You are HEDGE AI, an institutional AI analyst with RAG capabilities.
-        Analyze the current market state on Hyperliquid L1 using PROVIDED DATA.
+        You are VELOX AI, an institutional analyst. Use the PROVIDED DATA and NEWS to analyze Hyperliquid L1.
 
         PERIOD: {period_name}
         LANGUAGE: {target_lang}
         STYLE: {style}
         {f"USER CUSTOM STYLE: {custom_prompt}" if custom_prompt else ""}
 
-        MARKET DATA (Hyperliquid L1):
+        MARKET DATA:
         - 24h Volume: ${market_data.get('global_volume', 'N/A')}
-        - Total Open Interest: ${market_data.get('total_oi', 'N/A')}
+        - Total OI: ${market_data.get('total_oi', 'N/A')}
         - Top Gainers: {', '.join([f"{g['name']} {g['change']}%" for g in market_data.get('top_gainers', [])[:3]])}
-        - Top Losers: {', '.join([f"{l['name']} {l['change']}%" for l in market_data.get('top_losers', [])[:3]])}
         - ETF Flows: BTC ${market_data.get('etf_flows', {}).get('btc_flow', 0)}M, ETH ${market_data.get('etf_flows', {}).get('eth_flow', 0)}M
 
-        NEWS INTELLIGENCE (Google Search + RSS):
+        NEWS INTELLIGENCE:
         {combined_news}
 
         TASK:
         Synthesize market data + news into actionable intelligence.
 
-        RESPONSE REQUIREMENTS:
-        1. "summary": Sharp analysis connecting market movements to news events (max 500 chars). Use **bold** for key assets/events.
-        2. "sentiment": One word (BULLISH, BEARISH, NEUTRAL, CAUTIOUS, EXPLOSIVE)
-        3. "next_event": What traders should watch next (max 100 chars)
-        4. Professional tone only. No insults, no taunting, no certainty claims like "guaranteed" or "safe".
-
-        OUTPUT: Strictly JSON.
+        RESPONSE REQUIREMENTS (JSON):
+        1. "summary": Sharp analysis connecting market moves to news. Use **bold** for key assets.
+        2. "sentiment": BULLISH, BEARISH, NEUTRAL, CAUTIOUS, or EXPLOSIVE.
+        3. "next_event": Key milestone to watch (max 100 chars).
         """
 
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
+            "tools": [{"google_search": {}}],
             "generationConfig": {
-                "temperature": 0.4,
+                "temperature": 0.2,
                 "response_mime_type": "application/json"
             }
         }

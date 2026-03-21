@@ -586,6 +586,7 @@ def _fmt_signed_pct(rate_decimal: float) -> str:
 def format_dashboard_text(snapshot: dict, lang: str = "ru") -> str:
     t = snapshot.get("totals", {})
     coins = snapshot.get("coins", [])
+    is_ru = str(lang or "ru").lower().startswith("ru")
 
     lines = [
         _t(lang, "delta_dashboard_title"),
@@ -624,50 +625,29 @@ def format_dashboard_text(snapshot: dict, lang: str = "ru") -> str:
 
     for c in coins:
         delta_icon = _delta_icon(_safe_float(c.get("delta_pct", 0)))
-        if is_ru:
-            lines.append(
-                f"• <b>{c['symbol']}</b> | Δ {c.get('delta_qty', 0):+.4f} (${pretty_float(c.get('delta_usd', 0), 2)}, {c.get('delta_pct', 0):.2f}%) {delta_icon}"
-            )
-            lines.append(
-                f"  Spot: {c.get('spot_qty', 0):.4f} (${pretty_float(c.get('spot_value', 0), 2)}) uPnL {pretty_float(c.get('spot_upnl', 0), 2)}"
-            )
-            lines.append(
-                f"  Short: {c.get('short_qty', 0):.4f} (${pretty_float(c.get('short_notional', 0), 2)}) uPnL {pretty_float(c.get('short_upnl', 0), 2)}"
-            )
-            lines.append(
-                f"  Funding: {_fmt_signed_pct_hour(c.get('funding_current', 0))} | 24h {_fmt_signed_pct(c.get('funding_avg_24h', 0))} | 7d {_fmt_signed_pct(c.get('funding_avg_7d', 0))} | 30d {_fmt_signed_pct(c.get('funding_avg_30d', 0))}"
-            )
-            lines.append(
-                f"  APY(7d): {c.get('funding_apy_7d', 0):+.2f}% | Earned 24h/7d/30d/all: ${pretty_float(c.get('funding_earned_24h', 0), 2)} / ${pretty_float(c.get('funding_earned_7d', 0), 2)} / ${pretty_float(c.get('funding_earned_30d', 0), 2)} / ${pretty_float(c.get('funding_earned_all', 0), 2)}"
-            )
-            px_ch = c.get("price_change_1h_pct")
-            oi_ch = c.get("oi_change_1h_pct")
-            if px_ch is not None or oi_ch is not None:
-                px_part = f"{px_ch:+.2f}%" if px_ch is not None else "n/a"
-                oi_part = f"{oi_ch:+.2f}%" if oi_ch is not None else "n/a"
-                lines.append(f"  1h: Price {px_part} | OI {oi_part}")
-        else:
-            lines.append(
-                f"• <b>{c['symbol']}</b> | Δ {c.get('delta_qty', 0):+.4f} (${pretty_float(c.get('delta_usd', 0), 2)}, {c.get('delta_pct', 0):.2f}%) {delta_icon}"
-            )
-            lines.append(
-                f"  Spot: {c.get('spot_qty', 0):.4f} (${pretty_float(c.get('spot_value', 0), 2)}) uPnL {pretty_float(c.get('spot_upnl', 0), 2)}"
-            )
-            lines.append(
-                f"  Short: {c.get('short_qty', 0):.4f} (${pretty_float(c.get('short_notional', 0), 2)}) uPnL {pretty_float(c.get('short_upnl', 0), 2)}"
-            )
-            lines.append(
-                f"  Funding: {_fmt_signed_pct_hour(c.get('funding_current', 0))} | 24h {_fmt_signed_pct(c.get('funding_avg_24h', 0))} | 7d {_fmt_signed_pct(c.get('funding_avg_7d', 0))} | 30d {_fmt_signed_pct(c.get('funding_avg_30d', 0))}"
-            )
-            lines.append(
-                f"  APY(7d): {c.get('funding_apy_7d', 0):+.2f}% | Earned 24h/7d/30d/all: ${pretty_float(c.get('funding_earned_24h', 0), 2)} / ${pretty_float(c.get('funding_earned_7d', 0), 2)} / ${pretty_float(c.get('funding_earned_30d', 0), 2)} / ${pretty_float(c.get('funding_earned_all', 0), 2)}"
-            )
-            px_ch = c.get("price_change_1h_pct")
-            oi_ch = c.get("oi_change_1h_pct")
-            if px_ch is not None or oi_ch is not None:
-                px_part = f"{px_ch:+.2f}%" if px_ch is not None else "n/a"
-                oi_part = f"{oi_ch:+.2f}%" if oi_ch is not None else "n/a"
-                lines.append(f"  1h: Price {px_part} | OI {oi_part}")
+        
+        # Shared line formatting
+        lines.append(
+            f"• <b>{c['symbol']}</b> | Δ {c.get('delta_qty', 0):+.4f} (${pretty_float(c.get('delta_usd', 0), 2)}, {c.get('delta_pct', 0):.2f}%) {delta_icon}"
+        )
+        lines.append(
+            f"  Spot: {c.get('spot_qty', 0):.4f} (${pretty_float(c.get('spot_value', 0), 2)}) uPnL {pretty_float(c.get('spot_upnl', 0), 2)}"
+        )
+        lines.append(
+            f"  Short: {c.get('short_qty', 0):.4f} (${pretty_float(c.get('short_notional', 0), 2)}) uPnL {pretty_float(c.get('short_upnl', 0), 2)}"
+        )
+        lines.append(
+            f"  Funding: {_fmt_signed_pct_hour(c.get('funding_current', 0))} | 24h {_fmt_signed_pct(c.get('funding_avg_24h', 0))} | 7d {_fmt_signed_pct(c.get('funding_avg_7d', 0))} | 30d {_fmt_signed_pct(c.get('funding_avg_30d', 0))}"
+        )
+        lines.append(
+            f"  APY(7d): {c.get('funding_apy_7d', 0):+.2f}% | Earned 24h/7d/30d/all: ${pretty_float(c.get('funding_earned_24h', 0), 2)} / ${pretty_float(c.get('funding_earned_7d', 0), 2)} / ${pretty_float(c.get('funding_earned_30d', 0), 2)} / ${pretty_float(c.get('funding_earned_all', 0), 2)}"
+        )
+        px_ch = c.get("price_change_1h_pct")
+        oi_ch = c.get("oi_change_1h_pct")
+        if px_ch is not None or oi_ch is not None:
+            px_part = f"{px_ch:+.2f}%" if px_ch is not None else "n/a"
+            oi_part = f"{oi_ch:+.2f}%" if oi_ch is not None else "n/a"
+            lines.append(f"  1h: Price {px_part} | OI {oi_part}")
 
     text = "\n".join(lines)
     if len(text) > 3900:
@@ -687,28 +667,24 @@ def format_alert_digest(alerts: list[dict], lang: str = "ru") -> str:
         kind = a.get("kind")
         sym = a.get("symbol", "")
 
-        if kind == "delta_critical":
-            lines.append(f"⚖️ <b>{sym}</b> дельта {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) > 10%")
-        elif kind == "delta_warning":
-            lines.append(f"⚖️ <b>{sym}</b> дельта {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) > 5%")
-        elif kind == "margin_low":
-            lines.append(f"🔴 Margin ratio {a.get('margin_health_pct', 0):.1f}% < 30%")
-        elif kind == "funding_negative":
-            lines.append(f"💸 <b>{sym}</b> funding отрицательный: {_fmt_signed_pct_hour(a.get('funding_current', 0))}")
-        elif kind == "funding_negative_streak":
-            lines.append(f"⏰ <b>{sym}</b> funding < 0 уже {a.get('hours', 0):.1f}ч подряд")
-        elif kind == "funding_extreme":
-            lines.append(f"⚠️ <b>{sym}</b> funding аномальный: {_fmt_signed_pct_hour(a.get('funding_current', 0))}")
-        elif kind == "price_move_1h":
-            lines.append(f"📈 <b>{sym}</b> движение цены за 1ч: {a.get('change_pct', 0):+.2f}%")
-        elif kind == "oi_drop_1h":
-            lines.append(f"📉 <b>{sym}</b> OI за 1ч: {a.get('change_pct', 0):+.2f}%")
-
-    if not is_ru:
-        lines = [header]
-        for a in alerts:
-            kind = a.get("kind")
-            sym = a.get("symbol", "")
+        if is_ru:
+            if kind == "delta_critical":
+                lines.append(f"⚖️ <b>{sym}</b> дельта {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) > 10%")
+            elif kind == "delta_warning":
+                lines.append(f"⚖️ <b>{sym}</b> дельта {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) > 5%")
+            elif kind == "margin_low":
+                lines.append(f"🔴 Margin ratio {a.get('margin_health_pct', 0):.1f}% < 30%")
+            elif kind == "funding_negative":
+                lines.append(f"💸 <b>{sym}</b> funding отрицательный: {_fmt_signed_pct_hour(a.get('funding_current', 0))}")
+            elif kind == "funding_negative_streak":
+                lines.append(f"⏰ <b>{sym}</b> funding < 0 уже {a.get('hours', 0):.1f}ч подряд")
+            elif kind == "funding_extreme":
+                lines.append(f"⚠️ <b>{sym}</b> аномальный: {_fmt_signed_pct_hour(a.get('funding_current', 0))}")
+            elif kind == "price_move_1h":
+                lines.append(f"📈 <b>{sym}</b> движение цены за 1ч: {a.get('change_pct', 0):+.2f}%")
+            elif kind == "oi_drop_1h":
+                lines.append(f"📉 <b>{sym}</b> OI за 1ч: {a.get('change_pct', 0):+.2f}%")
+        else:
             if kind == "delta_critical":
                 lines.append(f"⚖️ <b>{sym}</b> delta drift {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) > 10%")
             elif kind == "delta_warning":

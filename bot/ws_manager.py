@@ -1032,7 +1032,7 @@ class WSManager:
                 
                 safe_coin = html.escape(sym_name)
                 tag = user.get("tag")
-                wallet_display = f"<b>{html.escape(tag)}</b>" if tag else f"<code>{user_wallet[:6]}...{user_wallet[-4:]}</code>"
+                wallet_display = f"<b>{html.escape(str(tag))}</b>" if tag else f"<code>{user_wallet[:6]}...{user_wallet[-4:]}</code>"
                 
                 if is_liq:
                     title = _t(lang, "fill_alert_liq")
@@ -1155,10 +1155,9 @@ class WSManager:
                     sz = self._extract_order_size(o)
                     side = self._extract_order_side(o)
                     side_icon = "🟢" if side == "buy" else "🔴"
-                    
+
                     tag = user.get("tag")
-                    wallet_display = f"<b>{html.escape(tag)}</b>" if tag else f"<code>{user_wallet[:6]}...{user_wallet[-4:]}</code>"
-                    
+                    wallet_display = f"<b>{html.escape(str(tag))}</b>" if tag else f"<code>{user_wallet[:6]}...{user_wallet[-4:]}</code>"
                     msg = f"🆕 <b>{_t(lang, 'order_placed_title')}</b>\n"
                     msg += f"{side_icon} {side.upper()} {sz} <b>{coin}</b> @ ${pretty_float(px)}\n"
                     msg += f"Wallet: {wallet_display}"

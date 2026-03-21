@@ -8,9 +8,13 @@
         * { box-sizing: border-box; }
         body {
             font-family: 'Plus Jakarta Sans', sans-serif;
-            background-color: #05070a; color: white;
+            background-color: #020408; color: white;
             width: 1000px; height: 1000px; padding: 40px;
             margin: 0; display: flex; flex-direction: column; overflow: hidden;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 50px 50px;
         }
         .mono { font-family: 'JetBrains Mono', monospace; }
         .glass {
@@ -91,13 +95,13 @@
         
         <div class="flex items-center gap-3 mb-6 relative z-10">
             <span class="text-2xl">⚡</span>
-            <h3 class="text-xl font-bold uppercase tracking-widest text-slate-300">Market Vitality</h3>
+            <h3 class="text-xl font-bold uppercase tracking-widest text-slate-300">{{ t.ui_market_vitality }}</h3>
         </div>
 
         <div class="grid grid-cols-2 gap-6 relative z-10 flex-1">
             <!-- Top Gainer -->
             <div class="card-grad rounded-xl p-5 flex flex-col justify-center">
-                <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Top Gainer (24h)</div>
+                <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">{{ t.ui_top_gainer }}</div>
                 <div class="flex justify-between items-end">
                     <div class="text-3xl font-black text-slate-200">{{ top_gainer.sym }}</div>
                     <div class="text-2xl font-bold text-emerald-400">+{{ top_gainer.val | round(1) }}%</div>
@@ -106,7 +110,7 @@
 
             <!-- Top Loser -->
             <div class="card-grad rounded-xl p-5 flex flex-col justify-center">
-                <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Top Loser (24h)</div>
+                <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">{{ t.ui_top_loser }}</div>
                 <div class="flex justify-between items-end">
                     <div class="text-3xl font-black text-slate-200">{{ top_loser.sym }}</div>
                     <div class="text-2xl font-bold text-rose-400">{{ top_loser.val | round(1) }}%</div>
@@ -115,7 +119,7 @@
 
             <!-- Top Volume -->
             <div class="card-grad rounded-xl p-5 flex flex-col justify-center">
-                <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Highest Volume</div>
+                <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">{{ t.ui_highest_volume }}</div>
                 <div class="flex justify-between items-end">
                     <div class="text-3xl font-black text-slate-200">{{ top_vol.sym }}</div>
                     <div class="text-2xl font-bold text-sky-400">{{ top_vol.val }}</div>
@@ -124,7 +128,7 @@
 
             <!-- Top Funding -->
             <div class="card-grad rounded-xl p-5 flex flex-col justify-center">
-                <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Highest Funding (APR)</div>
+                <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">{{ t.ui_highest_funding }}</div>
                 <div class="flex justify-between items-end">
                     <div class="text-3xl font-black text-slate-200">{{ top_fund.sym }}</div>
                     <div class="text-2xl font-bold text-amber-400">{{ top_fund.val }}</div>
@@ -136,13 +140,13 @@
     <!-- Footer Stats (Sentiment & Aggregates) -->
     <div class="grid grid-cols-2 gap-6 mt-6">
         <div class="glass p-4 flex flex-col items-center justify-center text-center">
-            <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Market Sentiment</div>
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">{{ t.ui_market_sentiment }}</div>
             <div class="text-2xl font-black {{ 'text-emerald-400' if sentiment == 'Bullish' else ('text-rose-400' if sentiment == 'Bearish' else 'text-sky-400') }}">
                 {{ sentiment }}
             </div>
         </div>
         <div class="glass p-4 flex flex-col items-center justify-center text-center">
-            <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Fear & Greed</div>
+            <div class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">{{ t.ui_fear_greed }}</div>
             <div class="text-2xl font-black text-slate-200">
                 {{ fng.value }} <span class="text-base text-slate-500 font-bold ml-1">{{ fng.classification }}</span>
             </div>

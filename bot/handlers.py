@@ -1755,7 +1755,7 @@ async def cb_portfolio_chart(call: CallbackQuery):
     comp_data = prepare_portfolio_composition_data(assets_list)
     
     try:
-        buf = await render_html_to_image("portfolio_composition.html", comp_data)
+        buf = await render_html_to_image("portfolio_composition.html", comp_data, lang=lang)
         photo = BufferedInputFile(buf.read(), filename="portfolio.png")
         await smart_edit_media(call, photo, "📊 <b>Portfolio Composition</b>", reply_markup=_back_kb(lang, "cb_balance:portfolio"))
     except Exception as e:
@@ -2053,8 +2053,9 @@ async def cb_share_pnl(call: CallbackQuery):
     
     pnl_data = prepare_pnl_card_data(data)
     try:
-        buf = await render_html_to_image("pnl_card.html", pnl_data)
-        photo = BufferedInputFile(buf.read(), filename=f"pnl_{data['symbol']}.png")
+        buf = await render_html_to_image("pnl_card.html", pnl_data, lang=lang)
+        photo = BufferedInputFile(buf.read(), filename="pnl.png")
+
         await smart_edit_media(call, photo, f"🚀 <b>{data['symbol']} Position</b>", reply_markup=_back_kb(lang, f"cb_positions:{context}:{page}"))
     except Exception as e:
         logger.error(f"Error rendering PnL card: {e}")
@@ -2445,7 +2446,8 @@ async def cb_wallets_menu(call: CallbackQuery):
     
     for w in wallets:
         addr = w["address"]
-        tag = html.escape(w.get("tag", "No Tag"))
+        tag_val = w.get("tag") or "No Tag"
+        tag = html.escape(tag_val)
         thresh = w.get("threshold", 0.0)
         
         text += f"• <code>{addr[:6]}...{addr[-4:]}</code>\n"
@@ -2722,10 +2724,10 @@ async def cb_market_overview(call: CallbackQuery, state: FSMContext):
     
     try:
         # Render all images
-        buf_alpha = await render_html_to_image("market_stats.html", data_alpha)
-        buf_liq = await render_html_to_image("liquidity_stats.html", data_liq)
-        buf_heat = await render_html_to_image("funding_heatmap.html", data_alpha)
-        buf_prices = await render_html_to_image("coin_prices.html", data_prices)
+        buf_alpha = await render_html_to_image("market_stats.html", data_alpha, lang=lang)
+        buf_liq = await render_html_to_image("liquidity_stats.html", data_liq, lang=lang)
+        buf_heat = await render_html_to_image("funding_heatmap.html", data_alpha, lang=lang)
+        buf_prices = await render_html_to_image("coin_prices.html", data_prices, lang=lang)
         
         # 1. Get detailed info for Majors
         majors_text = ""
@@ -4356,7 +4358,7 @@ async def cb_terminal(call: CallbackQuery):
     )
     
     try:
-        buf = await render_html_to_image("terminal_dashboard.html", data, width=1000, height=600)
+        buf = await render_html_to_image("terminal_dashboard.html", data, width=1000, height=600, lang=lang)
         photo = BufferedInputFile(buf.read(), filename="terminal.png")
         
         caption = "🖥️ <b>Velox Terminal</b>"
@@ -4464,8 +4466,9 @@ async def cb_positions_img(call: CallbackQuery):
     try:
         h = 150 + (len(combined_positions) * 55)
         h = max(400, min(h, 2000))
-        
-        buf = await render_html_to_image("positions_table.html", data, width=800, height=h)
+
+        buf = await render_html_to_image("positions_table.html", data, width=800, height=h, lang=lang)
+
         photo = BufferedInputFile(buf.read(), filename="positions.png")
         
         await smart_edit_media(call, photo, "📸 <b>Active Positions</b>", reply_markup=_back_kb(lang, "sub:trading"))
@@ -4770,7 +4773,7 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
             "top_fund": {"sym": top_fund, "val": f"{top_fund_val:.0f}%"}
         }
         
-        img_buf = await render_html_to_image("market_overview.html", render_data, width=1000, height=1000)
+        img_buf = await render_html_to_image("market_overview.html", render_data, width=1000, height=1000, lang=lang)
         
         # Header for Image Caption
         btc_d = market_data.get("BTC", {})

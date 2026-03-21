@@ -22,6 +22,16 @@ for file_name in os.listdir(_LOCALES_DIR):
 EN = _translations.get("en", {})
 RU = _translations.get("ru", {})
 
+def get_all_translations(lang: str) -> dict:
+    """
+    Returns all translations for a given language.
+    """
+    l = (lang or "ru").lower()
+    table = _translations.get(l)
+    if not table:
+        table = _translations.get("ru", _translations.get("en", next(iter(_translations.values())) if _translations else {}))
+    return table
+
 def _t(lang: str, key: str, **kwargs) -> str:
     """
     Multilingual support for Velox Bot.

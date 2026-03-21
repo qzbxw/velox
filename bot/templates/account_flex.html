@@ -10,18 +10,21 @@
             margin: 0; padding: 0; width: 800px; height: 800px;
             background-color: #05070a; color: white;
             display: flex; align-items: center; justify-content: center; overflow: hidden;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            background-size: 40px 40px;
         }
         .main-card {
             width: 800px; height: 800px;
             background: radial-gradient(circle at 50% 50%, #0f172a 0%, #05070a 100%);
-            position: relative; padding: 50px;
+            position: relative; padding: 60px;
             display: flex; flex-direction: column;
-            border: 1px solid #1e293b;
         }
         .orb {
-            position: absolute; width: 500px; height: 500px; border-radius: 50%;
+            position: absolute; width: 600px; height: 600px; border-radius: 50%;
             background: {{ '#10b981' if is_positive else '#f43f5e' }};
-            filter: blur(120px); opacity: 0.1; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            filter: blur(150px); opacity: 0.12; top: 50%; left: 50%; transform: translate(-50%, -50%);
         }
         .mono { font-family: 'JetBrains Mono', monospace; }
         .percentage-badge {
@@ -32,16 +35,66 @@
             font-weight: 800; font-size: 24px;
         }
         .pnl-value {
-            font-size: 100px; font-weight: 800; line-height: 1; letter-spacing: -4px;
+            font-size: 110px; font-weight: 900; line-height: 1; letter-spacing: -5px;
             margin: 20px 0; background: linear-gradient(to bottom, #ffffff 0%, #94a3b8 100%);
             -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 10px 30px rgba(0,0,0,0.5));
         }
         .label { color: #64748b; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 3px; }
         .glass-panel {
-            background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(20px);
+            background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(30px);
             border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 30px; padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.4);
         }
     </style>
+</head>
+<body>
+    <div class="main-card">
+        <div class="orb"></div>
+        <div class="relative z-10 flex flex-col h-full">
+            <div class="flex justify-between items-start mb-12">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-indigo-600 rounded-xl flex items-center justify-center shadow-[0_0_30px_rgba(79,70,229,0.3)]">
+                        <span class="text-2xl font-black">V</span>
+                    </div>
+                    <div>
+                        <h1 class="text-2xl font-black tracking-tighter uppercase">Velox <span class="text-indigo-500">Terminal</span></h1>
+                        <p class="text-slate-500 font-bold text-[8px] tracking-[0.4em] uppercase">Institutional Intelligence</p>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="label mb-1">{{ t.ui_period }}</div>
+                    <div class="text-lg font-black text-indigo-400 uppercase tracking-tighter">{{ period_label }}</div>
+                </div>
+            </div>
+            <div class="flex-1 flex flex-col justify-center">
+                <div class="flex items-center gap-4 mb-2">
+                    <div class="label">{{ t.ui_realized_pnl }}</div>
+                    <div class="percentage-badge mono">{{ pnl_pct }}%</div>
+                </div>
+                <div class="pnl-value mono tracking-tighter">{{ '+' if is_positive else '' }}${{ abs_pnl }}</div>
+                <p class="text-slate-400 text-lg font-medium max-w-md">Performance metrics across all tracked sub-accounts.</p>
+            </div>
+            <div class="mt-auto flex justify-between items-end">
+                <div class="glass-panel py-4 px-8 flex gap-10">
+                    <div>
+                        <div class="label mb-1" style="font-size: 10px;">{{ t.ui_account }}</div>
+                        <div class="text-base font-bold text-slate-200">{{ wallet_label }}</div>
+                    </div>
+                    <div>
+                        <div class="label mb-1" style="font-size: 10px;">{{ t.ui_date }}</div>
+                        <div class="text-base font-bold text-slate-200 mono">{{ date }}</div>
+                    </div>
+                </div>
+                <div class="text-right pb-2">
+                    <div class="text-indigo-400 font-black text-xl tracking-tighter uppercase">Hyperliquid L1</div>
+                    <div class="text-[9px] text-slate-500 font-bold mt-1 uppercase tracking-widest">t.me/veloxhlbot</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>    </style>
 </head>
 <body>
     <div class="main-card">

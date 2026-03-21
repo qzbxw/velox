@@ -7,6 +7,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from bot.locales import get_all_translations
+
 # Path to templates
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 
@@ -29,13 +31,16 @@ async def _get_browser():
         )
         return _browser
 
-async def render_html_to_image(template_name: str, data: dict, width: int = 800, height: int = 800) -> io.BytesIO:
+async def render_html_to_image(template_name: str, data: dict, width: int = 800, height: int = 800, lang: str = "ru") -> io.BytesIO:
     """
     Renders an HTML template with Jinja2 and takes a screenshot using Playwright.
     """
     template_path = os.path.join(TEMPLATE_DIR, template_name)
     with open(template_path, "r", encoding="utf-8") as f:
         template_html = f.read()
+    
+    # Inject translations
+    data["t"] = get_all_translations(lang)
     
     # Render HTML with data
     template = Template(template_html)

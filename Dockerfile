@@ -18,7 +18,7 @@ WORKDIR /app
 
 COPY --from=builder /install /usr/local/lib/python3.11/site-packages
 
-RUN playwright install-deps chromium && playwright install chromium \
+RUN python -m playwright install-deps chromium && python -m playwright install chromium \
     && rm -rf /tmp/* /var/lib/apt/lists/*
 
 COPY . .

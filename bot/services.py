@@ -2,7 +2,7 @@ import aiohttp
 import logging
 import asyncio
 import time
-from bot.config import settings
+from bot.config import settings, HLP_VAULT_ADDR
 
 logger = logging.getLogger(__name__)
 
@@ -494,7 +494,7 @@ async def get_hlp_info():
     url = f"{settings.HYPERLIQUID_API_URL}/info"
     payload = {
         "type": "vaultDetails",
-        "vaultAddress": "0xdf13098394e1832014b0df3f91285497",
+        "vaultAddress": HLP_VAULT_ADDR,
         "user": "0x0000000000000000000000000000000000000000"
     }
     session = await get_session()

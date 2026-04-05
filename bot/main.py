@@ -3,7 +3,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from bot.config import settings
 from bot.database import db
-from bot.handlers import router
+from bot.handlers import main_router
 from bot.ws_manager import WSManager
 from bot.scheduler import setup_scheduler
 from bot.services import close_session
@@ -34,7 +34,7 @@ async def main():
     dp = Dispatcher()
     
     # Register Routers
-    dp.include_router(router)
+    dp.include_router(main_router)
     
     # Initialize WS Manager
     ws_manager = WSManager(bot)
@@ -79,7 +79,7 @@ async def main():
             except asyncio.CancelledError:
                 pass
         
-        scheduler.shutdown()
+        scheduler.shutdown(wait=False)
         await bot.session.close()
         await close_session()
         logger.info("Bot session closed. Goodbye!")

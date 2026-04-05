@@ -9,6 +9,7 @@ from collections import deque
 from bot.config import settings
 from bot.database import db
 from bot.locales import _t
+from bot.handlers._common import format_money
 from bot.services import get_open_orders, get_spot_meta, normalize_spot_coin, pretty_float, get_symbol_name, get_perps_context, get_hlp_info
 from bot.renderer import render_html_to_image
 from bot.analytics import prepare_modern_market_data, prepare_liquidity_data
@@ -1062,20 +1063,20 @@ class WSManager:
                 # Build extended message
                 msg = f"{side_emoji} {title}\n\n"
                 msg += f"<b>{side.upper()} {sz} {safe_coin}</b> @ ${pretty_float(px)}\n"
-                msg += f"💰 {_t(lang, 'value_lbl')}: <b>${pretty_float(usd_value, 2)}</b>\n"
+                msg += f"💰 {_t(lang, 'value_lbl')}: <b>{format_money(usd_value, lang)}</b>\n"
                 
                 # Show current price comparison
                 if current_px and current_px != px:
                     price_change = ((current_px - px) / px) * 100
                     change_icon = "📈" if price_change > 0 else "📉"
-                    msg += f"📊 Now: <b>${pretty_float(current_px)}</b> ({change_icon} {price_change:+.2f}%)\n"
+                    msg += f"📊 {_t(lang, 'now_lbl')}: <b>${pretty_float(current_px)}</b> ({change_icon} {price_change:+.2f}%)\n"
                 
                 if fee != 0:
-                    msg += f"💸 Fee: <code>${pretty_float(fee, 2)}</code>\n"
+                    msg += f"💸 {_t(lang, 'fee_lbl')}: <code>{format_money(fee, lang)}</code>\n"
                 
                 if closed_pnl != 0:
                     pnl_icon = "📈" if closed_pnl > 0 else "📉"
-                    msg += f"{pnl_icon} <b>Realized PnL: {'+' if closed_pnl > 0 else ''}${pretty_float(closed_pnl, 2)}</b>\n"
+                    msg += f"{pnl_icon} <b>{_t(lang, 'realized_pnl_lbl')}: {format_money(closed_pnl, lang)}</b>\n"
 
                 # Add timestamp
                 fill_time = fill.get("time")
@@ -1087,17 +1088,17 @@ class WSManager:
                     except (TypeError, ValueError, OSError):
                         pass
 
-                msg += f"\n👛 Wallet: {wallet_display}"
+                msg += f"\n👛 {_t(lang, 'wallet_lbl_simple')}: {wallet_display}"
                 
                 # Build inline keyboard with quick actions
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
                 from aiogram.types import InlineKeyboardButton
                 kb = InlineKeyboardBuilder()
                 kb.row(
-                    InlineKeyboardButton(text="📊 Positions", callback_data="cb_positions"),
-                    InlineKeyboardButton(text=f"🔔 Alert {sym_name[:6]}", callback_data=f"quick_alert:{sym_name}")
+                    InlineKeyboardButton(text=_t(lang, "btn_positions_simple"), callback_data="cb_positions"),
+                    InlineKeyboardButton(text=_t(lang, "btn_alert_simple", sym=sym_name[:6]), callback_data=f"quick_alert:{sym_name}")
                 )
-                kb.row(InlineKeyboardButton(text="🏠 Menu", callback_data="cb_menu"))
+                kb.row(InlineKeyboardButton(text=_t(lang, "btn_main_menu_simple"), callback_data="cb_menu"))
                 
                 try:
                     sent_msg = await self.bot.send_message(chat_id, msg, reply_markup=kb.as_markup(), parse_mode="HTML")

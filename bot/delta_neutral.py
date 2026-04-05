@@ -3,6 +3,7 @@ import time
 from collections import defaultdict
 
 from bot.locales import _t
+from bot.handlers._common import format_money
 from bot.services import (
     extract_avg_entry_from_balance,
     get_mid_price,
@@ -605,10 +606,10 @@ def format_dashboard_text(snapshot: dict, lang: str = "ru") -> str:
             pct=t.get("margin_health_pct", 0),
             icon=t.get("margin_icon", "🟢"),
         ),
-        _t(lang, "delta_dashboard_funding_24h", value=pretty_float(t.get("funding_today", 0), 2)),
-        _t(lang, "delta_dashboard_funding_7d", value=pretty_float(t.get("funding_week", 0), 2)),
-        _t(lang, "delta_dashboard_funding_30d", value=pretty_float(t.get("funding_30d", 0), 2)),
-        _t(lang, "delta_dashboard_funding_total", value=pretty_float(t.get("funding_total", 0), 2)),
+        _t(lang, "delta_dashboard_funding_24h", value=format_money(t.get("funding_today", 0), lang)),
+        _t(lang, "delta_dashboard_funding_7d", value=format_money(t.get("funding_week", 0), lang)),
+        _t(lang, "delta_dashboard_funding_30d", value=format_money(t.get("funding_30d", 0), lang)),
+        _t(lang, "delta_dashboard_funding_total", value=format_money(t.get("funding_total", 0), lang)),
     ]
     if t.get("best_symbol"):
         lines.append(
@@ -628,19 +629,19 @@ def format_dashboard_text(snapshot: dict, lang: str = "ru") -> str:
         
         # Shared line formatting
         lines.append(
-            f"• <b>{c['symbol']}</b> | Δ {c.get('delta_qty', 0):+.4f} (${pretty_float(c.get('delta_usd', 0), 2)}, {c.get('delta_pct', 0):.2f}%) {delta_icon}"
+            f"• <b>{c['symbol']}</b> | Δ {c.get('delta_qty', 0):+.4f} ({format_money(c.get('delta_usd', 0), lang)}, {c.get('delta_pct', 0):.2f}%) {delta_icon}"
         )
         lines.append(
-            f"  Spot: {c.get('spot_qty', 0):.4f} (${pretty_float(c.get('spot_value', 0), 2)}) uPnL {pretty_float(c.get('spot_upnl', 0), 2)}"
+            f"  Spot: {c.get('spot_qty', 0):.4f} ({format_money(c.get('spot_value', 0), lang)}) uPnL {format_money(c.get('spot_upnl', 0), lang)}"
         )
         lines.append(
-            f"  Short: {c.get('short_qty', 0):.4f} (${pretty_float(c.get('short_notional', 0), 2)}) uPnL {pretty_float(c.get('short_upnl', 0), 2)}"
+            f"  Short: {c.get('short_qty', 0):.4f} ({format_money(c.get('short_notional', 0), lang)}) uPnL {format_money(c.get('short_upnl', 0), lang)}"
         )
         lines.append(
             f"  Funding: {_fmt_signed_pct_hour(c.get('funding_current', 0))} | 24h {_fmt_signed_pct(c.get('funding_avg_24h', 0))} | 7d {_fmt_signed_pct(c.get('funding_avg_7d', 0))} | 30d {_fmt_signed_pct(c.get('funding_avg_30d', 0))}"
         )
         lines.append(
-            f"  APY(7d): {c.get('funding_apy_7d', 0):+.2f}% | Earned 24h/7d/30d/all: ${pretty_float(c.get('funding_earned_24h', 0), 2)} / ${pretty_float(c.get('funding_earned_7d', 0), 2)} / ${pretty_float(c.get('funding_earned_30d', 0), 2)} / ${pretty_float(c.get('funding_earned_all', 0), 2)}"
+            f"  APY(7d): {c.get('funding_apy_7d', 0):+.2f}% | Earned 24h/7d/30d/all: {format_money(c.get('funding_earned_24h', 0), lang)} / {format_money(c.get('funding_earned_7d', 0), lang)} / {format_money(c.get('funding_earned_30d', 0), lang)} / {format_money(c.get('funding_earned_all', 0), lang)}"
         )
         px_ch = c.get("price_change_1h_pct")
         oi_ch = c.get("oi_change_1h_pct")

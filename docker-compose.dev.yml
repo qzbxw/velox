@@ -17,7 +17,7 @@ services:
     command: ["watchfiles", "--filter", "python", "--target-type", "command", "python -m bot.main"]
 
   mongo:
-    image: mongo:7.0
+    image: mongo:8.0
     container_name: velox_mongo_dev
     restart: always
     volumes:

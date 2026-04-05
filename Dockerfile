@@ -30,6 +30,6 @@ USER velox
 ENV PYTHONUNBUFFERED=1
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import asyncio; asyncio.run(__import__('motor.motor_asyncio').AsyncIOMotorClient('mongodb://mongo:27017').admin.command('ping'))"
+  CMD python -c "import asyncio, os; asyncio.run(__import__('motor.motor_asyncio').AsyncIOMotorClient(os.getenv('MONGO_URI', 'mongodb://mongo:27017')).admin.command('ping'))"
 
 CMD ["python", "-m", "bot.main"]

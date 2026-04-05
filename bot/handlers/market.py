@@ -143,14 +143,24 @@ async def process_market_alert_time(message: Message, state: FSMContext):
         if not (0 <= h <= 23 and 0 <= m <= 59): raise ValueError
         time_str = f"{h:02d}:{m:02d}"
     except Exception: await message.answer(_t(lang, "invalid_time")); return
-    await state.update_data(pending_time=time_str); try: await message.delete()
+    await state.update_data(pending_time=time_str)
+    try:
+        await message.delete()
     except Exception: pass
-    kb = InlineKeyboardBuilder(); kb.button(text="🔄 " + _t(lang, "daily"), callback_data="ma_type:daily"); kb.button(text="📍 " + _t(lang, "once"), callback_data="ma_type:once"); kb.button(text=_t(lang, "btn_back"), callback_data="cb_market_alerts"); kb.adjust(1)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 " + _t(lang, "daily"), callback_data="ma_type:daily")
+    kb.button(text="📍 " + _t(lang, "once"), callback_data="ma_type:once")
+    kb.button(text=_t(lang, "btn_back"), callback_data="cb_market_alerts")
+    kb.adjust(1)
     msg_id = (await state.get_data()).get("menu_msg_id")
     if msg_id:
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=f"⏰ Time: <b>{time_str} UTC</b>\n\nChoose frequency:", reply_markup=kb.as_markup(), parse_mode="HTML"); await state.set_state(MarketAlertStates.waiting_for_type); return
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=f"⏰ Time: <b>{time_str} UTC</b>\n\nChoose frequency:", reply_markup=kb.as_markup(), parse_mode="HTML")
+            await state.set_state(MarketAlertStates.waiting_for_type)
+            return
         except Exception: pass
-    await message.answer(f"⏰ Time: <b>{time_str} UTC</b>\n\nChoose frequency:", reply_markup=kb.as_markup(), parse_mode="HTML"); await state.set_state(MarketAlertStates.waiting_for_type)
+    await message.answer(f"⏰ Time: <b>{time_str} UTC</b>\n\nChoose frequency:", reply_markup=kb.as_markup(), parse_mode="HTML")
+    await state.set_state(MarketAlertStates.waiting_for_type)
 
 @router.callback_query(MarketAlertStates.waiting_for_type, F.data.startswith("ma_type:"))
 async def process_market_alert_type(call: CallbackQuery, state: FSMContext):

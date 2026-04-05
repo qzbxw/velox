@@ -46,27 +46,48 @@ async def cb_alerts(call: CallbackQuery):
     await smart_edit(call, text + f"\n\n<i>Last update: {time.strftime('%H:%M:%S')}</i>", reply_markup=kb.as_markup())
 
 @router.callback_query(F.data == "clear_all_alerts")
-async def cb_clear_all_alerts(call: CallbackQuery): await db.delete_all_user_alerts(call.message.chat.id); await call.answer(_t(await db.get_lang(call.message.chat.id), "deleted")); await cb_alerts(call)
+async def cb_clear_all_alerts(call: CallbackQuery):
+    await db.delete_all_user_alerts(call.message.chat.id)
+    await call.answer(_t(await db.get_lang(call.message.chat.id), "deleted"))
+    await cb_alerts(call)
 
 @router.callback_query(F.data.startswith("del_alert:"))
 async def cb_del_alert(call: CallbackQuery):
-    if await db.delete_alert(call.data.split(":")[1]): await call.answer(_t(await db.get_lang(call.message.chat.id), "deleted"))
-    else: await call.answer("🗑️ Alert already removed or error")
+    if await db.delete_alert(call.data.split(":")[1]):
+        await call.answer(_t(await db.get_lang(call.message.chat.id), "deleted"))
+    else:
+        await call.answer("🗑️ Alert already removed or error")
     await cb_alerts(call)
 
 @router.callback_query(F.data.startswith("quick_alert:"))
 async def cb_quick_alert(call: CallbackQuery):
     symbol, lang = call.data.split(":")[1], await db.get_lang(call.message.chat.id)
     current_price = await get_mid_price(symbol)
-    if not current_price: await call.answer("❌ Cannot get price", show_alert=True); return
-    kb = InlineKeyboardBuilder(); kb.row(InlineKeyboardButton(text=f"📈 Above ${pretty_float(current_price * 1.03)}", callback_data=f"set_quick_alert:{symbol}:above:{current_price * 1.03}"), InlineKeyboardButton(text=f"📉 Below ${pretty_float(current_price * 0.97)}", callback_data=f"set_quick_alert:{symbol}:below:{current_price * 0.97}")); kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
-    await call.message.edit_text(f"🔔 <b>Quick Alert: {symbol}</b>\n\nCurrent price: <b>${pretty_float(current_price)}</b>\n\nChoose alert type:", reply_markup=kb.as_markup(), parse_mode="HTML"); await call.answer()
+    if not current_price:
+        await call.answer("❌ Cannot get price", show_alert=True)
+        return
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        InlineKeyboardButton(text=f"📈 Above ${pretty_float(current_price * 1.03)}", callback_data=f"set_quick_alert:{symbol}:above:{current_price * 1.03}"),
+        InlineKeyboardButton(text=f"📉 Below ${pretty_float(current_price * 0.97)}", callback_data=f"set_quick_alert:{symbol}:below:{current_price * 0.97}")
+    )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    await call.message.edit_text(
+        f"🔔 <b>Quick Alert: {symbol}</b>\n\nCurrent price: <b>${pretty_float(current_price)}</b>\n\nChoose alert type:",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+    await call.answer()
 
 @router.callback_query(F.data.startswith("set_quick_alert:"))
 async def cb_set_quick_alert(call: CallbackQuery):
-    parts = call.data.split(":"); symbol, direction, target, lang = parts[1], parts[2], float(parts[3]), await db.get_lang(call.message.chat.id)
-    if not await _ensure_billing_quota(call, call.message.chat.id, lang, "alerts", len(await db.get_user_alerts(call.message.chat.id)), "billing_feature_alerts", is_callback=True): return
-    await db.add_price_alert(call.message.chat.id, symbol, target, direction); await call.answer(_t(lang, "alert_added", symbol=symbol, dir=direction, price=pretty_float(target)), show_alert=True); await cb_alerts(call)
+    parts = call.data.split(":")
+    symbol, direction, target, lang = parts[1], parts[2], float(parts[3]), await db.get_lang(call.message.chat.id)
+    if not await _ensure_billing_quota(call, call.message.chat.id, lang, "alerts", len(await db.get_user_alerts(call.message.chat.id)), "billing_feature_alerts", is_callback=True):
+        return
+    await db.add_price_alert(call.message.chat.id, symbol, target, direction)
+    await call.answer(_t(lang, "alert_added", symbol=symbol, dir=direction, price=pretty_float(target)), show_alert=True)
+    await cb_alerts(call)
 
 @router.message(Command("watch"))
 async def cmd_watch(message: Message):
@@ -102,35 +123,59 @@ async def cb_oi_alert_prompt(call: CallbackQuery, state: FSMContext):
 @router.message(AlertStates.waiting_for_symbol)
 async def process_alert_symbol(message: Message, state: FSMContext):
     lang, symbol, data = await db.get_lang(message.chat.id), message.text.strip().upper(), await state.get_data()
-    if len(symbol) > 10 or not symbol.isalnum(): await message.answer(_t(lang, "watch_invalid")); return
-    await state.update_data(symbol=symbol); prompt, msg_id = _t(lang, "prompt_target_funding") if data.get("alert_type") == "funding" else _t(lang, "prompt_target_oi"), data.get("menu_msg_id")
-    try: await message.delete()
+    if len(symbol) > 10 or not symbol.isalnum():
+        await message.answer(_t(lang, "watch_invalid"))
+        return
+    await state.update_data(symbol=symbol)
+    prompt = _t(lang, "prompt_target_funding") if data.get("alert_type") == "funding" else _t(lang, "prompt_target_oi")
+    msg_id = data.get("menu_msg_id")
+    try:
+        await message.delete()
     except Exception: pass
     if msg_id:
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML"); await state.set_state(AlertStates.waiting_for_target); return
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+            await state.set_state(AlertStates.waiting_for_target)
+            return
         except Exception: pass
-    await message.answer(prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML"); await state.set_state(AlertStates.waiting_for_target)
+    await message.answer(prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.set_state(AlertStates.waiting_for_target)
 
 @router.message(AlertStates.waiting_for_target)
 async def process_alert_target(message: Message, state: FSMContext):
-    try: await message.delete()
+    try:
+        await message.delete()
     except Exception: pass
     lang = await db.get_lang(message.chat.id)
-    try: target = float(message.text.replace(",", "."))
-    except ValueError: await message.answer(_t(lang, "invalid_number")); return
-    data = await state.get_data(); symbol, a_type, msg_id = data.get("symbol"), data.get("alert_type"), data.get("menu_msg_id")
-    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(await db.get_user_alerts(message.chat.id)), "billing_feature_alerts"): return
-    ctx = await get_perps_context(); universe, asset_ctxs = ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0], ctx[1]; idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == symbol), -1)
+    try:
+        target = float(message.text.replace(",", "."))
+    except ValueError:
+        await message.answer(_t(lang, "invalid_number"))
+        return
+    data = await state.get_data()
+    symbol, a_type, msg_id = data.get("symbol"), data.get("alert_type"), data.get("menu_msg_id")
+    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(await db.get_user_alerts(message.chat.id)), "billing_feature_alerts"):
+        return
+    ctx = await get_perps_context()
+    universe, asset_ctxs = ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0], ctx[1]
+    idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == symbol), -1)
     current_val = 0.0
     if idx != -1 and idx < len(asset_ctxs):
-        if a_type == "funding": current_val = float(asset_ctxs[idx].get("funding", 0)) * 24 * 365 * 100
-        else: current_val = float(asset_ctxs[idx].get("openInterest", 0)) * float(asset_ctxs[idx].get("markPx", 0)) / 1e6
-    direction = "above" if target > current_val else "below"; await db.add_alert(message.chat.id, symbol, target, direction, a_type)
+        if a_type == "funding":
+            current_val = float(asset_ctxs[idx].get("funding", 0)) * 24 * 365 * 100
+        else:
+            current_val = float(asset_ctxs[idx].get("openInterest", 0)) * float(asset_ctxs[idx].get("markPx", 0)) / 1e6
+    direction = "above" if target > current_val else "below"
+    await db.add_alert(message.chat.id, symbol, target, direction, a_type)
     success_msg = _t(lang, "funding_alert_set" if a_type == "funding" else "oi_alert_set", symbol=symbol, dir="📈" if direction == "above" else "📉", val=target)
     if msg_id:
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML"); await state.clear(); return
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
+            await state.clear()
+            return
         except Exception: pass
-    await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML"); await state.clear()
+    await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
+    await state.clear()
 
 @router.message(Command("f_alert"))
 async def cmd_f_alert(message: Message):

@@ -55,12 +55,20 @@ async def process_digest_time_state(message: Message, state: FSMContext):
     target = data.get("digest_target")
     if target not in DIGEST_TARGETS: await state.clear(); await message.answer("❌ Invalid digest target."); return
     parsed = _valid_hhmm(message.text.strip())
-    if not parsed: await message.answer(_t(lang, "digest_invalid_time"), parse_mode="HTML"); return
-    await db.set_digest_time(message.chat.id, target, parsed); await state.clear(); try: await message.delete()
+    if not parsed:
+        await message.answer(_t(lang, "digest_invalid_time"), parse_mode="HTML")
+        return
+    await db.set_digest_time(message.chat.id, target, parsed)
+    await state.clear()
+    try:
+        await message.delete()
     except Exception: pass
-    text, kb = await _build_digest_settings_ui(message.chat.id, lang); msg_id = data.get("digest_menu_msg_id")
+    text, kb = await _build_digest_settings_ui(message.chat.id, lang)
+    msg_id = data.get("digest_menu_msg_id")
     if msg_id:
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=text, reply_markup=kb, parse_mode="HTML"); return
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=text, reply_markup=kb, parse_mode="HTML")
+            return
         except Exception: pass
     await message.answer(f"{_t(lang, 'digest_time_saved').format(time=parsed)}\n\n{text}", reply_markup=kb, parse_mode="HTML")
 

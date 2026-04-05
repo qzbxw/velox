@@ -104,9 +104,15 @@ async def cmd_tag(message: Message):
 @router.message(Command("threshold"))
 async def cmd_threshold(message: Message):
     lang, args = await db.get_lang(message.chat.id), message.text.split()
-    if len(args) < 3: await message.answer(_t(lang, "threshold_usage"), parse_mode="HTML"); return
-    try: val = float(args[2].replace(",", ".")); await db.update_wallet_settings(message.chat.id, args[1].lower(), threshold=val); await message.answer(_t(lang, "settings_updated"))
-    except ValueError: await message.answer(_t(lang, "invalid_number"))
+    if len(args) < 3:
+        await message.answer(_t(lang, "threshold_usage"), parse_mode="HTML")
+        return
+    try:
+        val = float(args[2].replace(",", "."))
+        await db.update_wallet_settings(message.chat.id, args[1].lower(), threshold=val)
+        await message.answer(_t(lang, "settings_updated"))
+    except ValueError:
+        await message.answer(_t(lang, "invalid_number"))
 
 @router.callback_query(F.data == "set_prox_prompt")
 async def cb_set_prox_prompt(call: CallbackQuery, state: FSMContext):
@@ -124,13 +130,19 @@ async def cb_set_whale_prompt(call: CallbackQuery, state: FSMContext):
 async def process_set_prox_state(message: Message, state: FSMContext):
     lang, data = await db.get_lang(message.chat.id), await state.get_data()
     try:
-        val = float(message.text.replace(",", ".")) / 100.0; await db.update_user_settings(message.chat.id, {"prox_alert_pct": val}); res = "✅ " + _t(lang, "prox_set", val=val*100)
+        val = float(message.text.replace(",", ".")) / 100.0
+        await db.update_user_settings(message.chat.id, {"prox_alert_pct": val})
+        res = "✅ " + _t(lang, "prox_set", val=val*100)
     except ValueError: res = "❌ " + _t(lang, "invalid_number")
-    await state.clear(); try: await message.delete()
+    await state.clear()
+    try:
+        await message.delete()
     except Exception: pass
     from bot.handlers._common import _wallets_alerts_settings_kb
     if data.get("menu_msg_id"):
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=data["menu_msg_id"], text=f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML"); return
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=data["menu_msg_id"], text=f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML")
+            return
         except Exception: pass
     await message.answer(f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML")
 
@@ -138,13 +150,19 @@ async def process_set_prox_state(message: Message, state: FSMContext):
 async def process_set_vol_state(message: Message, state: FSMContext):
     lang, data = await db.get_lang(message.chat.id), await state.get_data()
     try:
-        val = float(message.text.replace(",", ".")) / 100.0; await db.update_user_settings(message.chat.id, {"watch_alert_pct": val}); res = "✅ " + _t(lang, "vol_set", val=val*100)
+        val = float(message.text.replace(",", ".")) / 100.0
+        await db.update_user_settings(message.chat.id, {"watch_alert_pct": val})
+        res = "✅ " + _t(lang, "vol_set", val=val*100)
     except ValueError: res = "❌ " + _t(lang, "invalid_number")
-    await state.clear(); try: await message.delete()
+    await state.clear()
+    try:
+        await message.delete()
     except Exception: pass
     from bot.handlers._common import _wallets_alerts_settings_kb
     if data.get("menu_msg_id"):
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=data["menu_msg_id"], text=f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML"); return
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=data["menu_msg_id"], text=f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML")
+            return
         except Exception: pass
     await message.answer(f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML")
 
@@ -152,36 +170,60 @@ async def process_set_vol_state(message: Message, state: FSMContext):
 async def process_set_whale_state(message: Message, state: FSMContext):
     lang, data = await db.get_lang(message.chat.id), await state.get_data()
     try:
-        val = float(message.text.replace(",", ".")); await db.update_user_settings(message.chat.id, {"whale_threshold": val}); res = "✅ " + _t(lang, "whale_set", val=pretty_float(val))
+        val = float(message.text.replace(",", "."))
+        await db.update_user_settings(message.chat.id, {"whale_threshold": val})
+        res = "✅ " + _t(lang, "whale_set", val=pretty_float(val))
     except ValueError: res = "❌ " + _t(lang, "invalid_number")
-    await state.clear(); try: await message.delete()
+    await state.clear()
+    try:
+        await message.delete()
     except Exception: pass
     from bot.handlers._common import _wallets_alerts_settings_kb
     if data.get("menu_msg_id"):
-        try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=data["menu_msg_id"], text=f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML"); return
+        try:
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=data["menu_msg_id"], text=f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML")
+            return
         except Exception: pass
     await message.answer(f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML")
 
 @router.message(Command("set_prox"))
 async def cmd_set_prox(message: Message):
     lang, args = await db.get_lang(message.chat.id), message.text.split()
-    if len(args) < 2: await message.answer(_t(lang, "set_prox_usage"), parse_mode="HTML"); return
-    try: val = float(args[1].replace(",", ".")) / 100.0; await db.update_user_settings(message.chat.id, {"prox_alert_pct": val}); await message.answer(_t(lang, "prox_set", val=val*100), parse_mode="HTML")
-    except ValueError: await message.answer(_t(lang, "invalid_number"))
+    if len(args) < 2:
+        await message.answer(_t(lang, "set_prox_usage"), parse_mode="HTML")
+        return
+    try:
+        val = float(args[1].replace(",", ".")) / 100.0
+        await db.update_user_settings(message.chat.id, {"prox_alert_pct": val})
+        await message.answer(_t(lang, "prox_set", val=val*100), parse_mode="HTML")
+    except ValueError:
+        await message.answer(_t(lang, "invalid_number"))
 
 @router.message(Command("set_vol"))
 async def cmd_set_vol(message: Message):
     lang, args = await db.get_lang(message.chat.id), message.text.split()
-    if len(args) < 2: await message.answer(_t(lang, "set_vol_usage"), parse_mode="HTML"); return
-    try: val = float(args[1].replace(",", ".")) / 100.0; await db.update_user_settings(message.chat.id, {"watch_alert_pct": val}); await message.answer(_t(lang, "vol_set", val=val*100), parse_mode="HTML")
-    except ValueError: await message.answer(_t(lang, "invalid_number"))
+    if len(args) < 2:
+        await message.answer(_t(lang, "set_vol_usage"), parse_mode="HTML")
+        return
+    try:
+        val = float(args[1].replace(",", ".")) / 100.0
+        await db.update_user_settings(message.chat.id, {"watch_alert_pct": val})
+        await message.answer(_t(lang, "vol_set", val=val*100), parse_mode="HTML")
+    except ValueError:
+        await message.answer(_t(lang, "invalid_number"))
 
 @router.message(Command("set_whale"))
 async def cmd_set_whale(message: Message):
     lang, args = await db.get_lang(message.chat.id), message.text.split()
-    if len(args) < 2: await message.answer(_t(lang, "set_whale_usage"), parse_mode="HTML"); return
-    try: val = float(args[1].replace(",", ".")); await db.update_user_settings(message.chat.id, {"whale_threshold": val}); await message.answer(_t(lang, "whale_set", val=pretty_float(val)), parse_mode="HTML")
-    except ValueError: await message.answer(_t(lang, "invalid_number"))
+    if len(args) < 2:
+        await message.answer(_t(lang, "set_whale_usage"), parse_mode="HTML")
+        return
+    try:
+        val = float(args[1].replace(",", "."))
+        await db.update_user_settings(message.chat.id, {"whale_threshold": val})
+        await message.answer(_t(lang, "whale_set", val=pretty_float(val)), parse_mode="HTML")
+    except ValueError:
+        await message.answer(_t(lang, "invalid_number"))
 
 @router.callback_query(F.data == "cb_flex_menu")
 async def cb_flex_menu(call: CallbackQuery):

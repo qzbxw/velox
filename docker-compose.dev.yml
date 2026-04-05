@@ -17,11 +17,11 @@ services:
     command: ["watchfiles", "--filter", "python", "--target-type", "command", "python -m bot.main"]
 
   mongo:
-    image: mongo:8.0
+    image: mongo:7.0
     container_name: velox_mongo_dev
     restart: always
     volumes:
-      - mongo_data:/data/db
+      - velox_mongo_data_dev:/data/db
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -35,4 +35,4 @@ networks:
     driver: bridge
 
 volumes:
-  mongo_data:
+  velox_mongo_data_dev:

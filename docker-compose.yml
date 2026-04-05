@@ -22,15 +22,16 @@ services:
       - bot_net
 
   mongo:
-    image: mongo:8.0
+    image: mongo:7.0
     container_name: velox_mongo
     restart: always
     env_file: .env
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER:-velox}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASS:-changeme}
+      - MONGO_INITDB_DATABASE=${MONGO_DB_NAME:-hyperliquid_bot}
     volumes:
-      - mongo_data:/data/db
+      - velox_mongo_data:/data/db
     mem_limit: 1g
     cpus: 0.5
     logging:
@@ -39,7 +40,7 @@ services:
         max-size: "50m"
         max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "mongosh -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval \"db.adminCommand('ping')\""]
+      test: ["CMD-SHELL", "mongosh -u \"$$MONGO_INITDB_ROOT_USERNAME\" -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping')\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -52,4 +53,4 @@ networks:
     driver: bridge
 
 volumes:
-  mongo_data:
+  velox_mongo_data:

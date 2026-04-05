@@ -10,12 +10,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.database import db
 from bot.locales import _t
 from bot.services import (
-    get_symbol_name, get_mid_price, get_perps_state, pretty_float, get_user_fills, get_user_funding
+    get_symbol_name, get_mid_price, get_perps_state, get_user_fills, get_user_funding
 )
 from bot.analytics import calculate_trade_stats
 from bot.handlers._common import (
-    smart_edit, _back_kb, format_money
+    smart_edit, _back_kb
 )
+from bot.utils import format_money, pretty_float
 from bot.handlers.states import CalcStates
 
 router = Router(name="trading")

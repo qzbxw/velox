@@ -10,7 +10,10 @@ from bot.config import settings, HLP_VAULT_ADDR, DIGEST_TARGETS
 from bot.database import db
 from bot.locales import _t
 from bot.services import (
-    pretty_float, get_user_vault_equities
+    get_user_vault_equities
+)
+from bot.utils import (
+    format_money, pretty_float, _vault_display_name
 )
 from bot.delta_neutral import (
     collect_delta_neutral_snapshot,
@@ -52,23 +55,6 @@ async def global_error_handler(event: ErrorEvent):
         logger.debug(f"Global error handler response failed: {e}")
 
 # --- UTILS ---
-
-def _vault_display_name(vault_address: str) -> str:
-    v = str(vault_address or "").lower()
-    if not v:
-        return "Vault"
-    if HLP_VAULT_ADDR[2:] in v:
-        return "HLP"
-    return f"Vault {v[:6]}"
-
-def format_money(val: float, lang: str = "en", compact: bool = False) -> str:
-    """Format money with sign and currency symbol."""
-    if compact and abs(val) >= 1_000_000:
-        return f"${val/1_000_000:.2f}M"
-    if compact and abs(val) >= 1_000:
-        return f"${val/1_000:.1f}K"
-    sign = "-" if val < 0 else ""
-    return f"{sign}${abs(val):,.2f}"
 
 async def smart_edit(call: CallbackQuery, text: str, reply_markup: InlineKeyboardMarkup = None):
     """Edits text message or deletes photo and sends new text message."""

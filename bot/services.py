@@ -3,6 +3,7 @@ import logging
 import asyncio
 import time
 from bot.config import settings, HLP_VAULT_ADDR
+from bot.utils import pretty_float
 
 logger = logging.getLogger(__name__)
 
@@ -181,19 +182,6 @@ def calc_avg_entry_from_fills(fills: list[dict]) -> float:
     if qty > 0 and cost > 0:
         return cost / qty
     return 0.0
-
-def pretty_float(x: float, max_decimals: int = 6) -> str:
-    """Human-friendly float: trim trailing zeros while keeping up to max_decimals."""
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return "0"
-
-    # stable formatting then strip
-    s = f"{v:.{max_decimals}f}"
-    if "." in s:
-        s = s.rstrip("0").rstrip(".")
-    return s
 
 def extract_avg_entry_from_balance(balance: dict) -> float:
     """Best-effort: try to use avg/entry provided by clearinghouse state.

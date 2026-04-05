@@ -9,7 +9,7 @@ from bot.database import db
 from bot.locales import _t
 from bot.services import (
     get_symbol_name, get_mid_price, get_spot_balances, 
-    get_perps_state, pretty_float, get_user_portfolio,
+    get_perps_state, get_user_portfolio,
     extract_avg_entry_from_balance, get_user_vault_equities
 )
 from bot.analytics import (
@@ -19,10 +19,9 @@ from bot.analytics import (
 from bot.renderer import render_html_to_image
 from bot.handlers._common import (
     smart_edit, smart_edit_media, _back_kb, _pagination_kb,
-    _ensure_billing_feature, _consume_billing_usage, BILLING_USAGE_SHARE_PNL,
-    format_money
+    _ensure_billing_feature, _consume_billing_usage, BILLING_USAGE_SHARE_PNL
 )
-from bot.utils import _vault_display_name
+from bot.utils import _vault_display_name, format_money, pretty_float
 from bot.handlers.states import CalcStates
 
 router = Router(name="portfolio")

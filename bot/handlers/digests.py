@@ -6,8 +6,9 @@ from bot.database import db
 from bot.locales import _t
 from bot.config import DIGEST_TARGETS
 from bot.services import (
-    get_user_portfolio, pretty_float
+    get_user_portfolio
 )
+from bot.utils import pretty_float
 from bot.handlers._common import (
     smart_edit, _back_kb, _ensure_billing_feature, _ensure_billing_digest_slot,
     _count_enabled_digests, _build_digest_settings_ui, _digest_label_key, _valid_hhmm

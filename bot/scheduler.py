@@ -2,9 +2,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.billing import get_plan_config, normalize_plan
 from bot.database import db
 from bot.config import HLP_VAULT_ADDR, DIGEST_TARGETS
-from bot.utils import _vault_display_name
+from bot.utils import _vault_display_name, pretty_float
 from bot.services import (
-    get_spot_balances, get_user_portfolio, pretty_float, get_perps_context, 
+    get_spot_balances, get_user_portfolio, get_perps_context, 
     get_hlp_info, _is_buy, calc_avg_entry_from_fills, get_all_assets_meta,
     get_fear_greed_index, get_user_vault_equities
 )

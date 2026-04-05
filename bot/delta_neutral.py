@@ -3,7 +3,7 @@ import time
 from collections import defaultdict
 
 from bot.locales import _t
-from bot.handlers._common import format_money
+from bot.utils import format_money, pretty_float
 from bot.services import (
     extract_avg_entry_from_balance,
     get_mid_price,
@@ -12,7 +12,6 @@ from bot.services import (
     get_spot_balances,
     get_symbol_name,
     get_user_funding,
-    pretty_float,
 )
 
 DELTA_WARN_PCT = 5.0

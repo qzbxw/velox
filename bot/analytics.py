@@ -5,6 +5,7 @@ import matplotlib.dates as mdates
 import io
 import pandas as pd
 from datetime import datetime
+from bot.utils import pretty_float
 
 def generate_pnl_chart(history: list, wallet_address: str) -> io.BytesIO:
     """
@@ -952,18 +953,6 @@ def prepare_modern_market_data(assets_ctx: list, universe: list, hlp_info: dict 
         "hlp_price": hlp_price,
         "hlp_apr": hlp_apr
     }
-
-def pretty_float(x: float, max_decimals: int = 6) -> str:
-
-    """Duplicate helper for analytics standalone usage."""
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return "0"
-    s = f"{v:.{max_decimals}f}"
-    if "." in s:
-        s = s.rstrip("0").rstrip(".")
-    return s
 
 def prepare_coin_prices_data(assets_ctx: list, universe: list) -> dict:
     """

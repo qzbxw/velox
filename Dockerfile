@@ -1,28 +1,27 @@
-# ---- Build stage ----
-FROM python:3.11-slim AS builder
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --target=/install -r requirements.txt
-
-# ---- Runtime stage ----
 FROM python:3.11-slim
 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget gnupg && rm -rf /var/lib/apt/lists/*
 
+# Create a non-root user
 RUN useradd -m -s /bin/bash velox
 
 WORKDIR /app
 
-COPY --from=builder /install /usr/local/lib/python3.11/site-packages
+# Copy requirements and install them
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-RUN python -m playwright install-deps chromium && python -m playwright install chromium \
-    && rm -rf /tmp/* /var/lib/apt/lists/*
+# Install Playwright and its dependencies
+RUN python -m playwright install-deps chromium && \
+    python -m playwright install chromium && \
+    rm -rf /tmp/* /var/lib/apt/lists/*
 
+# Copy the application code
 COPY . .
 
+# Change ownership to the non-root user
 RUN chown -R velox:velox /app
 
 USER velox

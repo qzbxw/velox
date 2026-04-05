@@ -8,10 +8,11 @@ from bot.database import db
 from bot.locales import _t
 from bot.config import HLP_VAULT_ADDR
 from bot.services import (
-    get_user_vault_equities, get_hlp_info, pretty_float
+    get_user_vault_equities, get_hlp_info
 )
+from bot.utils import pretty_float, _vault_display_name
 from bot.handlers._common import (
-    smart_edit, _back_kb, _vault_display_name, _is_hlp_vault, _fmt_period_change,
+    smart_edit, _back_kb, _is_hlp_vault, _fmt_period_change,
     _ensure_billing_feature, _ensure_billing_digest_slot, _count_enabled_digests,
     _collect_user_vault_catalog, _vault_cfg_key
 )

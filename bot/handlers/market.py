@@ -9,9 +9,10 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.database import db
 from bot.locales import _t
 from bot.services import (
-    get_mid_price, get_perps_context, get_hlp_info, pretty_float, get_fear_greed_index,
+    get_mid_price, get_perps_context, get_hlp_info, get_fear_greed_index,
     get_symbol_name, get_spot_balances, get_perps_state, extract_avg_entry_from_balance
 )
+from bot.utils import pretty_float
 from bot.analytics import (
     prepare_modern_market_data, prepare_liquidity_data, prepare_coin_prices_data,
     generate_market_overview_image, prepare_terminal_dashboard_data_clean

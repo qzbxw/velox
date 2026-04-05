@@ -6,7 +6,7 @@ services:
     env_file: .env
     environment:
       - PYTHONUNBUFFERED=1
-      - MONGO_URI=mongodb://${MONGO_USER}:${MONGO_PASS}@mongo:27017
+      - MONGO_URI=mongodb://${MONGO_USER:-velox}:${MONGO_PASS:-changeme}@mongo:27017
       - MONGO_DB_NAME=hyperliquid_bot
     mem_limit: 2g
     cpus: 0.7
@@ -27,8 +27,8 @@ services:
     restart: always
     env_file: .env
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASS}
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER:-velox}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASS:-changeme}
     volumes:
       - mongo_data:/data/db
     mem_limit: 1g
@@ -39,7 +39,7 @@ services:
         max-size: "50m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "mongosh", "-u", "${MONGO_USER}", "-p", "${MONGO_PASS}", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "mongosh -u $$MONGO_INITDB_ROOT_USERNAME -p $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval \"db.adminCommand('ping')\""]
       interval: 10s
       timeout: 5s
       retries: 5

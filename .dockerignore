@@ -1,0 +1,37 @@
+# Version control
+.git
+.github
+.githooks
+
+# Python cache
+__pycache__
+*.py[cod]
+
+# Virtual environments
+.venv
+venv/
+
+# Environment files (secrets!)
+.env
+.env.*
+
+# Local data
+mongo_data/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+
+# Documentation / meta
+*.md
+LICENSE
+Makefile
+
+# Deployment scripts (not needed in image)
+deploy.sh
+docker-compose*.yml
+
+# Backups
+bot/locales.py.bak

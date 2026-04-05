@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     WATCH_ALERT_PCT: float = Field(0.02, description="Watchlist alert percent move threshold (fraction, 0.02=2%)")
     WATCH_ALERT_WINDOW_SEC: int = Field(300, description="Watchlist alert time window in seconds")
     WATCH_ALERT_COOLDOWN: int = Field(900, description="Watchlist alert cooldown per symbol in seconds")
+    
+    # Renderer
+    RENDER_CONCURRENCY: int = Field(5, description="Maximum number of concurrent Chromium renders allowed")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -35,3 +38,21 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
+
+HLP_VAULT_ADDR = "0xdf13098394e1832014b0df3f91285497"
+
+DIGEST_TARGETS = [
+    "portfolio_daily",
+    "portfolio_weekly",
+    "hlp_daily",
+    "vault_weekly",
+    "vault_monthly",
+]
+
+def _vault_display_name(vault_address: str) -> str:
+    v = str(vault_address or "").lower()
+    if not v:
+        return "Vault"
+    if HLP_VAULT_ADDR[2:] in v:
+        return "HLP"
+    return f"Vault {v[:6]}"

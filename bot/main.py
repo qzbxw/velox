@@ -6,6 +6,7 @@ from bot.database import db
 from bot.handlers import router
 from bot.ws_manager import WSManager
 from bot.scheduler import setup_scheduler
+from bot.services import close_session
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -80,6 +81,7 @@ async def main():
         
         scheduler.shutdown()
         await bot.session.close()
+        await close_session()
         logger.info("Bot session closed. Goodbye!")
 
 if __name__ == "__main__":

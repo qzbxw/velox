@@ -1,6 +1,7 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.billing import get_plan_config, normalize_plan
 from bot.database import db
+from bot.config import HLP_VAULT_ADDR, DIGEST_TARGETS, _vault_display_name
 from bot.services import (
     get_spot_balances, get_user_portfolio, pretty_float, get_perps_context, 
     get_hlp_info, _is_buy, calc_avg_entry_from_fills, get_all_assets_meta,
@@ -25,14 +26,7 @@ from aiogram.types import BufferedInputFile, InputMediaPhoto
 from bot.locales import _t
 
 logger = logging.getLogger(__name__)
-HLP_VAULT_ADDR = "0xdf13098394e1832014b0df3f91285497"
-DIGEST_TARGETS = [
-    "portfolio_daily",
-    "portfolio_weekly",
-    "hlp_daily",
-    "vault_weekly",
-    "vault_monthly",
-]
+
 
 async def _get_user_wallet_pairs() -> list[tuple[int | str, str]]:
     """Return deduplicated (user_id, wallet) pairs from current + legacy storage."""
@@ -56,13 +50,7 @@ async def _get_user_wallet_pairs() -> list[tuple[int | str, str]]:
 
     return sorted(pairs, key=lambda x: (str(x[0]), x[1]))
 
-def _vault_display_name(vault_address: str) -> str:
-    v = str(vault_address or "").lower()
-    if not v:
-        return "Vault"
-    if HLP_VAULT_ADDR[2:] in v:
-        return "HLP"
-    return f"Vault {v[:6]}"
+
 
 def _parse_vault_cfg_key(key: str) -> tuple[str, str]:
     if not isinstance(key, str) or "|" not in key:

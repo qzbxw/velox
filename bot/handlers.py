@@ -6,7 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, InlineQuery, InlineQueryResultArticle, InputTextMessageContent, BufferedInputFile, InputMediaPhoto, ErrorEvent, LabeledPrice, PreCheckoutQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.billing import TEST_BILLING_ADMIN_IDS, PLAN_MONTH_OPTIONS, get_plan_config, get_plan_price, get_plan_price_options, get_plan_star_price, get_plan_star_price_options, get_plan_title, normalize_plan
-from bot.config import settings
+from bot.config import settings, HLP_VAULT_ADDR, DIGEST_TARGETS, _vault_display_name
 from bot.database import db
 from bot.locales import _t
 from bot.services import (
@@ -42,7 +42,7 @@ import json
 
 router = Router()
 logger = logging.getLogger(__name__)
-HLP_VAULT_ADDR = "0xdf13098394e1832014b0df3f91285497"
+
 
 async def smart_edit(call: CallbackQuery, text: str, reply_markup: InlineKeyboardMarkup = None):
     """Edits text message or deletes photo and sends new text message."""
@@ -407,13 +407,7 @@ def _vaults_kb(lang):
 def _is_hlp_vault(vault_address: str) -> bool:
     return HLP_VAULT_ADDR[2:] in str(vault_address or "").lower()
 
-def _vault_display_name(vault_address: str) -> str:
-    v = str(vault_address or "").lower()
-    if not v:
-        return "Vault"
-    if _is_hlp_vault(v):
-        return "HLP"
-    return f"Vault {v[:6]}"
+
 
 def _vault_cfg_key(wallet: str, vault: str) -> str:
     return f"{wallet.lower()}|{vault.lower()}"
@@ -453,13 +447,7 @@ async def _collect_user_vault_catalog(user_id: int) -> list[dict]:
     entries.sort(key=lambda x: x.get("equity", 0), reverse=True)
     return entries
 
-DIGEST_TARGETS = [
-    "portfolio_daily",
-    "portfolio_weekly",
-    "hlp_daily",
-    "vault_weekly",
-    "vault_monthly",
-]
+
 
 def _valid_hhmm(time_str: str) -> str | None:
     try:

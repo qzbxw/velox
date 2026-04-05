@@ -8,6 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from bot.locales import get_all_translations
+from bot.config import settings
 
 # Path to templates
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -15,7 +16,7 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 _playwright = None
 _browser = None
 _browser_lock = asyncio.Lock()
-_render_semaphore = asyncio.Semaphore(3)
+_render_semaphore = asyncio.Semaphore(settings.RENDER_CONCURRENCY)
 
 
 async def _get_browser():
@@ -68,7 +69,7 @@ async def render_html_to_image(template_name: str, data: dict, width: int = 800,
                     pass
                 await page.wait_for_timeout(250)
 
-                image_bytes = await page.screenshot(type="png", full_page=False)
+                image_bytes = await page.screenshot(type="png", full_page=False, timeout=15000)
                 return io.BytesIO(image_bytes)
         except Exception as e:
             last_error = e

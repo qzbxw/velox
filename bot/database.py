@@ -628,4 +628,12 @@ class Database:
             upsert=True
         )
 
-db = Database(settings.MONGO_URI, settings.MONGO_DB_NAME)
+_db_instance: Database | None = None
+
+def __getattr__(name: str) -> Database:
+    if name == "db":
+        global _db_instance
+        if _db_instance is None:
+            _db_instance = Database(settings.MONGO_URI, settings.MONGO_DB_NAME)
+        return _db_instance
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

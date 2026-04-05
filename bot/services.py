@@ -6,6 +6,23 @@ from bot.config import settings
 
 logger = logging.getLogger(__name__)
 
+_session: aiohttp.ClientSession | None = None
+
+async def get_session() -> aiohttp.ClientSession:
+    global _session
+    if _session is None or _session.closed:
+        _session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30),
+            connector=aiohttp.TCPConnector(limit=50, keepalive_timeout=60)
+        )
+    return _session
+
+async def close_session():
+    global _session
+    if _session and not _session.closed:
+        await _session.close()
+        _session = None
+
 # --- Rate Limiter ---
 async def _rate_limit():
     # Simple delay to stay under ~1200 req/min (20/s)
@@ -225,7 +242,8 @@ async def get_user_state(wallet_address: str):
         "user": wallet_address
     }
     
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -241,7 +259,8 @@ async def get_perps_state(wallet_address: str):
         "user": wallet_address
     }
     
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -263,7 +282,8 @@ async def get_spot_meta():
     url = f"{settings.HYPERLIQUID_API_URL}/info"
     payload = {"type": "spotMeta"}
     
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -274,7 +294,8 @@ async def get_perps_meta():
     url = f"{settings.HYPERLIQUID_API_URL}/info"
     payload = {"type": "meta"}
     
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -286,7 +307,8 @@ async def get_perps_context():
     url = f"{settings.HYPERLIQUID_API_URL}/info"
     payload = {"type": "metaAndAssetCtxs"}
     
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -299,7 +321,8 @@ async def get_open_orders(wallet_address: str):
         "user": wallet_address,
     }
 
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 data = await resp.json()
@@ -325,7 +348,8 @@ async def get_all_mids():
     payload = {"type": "allMids"}
 
     try:
-        async with aiohttp.ClientSession() as session:
+        session = await get_session()
+        if True:
             async with session.post(url, json=payload) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -389,7 +413,8 @@ async def get_user_portfolio(wallet_address: str):
         "user": wallet_address
     }
     try:
-        async with aiohttp.ClientSession() as session:
+        session = await get_session()
+        if True:
             async with session.post(url, json=payload) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -408,7 +433,8 @@ async def get_user_fills(wallet_address: str):
         "type": "userFills",
         "user": wallet_address
     }
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -425,7 +451,8 @@ async def get_user_funding(wallet_address: str, start_time: int = None):
     if start_time:
         payload["startTime"] = start_time
         
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -441,7 +468,8 @@ async def get_user_ledger(wallet_address: str, start_time: int = None):
     if start_time:
         payload["startTime"] = start_time
 
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -454,7 +482,8 @@ async def get_user_vault_equities(wallet_address: str):
         "type": "userVaultEquities",
         "user": wallet_address
     }
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -468,7 +497,8 @@ async def get_hlp_info():
         "vaultAddress": "0xdf13098394e1832014b0df3f91285497",
         "user": "0x0000000000000000000000000000000000000000"
     }
-    async with aiohttp.ClientSession() as session:
+    session = await get_session()
+    if True:
         async with session.post(url, json=payload) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -505,7 +535,8 @@ async def get_fear_greed_index():
     url = "https://api.alternative.me/fng/?limit=2"  # Get today + yesterday for change
     
     try:
-        async with aiohttp.ClientSession() as session:
+        session = await get_session()
+        if True:
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status == 200:
                     data = await resp.json()

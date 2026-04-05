@@ -1,25 +1,20 @@
 services:
   bot:
     build: .
-    container_name: hl_bot
+    container_name: velox_bot
     restart: always
+    env_file: .env
     environment:
       - PYTHONUNBUFFERED=1
-      - BOT_TOKEN=${BOT_TOKEN}
-      - MONGO_URI=mongodb://mongo:27017
+      - MONGO_URI=mongodb://${MONGO_USER}:${MONGO_PASS}@mongo:27017
       - MONGO_DB_NAME=hyperliquid_bot
-      - HYPERLIQUID_WS_URL=${HYPERLIQUID_WS_URL}
-      - HYPERLIQUID_API_URL=${HYPERLIQUID_API_URL}
-      - PROXIMITY_THRESHOLD=${PROXIMITY_THRESHOLD}
-      - BUY_PROXIMITY_THRESHOLD=${BUY_PROXIMITY_THRESHOLD}
-      - SELL_PROXIMITY_THRESHOLD=${SELL_PROXIMITY_THRESHOLD}
-      - PROXIMITY_USD_THRESHOLD=${PROXIMITY_USD_THRESHOLD}
-      - ALERT_COOLDOWN=${ALERT_COOLDOWN}
-      - MARKET_HISTORY_MINUTES=${MARKET_HISTORY_MINUTES}
-      - WATCH_ALERT_PCT=${WATCH_ALERT_PCT}
-      - WATCH_ALERT_WINDOW_SEC=${WATCH_ALERT_WINDOW_SEC}
-      - WATCH_ALERT_COOLDOWN=${WATCH_ALERT_COOLDOWN}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    mem_limit: 2g
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     depends_on:
       mongo:
         condition: service_healthy
@@ -27,13 +22,23 @@ services:
       - bot_net
 
   mongo:
-    image: mongo:latest
-    container_name: hl_mongo
+    image: mongo:7.0
+    container_name: velox_mongo
     restart: always
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASS}
     volumes:
       - mongo_data:/data/db
+    mem_limit: 1g
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "-u", "${MONGO_USER}", "-p", "${MONGO_PASS}", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5

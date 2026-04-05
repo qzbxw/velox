@@ -46,6 +46,10 @@ class WSManager:
         self.active_alerts = [] # List of alert dicts
         self.triggered_alerts = set() # Set of alert_ids that recently triggered (to avoid double trigger if DB lag)
         
+        self.ready_event = asyncio.Event()
+        self.wl_cache = {}
+        self.wl_cache_ts = {}
+        
         # Task handles
         self.ping_task = None
         self.alerts_refresh_task = None
@@ -67,6 +71,7 @@ class WSManager:
 
     async def start(self):
         self.running = True
+        backoff = 5
         
         # Start background tasks
         self.alerts_refresh_task = asyncio.create_task(self._refresh_alerts_loop())
@@ -79,6 +84,8 @@ class WSManager:
                 async with websockets.connect(self.ws_url) as ws:
                     self.ws = ws
                     logger.info("Connected to Hyperliquid WS")
+                    backoff = 5
+                    self.ready_event.set()
 
                     # Reset whale subscriptions state on new connection
                     self.top_assets = set()
@@ -136,7 +143,9 @@ class WSManager:
                         
             except Exception as e:
                 logger.error(f"WS Connection error: {e}")
-                await asyncio.sleep(5)  # Backoff
+                self.ready_event.clear()
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 120)
             finally:
                 if self.ping_task:
                     self.ping_task.cancel()
@@ -150,9 +159,7 @@ class WSManager:
         """Periodically subscribe to trades for top volume assets."""
         while self.running:
             try:
-                if not self.ws:
-                    await asyncio.sleep(5)
-                    continue
+                await self.ready_event.wait()
 
                 ctx = await get_perps_context()
                 if ctx and isinstance(ctx, list) and len(ctx) == 2:
@@ -227,7 +234,15 @@ class WSManager:
 
                 # Watchlist filter
                 if u.get("whale_watchlist_only"):
-                    watchlist = await db.get_watchlist(user_id)
+                    import time
+                    now_s = time.time()
+                    if user_id in self.wl_cache and now_s - self.wl_cache_ts.get(user_id, 0) < 60:
+                        watchlist = self.wl_cache[user_id]
+                    else:
+                        watchlist = await db.get_watchlist(user_id)
+                        self.wl_cache[user_id] = watchlist
+                        self.wl_cache_ts[user_id] = now_s
+
                     if sym not in watchlist:
                         continue
                     
@@ -304,6 +319,7 @@ class WSManager:
         """Fetch alerts and user settings from DB periodically."""
         while self.running:
             try:
+                await self.ready_event.wait()
                 # Price Alerts
                 alerts = await db.get_all_active_alerts()
                 if alerts is not None:
@@ -480,6 +496,7 @@ class WSManager:
         """Periodically check for new assets in the universe."""
         while self.running:
             try:
+                await self.ready_event.wait()
                 from bot.services import get_all_assets_meta
                 meta = await get_all_assets_meta()
                 
@@ -1241,106 +1258,92 @@ class WSManager:
         from bot.services import get_user_ledger
         logger.info("Starting Ledger Monitor Loop")
         
+        sem = asyncio.Semaphore(10)
+        
+        async def _process_wallet(wallet):
+            async with sem:
+                w_state = await db.get_wallet_state(wallet)
+                last_time = int(w_state.get("last_ledger_time", 0)) if w_state else 0
+                
+                updates = await get_user_ledger(wallet, start_time=last_time + 1 if last_time > 0 else None)
+                if not updates or not isinstance(updates, list):
+                    return
+                    
+                new_max_time = last_time
+                valid_updates = []
+                for event in updates:
+                    ts = int(event.get("time", 0))
+                    if ts > last_time:
+                        valid_updates.append(event)
+                        if ts > new_max_time:
+                            new_max_time = ts
+                
+                if last_time == 0:
+                    if new_max_time > 0:
+                        await db.update_wallet_ledger_time(wallet, new_max_time)
+                    return
+                
+                valid_updates.sort(key=lambda x: int(x.get("time", 0)))
+                for event in valid_updates:
+                    delta = event.get("delta", {})
+                    type_ = delta.get("type")
+                    if type_ not in ("deposit", "withdraw", "transfer", "spotTransfer"):
+                        continue
+                        
+                    amount = delta.get("usdc") or delta.get("amount") or 0.0
+                    try:
+                        amount = float(amount)
+                    except (TypeError, ValueError):
+                        amount = 0.0
+                    
+                    key_map = {
+                        "deposit": "deposit_alert",
+                        "withdraw": "withdraw_alert",
+                        "transfer": "transfer_alert",
+                        "spotTransfer": "transfer_alert"
+                    }
+                    key = key_map.get(type_, "transfer_alert")
+                    
+                    users = await db.get_users_by_wallet(wallet)
+                    for user in users:
+                        chat_id = user.get("chat_id")
+                        if not chat_id:
+                            continue
+                        lang = await db.get_lang(chat_id)
+                        
+                        title = _t(lang, key)
+                        msg = f"{title}\n"
+                        msg += f"👛 <code>{wallet[:6]}...{wallet[-4:]}</code>\n"
+                        msg += _t(lang, "ledger_amt", amount=pretty_float(amount))
+                        try:
+                            from datetime import datetime
+                            ts_dt = datetime.fromtimestamp(int(event.get("time", 0)) / 1000)
+                            msg += f"\n🕐 {ts_dt.strftime('%H:%M:%S')}"
+                        except Exception as e:
+                            logger.debug(f"Failed to format ledger timestamp for {wallet}: {e}")
+
+                        try:
+                            sent_msg = await self.bot.send_message(chat_id, msg, parse_mode="HTML")
+                            if sent_msg:
+                                await self.fire_hedge_insight(chat_id, chat_id, "ledger", {
+                                    "type": type_,
+                                    "amount": amount,
+                                    "wallet": wallet
+                                }, reply_to_id=sent_msg.message_id)
+                        except Exception as e:
+                            logger.warning(f"Failed to send ledger alert to {chat_id}: {e}")
+                            
+                if new_max_time > last_time:
+                    await db.update_wallet_ledger_time(wallet, new_max_time)
+
         while self.running:
             try:
-                # 1. Get unique wallets
+                await self.ready_event.wait()
                 wallets = await db.get_all_watched_addresses()
                 
-                for wallet in wallets:
-                    # 2. Get state
-                    w_state = await db.get_wallet_state(wallet)
-                    last_time = int(w_state.get("last_ledger_time", 0)) if w_state else 0
-                    
-                    # 3. Fetch updates
-                    # If last_time == 0, we fetch updates, find max time, save it, and continue (no alert on first run)
-                    updates = await get_user_ledger(wallet, start_time=last_time + 1 if last_time > 0 else None)
-                    
-                    if not updates or not isinstance(updates, list):
-                        continue
-                        
-                    # Filter updates
-                    new_max_time = last_time
-                    valid_updates = []
-                    
-                    for event in updates:
-                        # event structure: {"hash": "...", "time": 123456789, "delta": {...}}
-                        ts = int(event.get("time", 0))
-                        if ts > last_time:
-                            valid_updates.append(event)
-                            if ts > new_max_time:
-                                new_max_time = ts
-                    
-                    # Initialization check
-                    if last_time == 0:
-                        if new_max_time > 0:
-                            await db.update_wallet_ledger_time(wallet, new_max_time)
-                        continue
-                    
-                    # Process Alerts
-                    valid_updates.sort(key=lambda x: int(x.get("time", 0)))
-                    
-                    for event in valid_updates:
-                        delta = event.get("delta", {})
-                        type_ = delta.get("type")
-                        
-                        # Supported types
-                        if type_ not in ("deposit", "withdraw", "transfer", "spotTransfer"):
-                            continue
-                            
-                        # Extract amount
-                        amount = delta.get("usdc") or delta.get("amount") or 0.0
-                        try:
-                            amount = float(amount)
-                        except (TypeError, ValueError):
-                            amount = 0.0
-                        
-                        # Determine Alert Key
-                        key_map = {
-                            "deposit": "deposit_alert",
-                            "withdraw": "withdraw_alert",
-                            "transfer": "transfer_alert",
-                            "spotTransfer": "transfer_alert"
-                        }
-                        
-                        key = key_map.get(type_, "transfer_alert")
-                        
-                        # Notify Users
-                        users = await db.get_users_by_wallet(wallet)
-                        for user in users:
-                            chat_id = user.get("chat_id")
-                            if not chat_id:
-                                continue
-                            lang = await db.get_lang(chat_id)
-                            
-                            title = _t(lang, key)
-                            msg = f"{title}\n"
-                            msg += f"👛 <code>{wallet[:6]}...{wallet[-4:]}</code>\n"
-                            msg += _t(lang, "ledger_amt", amount=pretty_float(amount))
-                            
-                            # Add time
-                            try:
-                                from datetime import datetime
-                                ts_dt = datetime.fromtimestamp(int(event.get("time", 0)) / 1000)
-                                msg += f"\n🕐 {ts_dt.strftime('%H:%M:%S')}"
-                            except Exception as e:
-                                logger.debug(f"Failed to format ledger timestamp for {wallet}: {e}")
-
-                            try:
-                                sent_msg = await self.bot.send_message(chat_id, msg, parse_mode="HTML")
-                                if sent_msg:
-                                    await self.fire_hedge_insight(chat_id, chat_id, "ledger", {
-                                        "type": type_,
-                                        "amount": amount,
-                                        "wallet": wallet
-                                    }, reply_to_id=sent_msg.message_id)
-                            except Exception as e:
-                                logger.warning(f"Failed to send ledger alert to {chat_id}: {e}")
-                            
-                    # Update DB
-                    if new_max_time > last_time:
-                        await db.update_wallet_ledger_time(wallet, new_max_time)
-                        
-                    await asyncio.sleep(0.5) # Pace per wallet
+                tasks = [asyncio.create_task(_process_wallet(w)) for w in wallets]
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
                     
                 await asyncio.sleep(60) # Global loop interval
                 

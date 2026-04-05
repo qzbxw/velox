@@ -19,7 +19,7 @@ docker compose down
 
 # Clean up Docker garbage (free space)
 echo -e "${BLUE}🧹 Cleaning Docker cache and old images...${NC}"
-docker system prune -af --volumes
+docker image prune -af
 echo -e "${GREEN}✅ Docker cleaned!${NC}"
 
 # Rebuild images

@@ -32,7 +32,7 @@ services:
     volumes:
       - mongo_data:/data/db
     mem_limit: 1g
-    cpus: 0.2
+    cpus: 0.5
     logging:
       driver: json-file
       options:
@@ -43,6 +43,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 60s
     networks:
       - bot_net
 

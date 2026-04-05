@@ -9,7 +9,7 @@ services:
       - MONGO_URI=mongodb://${MONGO_USER}:${MONGO_PASS}@mongo:27017
       - MONGO_DB_NAME=hyperliquid_bot
     mem_limit: 2g
-    cpus: 1.5
+    cpus: 0.7
     logging:
       driver: json-file
       options:
@@ -31,7 +31,7 @@ services:
     volumes:
       - mongo_data:/data/db
     mem_limit: 1g
-    cpus: 1.0
+    cpus: 0.2
     logging:
       driver: json-file
       options:

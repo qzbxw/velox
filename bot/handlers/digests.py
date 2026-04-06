@@ -18,12 +18,14 @@ from bot.handlers.states import SettingsStates
 router = Router(name="digests")
 logger = logging.getLogger(__name__)
 
-@router.callback_query(F.data == "cb_digest_settings_menu")
+@router.callback_query(F.data.startswith("cb_digest_settings_menu"))
 async def cb_digest_settings_menu(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "cb_settings"
     lang = await db.get_lang(call.message.chat.id)
     if not await _ensure_billing_feature(call, call.message.chat.id, lang, "digests", "billing_feature_digests", is_callback=True):
         return
-    text, kb = await _build_digest_settings_ui(call.message.chat.id, lang)
+    text, kb = await _build_digest_settings_ui(call.message.chat.id, lang, back_target=back_target)
     await smart_edit(call, text, reply_markup=kb)
     await call.answer()
 
@@ -32,7 +34,9 @@ async def cb_digest_toggle(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
     if not await _ensure_billing_feature(call, call.message.chat.id, lang, "digests", "billing_feature_digests", is_callback=True):
         return
-    target = call.data.split(":", 1)[1]
+    parts = call.data.split(":")
+    target = parts[1]
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "cb_settings"
     if target not in DIGEST_TARGETS:
         await call.answer("Invalid digest")
         return
@@ -42,7 +46,7 @@ async def cb_digest_toggle(call: CallbackQuery):
             return
     enabled = await db.toggle_digest_enabled(call.message.chat.id, target)
     await call.answer(_t(lang, "digest_toggle_done").format(state="ON" if enabled else "OFF"))
-    text, kb = await _build_digest_settings_ui(call.message.chat.id, lang)
+    text, kb = await _build_digest_settings_ui(call.message.chat.id, lang, back_target=back_target)
     await smart_edit(call, text, reply_markup=kb)
 
 @router.callback_query(F.data.startswith("dg_set_time:"))
@@ -50,12 +54,14 @@ async def cb_digest_set_time(call: CallbackQuery, state: FSMContext):
     lang = await db.get_lang(call.message.chat.id)
     if not await _ensure_billing_feature(call, call.message.chat.id, lang, "digests", "billing_feature_digests", is_callback=True):
         return
-    target = call.data.split(":", 1)[1]
+    parts = call.data.split(":")
+    target = parts[1]
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "cb_settings"
     if target not in DIGEST_TARGETS:
         await call.answer("Invalid digest")
         return
-    await state.update_data(digest_target=target, digest_menu_msg_id=call.message.message_id)
-    await smart_edit(call, _t(lang, "digest_time_prompt").format(name=_t(lang, _digest_label_key(target))), reply_markup=_back_kb(lang, "cb_digest_settings_menu"))
+    await state.update_data(digest_target=target, digest_menu_msg_id=call.message.message_id, back_target=back_target)
+    await smart_edit(call, _t(lang, "digest_time_prompt").format(name=_t(lang, _digest_label_key(target))), reply_markup=_back_kb(lang, f"cb_digest_settings_menu:{back_target}"))
     await state.set_state(SettingsStates.waiting_for_digest_time)
     await call.answer()
 
@@ -64,6 +70,7 @@ async def process_digest_time_state(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
     data = await state.get_data()
     target = data.get("digest_target")
+    back_target = data.get("back_target", "cb_settings")
     if target not in DIGEST_TARGETS:
         await state.clear()
         await message.answer("❌ Invalid digest target.")
@@ -78,7 +85,7 @@ async def process_digest_time_state(message: Message, state: FSMContext):
         await message.delete()
     except Exception:
         pass
-    text, kb = await _build_digest_settings_ui(message.chat.id, lang)
+    text, kb = await _build_digest_settings_ui(message.chat.id, lang, back_target=back_target)
     msg_id = data.get("digest_menu_msg_id")
     if msg_id:
         try:

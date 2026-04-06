@@ -352,19 +352,19 @@ Provide a concise summary with key bullet points."""
             session = await get_session()
             async with session.post(self.news_agent_url, json=payload, timeout=90) as resp:
                 if resp.status == 200:
-                        data = await resp.json()
-                        candidate = data["candidates"][0]
-                        text = candidate["content"]["parts"][0]["text"].strip()
+                    data = await resp.json()
+                    candidate = data["candidates"][0]
+                    text = candidate["content"]["parts"][0]["text"].strip()
 
-                        # Extract grounding metadata if available for transparency
-                        grounding_meta = candidate.get("groundingMetadata", {})
-                        if grounding_meta:
-                            logger.info(f"News Agent received groundingMetadata with {len(grounding_meta.get('groundingChunks', []))} chunks")
-                            
-                        return text
-                    else:
-                        error_text = await resp.text()
-                        logger.error(f"News Agent error: {resp.status} - {error_text}")
+                    # Extract grounding metadata if available for transparency
+                    grounding_meta = candidate.get("groundingMetadata", {})
+                    if grounding_meta:
+                        logger.info(f"News Agent received groundingMetadata with {len(grounding_meta.get('groundingChunks', []))} chunks")
+
+                    return text
+                else:
+                    error_text = await resp.text()
+                    logger.error(f"News Agent error: {resp.status} - {error_text}")
         except Exception as e:
             logger.error(f"News Agent exception: {e}")
 
@@ -484,8 +484,8 @@ Provide a concise summary with key bullet points."""
                             return parsed
 
                         return default_res
-                    else:
-                        logger.error(f"Hedge Agent error: {resp.status} - {await resp.text()}")
+                else:
+                    logger.error(f"Hedge Agent error: {resp.status} - {await resp.text()}")
         except Exception as e:
             logger.error(f"Hedge Agent exception: {str(e)}", exc_info=True)
 

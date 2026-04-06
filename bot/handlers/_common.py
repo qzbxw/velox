@@ -242,7 +242,7 @@ def _main_menu_kb(lang):
         InlineKeyboardButton(text=_t(lang, "cat_alerts"), callback_data="sub:alerts")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "cat_ai_market"), callback_data="sub:ai_market"),
+        InlineKeyboardButton(text=_t(lang, "cat_market"), callback_data="sub:market"),
         InlineKeyboardButton(text=_t(lang, "cat_settings"), callback_data="cb_settings")
     )
     return kb.as_markup()
@@ -251,15 +251,15 @@ def _dashboard_kb(lang):
     kb = InlineKeyboardBuilder()
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_balance"), callback_data="cb_balance:portfolio"),
-        InlineKeyboardButton(text=_t(lang, "btn_pnl"), callback_data="cb_pnl")
+        InlineKeyboardButton(text=_t(lang, "btn_pnl"), callback_data="cb_pnl:portfolio")
     )
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_positions"), callback_data="cb_positions:portfolio:0"),
         InlineKeyboardButton(text=_t(lang, "btn_orders"), callback_data="cb_orders:portfolio:0")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_terminal"), callback_data="cb_terminal"),
-        InlineKeyboardButton(text=_t(lang, "btn_delta_neutral"), callback_data="cb_delta_neutral")
+        InlineKeyboardButton(text=_t(lang, "btn_terminal"), callback_data="cb_terminal:dashboard"),
+        InlineKeyboardButton(text=_t(lang, "btn_delta_neutral"), callback_data="cb_delta_neutral:dashboard")
     )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
@@ -267,29 +267,16 @@ def _dashboard_kb(lang):
 def _alerts_kb(lang):
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data="cb_alerts"),
-        InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data="sub:market") # For watchlist?
+        InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data="cb_alerts:alerts"),
+        InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data="sub:market:alerts") # For watchlist?
     )
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_funding_alert"), callback_data="cb_funding_alert_prompt"),
         InlineKeyboardButton(text=_t(lang, "btn_oi_alert"), callback_data="cb_oi_alert_prompt")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data="cb_whales"),
-        InlineKeyboardButton(text=_t(lang, "btn_hedge_chat"), callback_data="cb_hedge_chat_start")
-    )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
-    return kb.as_markup()
-
-def _ai_market_kb(lang):
-    kb = InlineKeyboardBuilder()
-    kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_market_overview"), callback_data="cb_ai_overview_menu"),
-        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_alerts")
-    )
-    kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_fear_greed"), callback_data="cb_fear_greed"),
-        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data="cb_hlp_snapshot")
+        InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data="cb_whales:alerts"),
+        InlineKeyboardButton(text=_t(lang, "btn_hedge_chat"), callback_data="cb_hedge_chat_start:alerts")
     )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
@@ -297,12 +284,12 @@ def _ai_market_kb(lang):
 def _overview_kb(lang):
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_terminal"), callback_data="cb_terminal"),
-        InlineKeyboardButton(text=_t(lang, "btn_delta_neutral"), callback_data="cb_delta_neutral")
+        InlineKeyboardButton(text=_t(lang, "btn_terminal"), callback_data="cb_terminal:overview"),
+        InlineKeyboardButton(text=_t(lang, "btn_delta_neutral"), callback_data="cb_delta_neutral:overview")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_hedge_ai"), callback_data="cb_ai_overview_menu"),
-        InlineKeyboardButton(text=_t(lang, "btn_hedge_chat"), callback_data="cb_hedge_chat_start")
+        InlineKeyboardButton(text=_t(lang, "btn_hedge_ai"), callback_data="cb_ai_overview_menu:overview"),
+        InlineKeyboardButton(text=_t(lang, "btn_hedge_chat"), callback_data="cb_hedge_chat_start:overview")
     )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
@@ -311,7 +298,7 @@ def _portfolio_kb(lang):
     kb = InlineKeyboardBuilder()
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_balance"), callback_data="cb_balance:portfolio"),
-        InlineKeyboardButton(text=_t(lang, "btn_pnl"), callback_data="cb_pnl")
+        InlineKeyboardButton(text=_t(lang, "btn_pnl"), callback_data="cb_pnl:portfolio")
     )
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_positions"), callback_data="cb_positions:portfolio:0"),
@@ -338,30 +325,34 @@ def _trading_kb(lang):
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
 
-def _market_kb(lang):
+def _market_kb(lang, back_target="cb_menu"):
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data="cb_market"),
-        InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data="cb_whales")
+        InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data=f"cb_market:market:{back_target}"),
+        InlineKeyboardButton(text=_t(lang, "btn_market_overview"), callback_data=f"cb_ai_overview_menu:{back_target}")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_fear_greed"), callback_data="cb_fear_greed"),
-        InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data="cb_alerts")
+        InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data=f"cb_whales:market:{back_target}"),
+        InlineKeyboardButton(text=_t(lang, "btn_fear_greed"), callback_data=f"cb_fear_greed:market:{back_target}")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_alerts")
+        InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data=f"cb_alerts:market:{back_target}"),
+        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data=f"cb_hlp_snapshot:market:{back_target}")
     )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    kb.row(
+        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data=f"cb_market_alerts:market:{back_target}")
+    )
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     return kb.as_markup()
 
-def _vaults_kb(lang):
+def _vaults_kb(lang, back_target="cb_menu"):
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_vaults_overview"), callback_data="cb_vaults_overview"),
-        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data="cb_hlp_snapshot")
+        InlineKeyboardButton(text=_t(lang, "btn_vaults_overview"), callback_data=f"cb_vaults_overview:{back_target}"),
+        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data=f"cb_hlp_snapshot:vaults:{back_target}")
     )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data="cb_vault_reports_menu"))
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data=f"cb_vault_reports_menu:{back_target}"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     return kb.as_markup()
 
 def _is_hlp_vault(vault_address: str) -> bool:
@@ -603,7 +594,7 @@ async def _build_billing_ui(user_id: int, lang: str) -> tuple[str, InlineKeyboar
         kb.adjust(2, 2, 2, 2, 1)
     return text, kb.as_markup()
 
-async def _build_digest_settings_ui(user_id: int, lang: str) -> tuple[str, InlineKeyboardMarkup]:
+async def _build_digest_settings_ui(user_id: int, lang: str, back_target: str = "cb_settings") -> tuple[str, InlineKeyboardMarkup]:
     cfg = await db.get_digest_settings(user_id)
     state = await _get_billing_state(user_id)
     digest_limit = _limit_value(state["plan_cfg"]["limits"].get("digest_slots"))
@@ -625,14 +616,14 @@ async def _build_digest_settings_ui(user_id: int, lang: str) -> tuple[str, Inlin
         kb.row(
             InlineKeyboardButton(
                 text=f"{'✅' if enabled else '➕'} {name}",
-                callback_data=f"dg_toggle:{target}"
+                callback_data=f"dg_toggle:{target}:{back_target}"
             ),
             InlineKeyboardButton(
                 text=f"🕒 {time_str}",
-                callback_data=f"dg_set_time:{target}"
+                callback_data=f"dg_set_time:{target}:{back_target}"
             )
         )
 
     text += f"\n<i>{_t(lang, 'digest_schedule_note')}</i>"
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     return text, kb.as_markup()

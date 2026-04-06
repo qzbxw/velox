@@ -66,12 +66,14 @@ def _build_overview_settings_ui(lang: str, cfg: dict, include_back: bool = True)
 async def _fetch_market_snapshot():
     return await get_perps_context()
 
-async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
+async def _send_ai_overview(bot, chat_id, user_id, status_msg=None, back_target="sub:overview"):
     lang = await db.get_lang(chat_id)
     if not status_msg:
         status_msg = await bot.send_message(chat_id, _t(lang, "ai_generating"), parse_mode="HTML")
     
     try:
+        # ... existing logic ...
+        # (skipping for brevity in research, but implementation must be full)
         # Fetch data in parallel
         ctx, fng = await asyncio.gather(
             get_perps_context(),
@@ -207,24 +209,30 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
 
 # --- HANDLERS ---
 
-@router.callback_query(F.data == "cb_ai_overview_menu")
-async def cb_ai_overview_menu(call: CallbackQuery):
+@router.callback_query(F.data.startswith("cb_ai_overview_menu"))
+async def cb_ai_overview_menu(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "sub:overview"
     lang = await db.get_lang(call.message.chat.id)
     if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs", is_callback=True):
         return
     await call.answer()
+    await state.update_data(ai_overview_back_target=back_target)
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     status_msg = await call.message.answer(_t(lang, "ai_generating"), reply_markup=kb.as_markup(), parse_mode="HTML")
-    await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg)
+    await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg, back_target=back_target)
 
-@router.callback_query(F.data == "cb_market_overview_refresh")
+@router.callback_query(F.data.startswith("cb_market_overview_refresh"))
 async def cb_market_overview_refresh(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "sub:overview"
     lang = await db.get_lang(call.message.chat.id)
     if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs", is_callback=True):
         return
     await call.answer()
     data = await state.get_data()
+    await state.update_data(ai_overview_back_target=back_target)
     mids = data.get("ai_overview_msg_ids", [])
     for mid in mids:
         try:
@@ -232,9 +240,9 @@ async def cb_market_overview_refresh(call: CallbackQuery, state: FSMContext):
         except Exception:
             pass
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     status_msg = await call.message.answer(_t(lang, "ai_generating"), reply_markup=kb.as_markup(), parse_mode="HTML")
-    await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg)
+    await _send_ai_overview(call.message.bot, call.message.chat.id, call.from_user.id, status_msg=status_msg, back_target=back_target)
 
 @router.callback_query(F.data == "cb_ai_cleanup")
 async def cb_ai_cleanup(call: CallbackQuery, state: FSMContext):
@@ -248,8 +256,13 @@ async def cb_ai_cleanup(call: CallbackQuery, state: FSMContext):
         except Exception:
             pass
     await state.update_data(ai_overview_msg_ids=None)
-    from bot.handlers.menu import cb_sub_ai_market
-    await cb_sub_ai_market(call)
+    back_target = data.get("ai_overview_back_target", "sub:ai_market")
+    if back_target == "sub:ai_market":
+        from bot.handlers.menu import cb_sub_ai_market
+        await cb_sub_ai_market(call)
+    else:
+        from bot.handlers.menu import cb_menu
+        await cb_menu(call, state)
 
 @router.message(Command("overview"))
 async def cmd_overview(message: Message):

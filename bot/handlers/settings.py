@@ -87,11 +87,13 @@ async def cb_del_wallet(call: CallbackQuery):
     await db.remove_wallet(call.message.chat.id, call.data.split(":")[1])
     await cb_wallets_menu(call)
 
-@router.callback_query(F.data == "cb_add_wallet_prompt")
-async def cb_add_wallet_prompt(call: CallbackQuery):
+@router.callback_query(F.data.startswith("cb_add_wallet_prompt"))
+async def cb_add_wallet_prompt(call: CallbackQuery, state: FSMContext = None):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "cb_wallets_menu"
     lang = await db.get_lang(call.message.chat.id)
     text = _t(lang, "add_wallet_prompt")
-    await call.message.edit_text(text, reply_markup=_back_kb(lang, "cb_wallets_menu"), parse_mode="HTML")
+    await call.message.edit_text(text, reply_markup=_back_kb(lang, back_target), parse_mode="HTML")
     await call.answer()
 
 @router.message(Command("add_wallet"))
@@ -113,7 +115,14 @@ async def cmd_add_wallet(message: Message):
     if ws:
         ws.track_wallet(wallet)
         await ws.subscribe_user(wallet)
-    await message.answer(_t(lang, "tracking").format(wallet=wallet), reply_markup=_back_kb(lang), parse_mode="HTML")
+    
+    # After adding, if it was the first wallet, show main menu
+    if len(wallets) == 0:
+        from bot.handlers._common import _main_menu_text, _main_menu_kb
+        await message.answer(_t(lang, "tracking").format(wallet=wallet), parse_mode="HTML")
+        await message.answer(_main_menu_text(lang, [wallet]), reply_markup=_main_menu_kb(lang), parse_mode="HTML")
+    else:
+        await message.answer(_t(lang, "tracking").format(wallet=wallet), reply_markup=_back_kb(lang, "cb_wallets_menu"), parse_mode="HTML")
 
 @router.message(Command("tag"))
 async def cmd_tag(message: Message):
@@ -179,38 +188,21 @@ async def process_set_prox_state(message: Message, state: FSMContext):
         res = "✅ " + _t(lang, "prox_set", val=val*100)
     except ValueError:
         res = "❌ " + _t(lang, "invalid_number")
+    
+    back_target = data.get("back_target") or data.get("market_back_target") or "cb_wallets_alerts_menu"
     await state.clear()
     try:
         await message.delete()
     except Exception:
         pass
     
-    back_target = data.get("back_target", "cb_wallets_alerts_menu")
     if back_target == "cb_whales":
         from bot.handlers.market import cb_whales as target_handler
     else:
         from bot.handlers.settings import cb_wallets_alerts_menu as target_handler
     
-    if data.get("menu_msg_id"):
-        try:
-            # We cannot easily call handler with call.message because message object is different.
-            # Best is to just answer and then the user can navigate back.
-            # Or manually edit the message if we know what it was.
-            pass
-        except Exception:
-            pass
-    
-    # Simple way: just send message and re-show menu
     await message.answer(res)
-    # We create a dummy CallbackQuery to reuse the handler
-    from aiogram.types import User, Chat
-    dummy_call = CallbackQuery(
-        id="0",
-        from_user=message.from_user,
-        chat_instance="0",
-        message=message,
-        data=back_target
-    )
+    dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=back_target)
     await target_handler(dummy_call)
 
 @router.message(SettingsStates.waiting_for_vol)
@@ -222,13 +214,14 @@ async def process_set_vol_state(message: Message, state: FSMContext):
         res = "✅ " + _t(lang, "vol_set", val=val*100)
     except ValueError:
         res = "❌ " + _t(lang, "invalid_number")
+    
+    back_target = data.get("back_target") or data.get("market_back_target") or "cb_wallets_alerts_menu"
     await state.clear()
     try:
         await message.delete()
     except Exception:
         pass
     
-    back_target = data.get("back_target", "cb_wallets_alerts_menu")
     if back_target == "cb_whales":
         from bot.handlers.market import cb_whales as target_handler
     else:
@@ -247,13 +240,14 @@ async def process_set_whale_state(message: Message, state: FSMContext):
         res = "✅ " + _t(lang, "whale_set", val=pretty_float(val))
     except ValueError:
         res = "❌ " + _t(lang, "invalid_number")
+    
+    back_target = data.get("back_target") or data.get("market_back_target") or "cb_wallets_alerts_menu"
     await state.clear()
     try:
         await message.delete()
     except Exception:
         pass
     
-    back_target = data.get("back_target", "cb_wallets_alerts_menu")
     if back_target == "cb_whales":
         from bot.handlers.market import cb_whales as target_handler
     else:

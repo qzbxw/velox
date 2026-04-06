@@ -27,8 +27,10 @@ from bot.handlers.states import MarketAlertStates
 router = Router(name="market")
 logger = logging.getLogger(__name__)
 
-@router.callback_query(F.data == "cb_market")
+@router.callback_query(F.data.startswith("cb_market"))
 async def cb_market(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = parts[2] if len(parts) > 2 else "sub:market"
     await call.answer("Loading...")
     lang = await db.get_lang(call.message.chat.id)
     ws = getattr(call.message.bot, "ws_manager", None)
@@ -56,143 +58,25 @@ async def cb_market(call: CallbackQuery):
         )
     text = f"{_t(lang, 'market_title')} (updated {time.strftime('%H:%M:%S', time.gmtime())})\n\n" + "\n\n".join(lines) + "\n\nℹ️ <i>/watch SYM | /unwatch SYM</i>"
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_market_overview"), callback_data="cb_market_overview")
-    kb.button(text=_t(lang, "btn_refresh"), callback_data="cb_market")
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
+    kb.button(text=_t(lang, "btn_market_overview"), callback_data=f"cb_ai_overview_menu:{back_target}")
+    kb.button(text=_t(lang, "btn_refresh"), callback_data=call.data)
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "cb_market_overview")
-async def cb_market_overview(call: CallbackQuery, state: FSMContext):
-    lang = await db.get_lang(call.message.chat.id)
-    if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs", is_callback=True):
-        return
-    await call.answer("Generating Market Insights...")
-    ctx, hlp_info, fng = await asyncio.gather(get_perps_context(), get_hlp_info(), get_fear_greed_index(), return_exceptions=True)
-    if isinstance(ctx, Exception) or not ctx:
-        await call.message.answer("❌ Error fetching market data.")
-        return
-    
-    universe, asset_ctxs = (ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0]), ctx[1]
-    data_alpha = prepare_modern_market_data(asset_ctxs, universe, hlp_info if not isinstance(hlp_info, Exception) else None)
-    
-    # Extract BTC/ETH prices for market_overview.html
-    btc_data = {"price": "0", "change": 0.0}
-    eth_data = {"price": "0", "change": 0.0}
-    for sym, target in [("BTC", btc_data), ("ETH", eth_data)]:
-        idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == sym), -1)
-        if idx != -1 and idx < len(asset_ctxs):
-            ac = asset_ctxs[idx]
-            p = float(ac.get("markPx", 0))
-            target["price"] = pretty_float(p)
-            target["change"] = round(((p - float(ac.get("prevDayPx", p))) / float(ac.get("prevDayPx", p))) * 100 if float(ac.get("prevDayPx", p)) > 0 else 0.0, 2)
-
-    # Top stats
-    top_gainer = data_alpha["gainers"][0] if data_alpha.get("gainers") else {"name": "N/A", "change": 0}
-    top_loser = data_alpha["losers"][0] if data_alpha.get("losers") else {"name": "N/A", "change": 0}
-    
-    # Volume/Funding
-    vol_indices = sorted([(i, float(ac.get("dayNtlVlm", 0))) for i, ac in enumerate(asset_ctxs)], key=lambda x: x[1], reverse=True)
-    fund_indices = sorted([(i, abs(float(ac.get("funding", 0)))) for i, ac in enumerate(asset_ctxs)], key=lambda x: x[1], reverse=True)
-    
-    top_vol_idx = vol_indices[0][0] if vol_indices else 0
-    top_fund_idx = fund_indices[0][0] if fund_indices else 0
-    
-    render_data = {
-        "period_label": "MARKET INSIGHTS",
-        "date": datetime.now().strftime("%d %b %H:%M"),
-        "btc": btc_data,
-        "eth": eth_data,
-        "sentiment": data_alpha.get("sentiment_label", "NEUTRAL"),
-        "fng": fng if fng and not isinstance(fng, Exception) else {"value": 0, "classification": "N/A"},
-        "gemini_model": "Velox Engine",
-        "top_gainer": {"sym": top_gainer["name"], "val": top_gainer["change"]},
-        "top_loser": {"sym": top_loser["name"], "val": top_loser["change"]},
-        "top_vol": {"sym": (universe[top_vol_idx]["name"] if isinstance(universe[top_vol_idx], dict) else universe[top_vol_idx]) if top_vol_idx < len(universe) else "N/A", "val": f"${vol_indices[0][1]/1e6:.1f}M"},
-        "top_fund": {"sym": (universe[top_fund_idx]["name"] if isinstance(universe[top_fund_idx], dict) else universe[top_fund_idx]) if top_fund_idx < len(universe) else "N/A", "val": f"{float(asset_ctxs[top_fund_idx].get('funding',0))*100*24*365:.1f}%"}
-    }
-
-    try:
-        # Use market_overview.html as main and funding_heatmap.html as secondary
-        buf_main, buf_heat = await asyncio.gather(
-            render_html_to_image("market_overview.html", render_data, width=1000, height=1000, lang=lang),
-            render_html_to_image("funding_heatmap.html", data_alpha, lang=lang)
-        )
-        
-        majors_text = ""
-        for sym in ["BTC", "ETH", "SOL", "HYPE"]:
-            idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == sym), -1)
-            if idx != -1:
-                ac = asset_ctxs[idx]
-                p = float(ac.get("markPx", 0))
-                change = ((p - float(ac.get("prevDayPx", p))) / float(ac.get("prevDayPx", p))) * 100 if float(ac.get("prevDayPx", p)) > 0 else 0.0
-                majors_text += (
-                    f"🔹 <b>{sym}</b>: ${pretty_float(p)} ({'🟢' if change>=0 else '🔴'} {change:+.2f}%)\n"
-                    f"   ├ F: <code>{float(ac.get('funding', 0))*24*365*100:+.1f}% APR</code>\n"
-                    f"   └ OI: <b>${float(ac.get('openInterest', 0))*p/1e6:.1f}M</b> | Vol: <b>${float(ac.get('dayNtlVlm', 0))/1e6:.1f}M</b>\n\n"
-                )
-        
-        watchlist, watchlist_lines = await db.get_watchlist(call.message.chat.id), []
-        if watchlist:
-            for sym in watchlist:
-                if sym in ["BTC", "ETH", "SOL", "HYPE"]: continue
-                idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == sym), -1)
-                if idx != -1:
-                    ac = asset_ctxs[idx]
-                    p = float(ac.get("markPx", 0))
-                    change = ((p - float(ac.get("prevDayPx", p))) / float(ac.get("prevDayPx", p))) * 100 if float(ac.get("prevDayPx", p)) > 0 else 0.0
-                    watchlist_lines.append(f"• {sym}: ${pretty_float(p)} ({'🟢' if change>=0 else '🔴'} {change:+.2f}%)")
-        
-        fng_text = f"• Fear/Greed: {fng['emoji']} <b>{fng['value']}</b> ({fng['classification']})" if fng and not isinstance(fng, Exception) else ""
-        watchlist_text = f"⭐ <b>Watchlist</b>:\n" + "\n".join(watchlist_lines) + "\n\n" if watchlist_lines else ""
-        
-        text_report = (
-            f"📊 <b>Market Intelligence</b>\n\n"
-            f"• Vol 24h: <b>${data_alpha['global_volume']}</b>\n"
-            f"• Total OI: <b>${data_alpha['total_oi']}</b>\n"
-            f"• Sentiment: <code>{data_alpha['sentiment_label']}</code>\n"
-            f"{fng_text}\n\n"
-            f"<b>Majors & Watchlist</b>\n"
-            f"{majors_text}{watchlist_text}"
-            f"🕒 <i>{time.strftime('%H:%M')} UTC</i>"
-        )
-        
-        await call.message.delete()
-        mids = await call.message.answer_media_group([
-            InputMediaPhoto(media=BufferedInputFile(buf_main.read(), filename="i1.png")),
-            InputMediaPhoto(media=BufferedInputFile(buf_heat.read(), filename="i2.png"))
-        ])
-        await state.update_data(market_media_ids=[m.message_id for m in mids])
-        kb = InlineKeyboardBuilder()
-        kb.button(text=_t(lang, "btn_back"), callback_data="cb_market_cleanup")
-        await call.message.answer(text_report, reply_markup=kb.as_markup(), parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Error generating images: {e}")
-        await call.message.answer("❌ Error generating insights.")
-
-@router.callback_query(F.data == "cb_market_cleanup")
-async def cb_market_cleanup(call: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    for mid in data.get("market_media_ids", []):
-        try:
-            await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
-        except Exception:
-            pass
-    await state.update_data(market_media_ids=None)
-    from bot.handlers.menu import cb_sub_market
-    await cb_sub_market(call)
-
 @router.callback_query(F.data.startswith("cb_heatmap_sort:"))
 async def cb_heatmap_sort(call: CallbackQuery):
-    sort_by = call.data.split(":")[1]
+    parts = call.data.split(":")
+    sort_by = parts[1]
+    back_target = parts[2] if len(parts) > 2 else "cb_market"
     await call.answer(f"Sorting by {sort_by}...")
     lang, ctx = await db.get_lang(call.message.chat.id), await get_perps_context()
     buf = generate_market_overview_image(ctx[1], ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0], sort_by=sort_by)
     kb = InlineKeyboardBuilder()
     for s in ["vol", "funding", "oi", "change"]:
         if s != sort_by:
-            kb.button(text=_t(lang, f"sort_{s}"), callback_data=f"cb_heatmap_sort:{s}")
-    kb.button(text=_t(lang, "btn_back"), callback_data="cb_market")
+            kb.button(text=_t(lang, f"sort_{s}"), callback_data=f"cb_heatmap_sort:{s}:{back_target}")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(2, 2)
     if buf:
         await call.message.edit_media(
@@ -204,8 +88,10 @@ async def cb_heatmap_sort(call: CallbackQuery):
             reply_markup=kb.as_markup()
         )
 
-@router.callback_query(F.data == "cb_market_alerts")
+@router.callback_query(F.data.startswith("cb_market_alerts"))
 async def cb_market_alerts(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = parts[2] if len(parts) > 2 else "sub:market"
     lang, user_settings = await db.get_lang(call.message.chat.id), await db.get_user_settings(call.message.chat.id)
     alert_times = user_settings.get("market_alert_times", [])
     text = f"{_t(lang, 'market_alerts_title')}\n\n{_t(lang, 'market_alerts_msg')}\n\n"
@@ -216,19 +102,21 @@ async def cb_market_alerts(call: CallbackQuery):
         for t_entry in sorted(alert_times, key=lambda x: x["t"] if isinstance(x, dict) else x):
             t, is_repeat = (t_entry["t"], t_entry.get("r", True)) if isinstance(t_entry, dict) else (t_entry, True)
             text += f"{'🔄' if is_repeat else '📍'} <b>{t} UTC</b>\n"
-            kb.button(text=f"❌ {t}", callback_data=f"del_market_alert:{t}")
-    kb.button(text=_t(lang, "btn_add_time"), callback_data="cb_add_market_alert_time")
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
+            kb.button(text=f"❌ {t}", callback_data=f"del_market_alert:{t}:{back_target}")
+    kb.button(text=_t(lang, "btn_add_time"), callback_data=f"cb_add_market_alert_time:{back_target}")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     await smart_edit(call, text + f"\n\n<i>Last update: {time.strftime('%H:%M:%S')}</i>", reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "cb_add_market_alert_time")
+@router.callback_query(F.data.startswith("cb_add_market_alert_time"))
 async def cb_add_market_alert_time(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "sub:market"
     lang, billing_state = await db.get_lang(call.message.chat.id), await _get_billing_state(call.message.chat.id)
     if not await _ensure_billing_quota(call, call.message.chat.id, lang, "market_reports", billing_state["counts"]["market_reports"], "billing_feature_market_reports", is_callback=True):
         return
-    await state.update_data(menu_msg_id=call.message.message_id)
-    await call.message.edit_text(_t(lang, "add_time_prompt"), reply_markup=_back_kb(lang, "cb_market_alerts"), parse_mode="HTML")
+    await state.update_data(menu_msg_id=call.message.message_id, market_back_target=back_target)
+    await call.message.edit_text(_t(lang, "add_time_prompt"), reply_markup=_back_kb(lang, f"cb_market_alerts:market:{back_target}"), parse_mode="HTML")
     await state.set_state(MarketAlertStates.waiting_for_time)
     await call.answer()
 
@@ -249,12 +137,16 @@ async def process_market_alert_time(message: Message, state: FSMContext):
         await message.delete()
     except Exception:
         pass
+    
+    state_data = await state.get_data()
+    back_target = state_data.get("market_back_target", "sub:market")
+    
     kb = InlineKeyboardBuilder()
-    kb.button(text="🔄 " + _t(lang, "daily"), callback_data="ma_type:daily")
-    kb.button(text="📍 " + _t(lang, "once"), callback_data="ma_type:once")
-    kb.button(text=_t(lang, "btn_back"), callback_data="cb_market_alerts")
+    kb.button(text="🔄 " + _t(lang, "daily"), callback_data=f"ma_type:daily:{back_target}")
+    kb.button(text="📍 " + _t(lang, "once"), callback_data=f"ma_type:once:{back_target}")
+    kb.button(text=_t(lang, "btn_back"), callback_data=f"cb_market_alerts:market:{back_target}")
     kb.adjust(1)
-    msg_id = (await state.get_data()).get("menu_msg_id")
+    msg_id = state_data.get("menu_msg_id")
     if msg_id:
         try:
             await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=f"⏰ Time: <b>{time_str} UTC</b>\n\nChoose frequency:", reply_markup=kb.as_markup(), parse_mode="HTML")
@@ -269,17 +161,25 @@ async def process_market_alert_time(message: Message, state: FSMContext):
 async def process_market_alert_type(call: CallbackQuery, state: FSMContext):
     lang, data = await db.get_lang(call.message.chat.id), await state.get_data()
     time_str, alert_type = data.get("pending_time"), call.data.split(":")[1]
+    # Extract back_target from callback data
+    parts = call.data.split(":")
+    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    
     user_settings = await db.get_user_settings(call.message.chat.id)
     alert_times = [t for t in user_settings.get("market_alert_times", []) if (t["t"] if isinstance(t, dict) else t) != time_str]
     alert_times.append({"t": time_str, "r": (alert_type == "daily")})
     await db.update_user_settings(call.message.chat.id, {"market_alert_times": alert_times})
     await state.clear()
     await call.answer(_t(lang, "market_alert_added").format(time=time_str))
+    # Pass context back to cb_market_alerts
+    call.data = f"cb_market_alerts:market:{back_target}"
     await cb_market_alerts(call)
 
 @router.callback_query(F.data.startswith("del_market_alert:"))
 async def cb_del_market_alert(call: CallbackQuery):
-    time_str, lang = call.data.split(":")[1], await db.get_lang(call.message.chat.id)
+    parts = call.data.split(":")
+    time_str, lang = parts[1], await db.get_lang(call.message.chat.id)
+    back_target = parts[2] if len(parts) > 2 else "sub:market"
     user_settings = await db.get_user_settings(call.message.chat.id)
     alert_times = [t for t in user_settings.get("market_alert_times", []) if (t["t"] if isinstance(t, dict) else t) != time_str]
     if len(alert_times) < len(user_settings.get("market_alert_times", [])):
@@ -287,10 +187,13 @@ async def cb_del_market_alert(call: CallbackQuery):
         await call.answer(_t(lang, "market_alert_removed").format(time=time_str))
     else:
         await call.answer("🗑️ Alert not found")
+    call.data = f"cb_market_alerts:market:{back_target}"
     await cb_market_alerts(call)
 
-@router.callback_query(F.data == "cb_whales")
+@router.callback_query(F.data.startswith("cb_whales"))
 async def cb_whales(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = parts[2] if len(parts) > 2 else "sub:market"
     lang, user_settings = await db.get_lang(call.message.chat.id), await db.get_user_settings(call.message.chat.id)
     is_on = user_settings.get("whale_alerts", False)
     threshold = user_settings.get("whale_threshold", 50_000)
@@ -303,20 +206,22 @@ async def cb_whales(call: CallbackQuery):
         f"{_t(lang, 'min_val')}: <b>${pretty_float(threshold, 0)}</b>"
     )
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "disable" if is_on else "enable"), callback_data=f"toggle_whales:{'off' if is_on else 'on'}")
-    kb.button(text="🔔 Show All Assets" if wl_only else "👁️ Watchlist Only", callback_data=f"toggle_whale_wl:{'off' if wl_only else 'on'}")
-    kb.button(text="✏️ Threshold", callback_data="set_whale_thr_prompt")
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
+    kb.button(text=_t(lang, "disable" if is_on else "enable"), callback_data=f"toggle_whales:{'off' if is_on else 'on'}:{back_target}")
+    kb.button(text="🔔 Show All Assets" if wl_only else "👁️ Watchlist Only", callback_data=f"toggle_whale_wl:{'off' if wl_only else 'on'}:{back_target}")
+    kb.button(text="✏️ Threshold", callback_data=f"set_whale_thr_prompt:{back_target}")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "set_whale_thr_prompt")
+@router.callback_query(F.data.startswith("set_whale_thr_prompt"))
 async def cb_set_whale_thr_prompt(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "cb_whales"
     from bot.handlers.states import SettingsStates
-    await state.update_data(menu_msg_id=call.message.message_id, back_target="cb_whales")
+    await state.update_data(menu_msg_id=call.message.message_id, market_back_target=back_target)
     await call.message.edit_text(
         _t(await db.get_lang(call.message.chat.id), "whale_input"),
-        reply_markup=_back_kb(await db.get_lang(call.message.chat.id), "cb_whales"),
+        reply_markup=_back_kb(await db.get_lang(call.message.chat.id), f"cb_whales:market:{back_target}"),
         parse_mode="HTML"
     )
     await state.set_state(SettingsStates.waiting_for_whale)
@@ -324,19 +229,27 @@ async def cb_set_whale_thr_prompt(call: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("toggle_whale_wl:"))
 async def cb_toggle_whale_wl(call: CallbackQuery):
-    await db.update_user_settings(call.message.chat.id, {"whale_watchlist_only": call.data.split(":")[1] == "on"})
+    parts = call.data.split(":")
+    await db.update_user_settings(call.message.chat.id, {"whale_watchlist_only": parts[1] == "on"})
+    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    call.data = f"cb_whales:market:{back_target}"
     await cb_whales(call)
 
 @router.callback_query(F.data.startswith("toggle_whales:"))
 async def cb_toggle_whales(call: CallbackQuery):
-    await db.update_user_settings(call.message.chat.id, {"whale_alerts": call.data.split(":")[1] == "on"})
+    parts = call.data.split(":")
+    await db.update_user_settings(call.message.chat.id, {"whale_alerts": parts[1] == "on"})
+    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    call.data = f"cb_whales:market:{back_target}"
     await cb_whales(call)
 
-@router.callback_query(F.data == "cb_fear_greed")
+@router.callback_query(F.data.startswith("cb_fear_greed"))
 async def cb_fear_greed(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = parts[2] if len(parts) > 2 else "sub:market"
     lang, fng = await db.get_lang(call.message.chat.id), await get_fear_greed_index()
     if not fng:
-        await smart_edit(call, "❌ Unable to fetch Fear & Greed data.", reply_markup=_back_kb(lang, "sub:market"))
+        await smart_edit(call, "❌ Unable to fetch Fear & Greed data.", reply_markup=_back_kb(lang, back_target))
         await call.answer()
         return
     val, change = fng["value"], fng["change"]
@@ -349,8 +262,8 @@ async def cb_fear_greed(call: CallbackQuery):
         f"<i>Source: Alternative.me Crypto Fear & Greed Index</i>"
     )
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_refresh"), callback_data="cb_fear_greed")
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
+    kb.button(text=_t(lang, "btn_refresh"), callback_data=call.data)
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     await smart_edit(call, text, reply_markup=kb.as_markup())
     await call.answer()

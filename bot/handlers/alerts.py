@@ -44,13 +44,15 @@ async def cmd_alert(message: Message):
     await db.add_price_alert(message.chat.id, symbol, target, direction)
     await message.answer(_t(lang, "alert_added").format(symbol=symbol, dir="📈" if direction == "above" else "📉", price=pretty_float(target)), parse_mode="HTML")
 
-@router.callback_query(F.data == "cb_alerts")
+@router.callback_query(F.data.startswith("cb_alerts"))
 async def cb_alerts(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "sub:market"
     lang = await db.get_lang(call.message.chat.id)
     alerts = await db.get_user_alerts(call.message.chat.id)
     if not alerts:
         text = f"{_t(lang, 'market_title')} > <b>{_t(lang, 'btn_price_alerts')}</b>\n\n{_t(lang, 'no_alerts')}\n{_t(lang, 'alert_usage')}\n\n<i>Last update: {time.strftime('%H:%M:%S')}</i>"
-        await smart_edit(call, text, reply_markup=_back_kb(lang, "sub:market"))
+        await smart_edit(call, text, reply_markup=_back_kb(lang, back_target))
         return
     
     kb = InlineKeyboardBuilder()
@@ -61,25 +63,32 @@ async def cb_alerts(call: CallbackQuery):
         p = pretty_float(a.get("target", 0))
         d = "📈" if a.get("direction") == "above" else "📉"
         text += f"\n• {s} {d} {p}"
-        kb.button(text=f"❌ Del {s}", callback_data=f"del_alert:{aid}")
+        kb.button(text=f"❌ {s} {p}", callback_data=f"del_alert:{aid}:{back_target}")
     
-    kb.button(text="🗑️ Clear All", callback_data="clear_all_alerts")
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
+    kb.button(text="🗑️ Clear All", callback_data=f"clear_all_alerts:{back_target}")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     await smart_edit(call, text + f"\n\n<i>Last update: {time.strftime('%H:%M:%S')}</i>", reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "clear_all_alerts")
+@router.callback_query(F.data.startswith("clear_all_alerts"))
 async def cb_clear_all_alerts(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "sub:market"
     await db.delete_all_user_alerts(call.message.chat.id)
     await call.answer(_t(await db.get_lang(call.message.chat.id), "deleted"))
+    call.data = f"cb_alerts:{back_target}"
     await cb_alerts(call)
 
 @router.callback_query(F.data.startswith("del_alert:"))
 async def cb_del_alert(call: CallbackQuery):
-    if await db.delete_alert(call.data.split(":")[1]):
+    parts = call.data.split(":")
+    aid = parts[1]
+    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    if await db.delete_alert(aid):
         await call.answer(_t(await db.get_lang(call.message.chat.id), "deleted"))
     else:
         await call.answer("🗑️ Alert already removed or error")
+    call.data = f"cb_alerts:{back_target}"
     await cb_alerts(call)
 
 @router.callback_query(F.data.startswith("quick_alert:"))
@@ -153,19 +162,23 @@ async def cmd_unwatch(message: Message):
         ws.watch_subscribers[symbol].discard(message.chat.id)
     await message.answer(_t(lang, "watch_removed").format(symbol=symbol), parse_mode="HTML")
 
-@router.callback_query(F.data == "cb_funding_alert_prompt")
+@router.callback_query(F.data.startswith("cb_funding_alert_prompt"))
 async def cb_funding_alert_prompt(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "cb_settings"
     lang = await db.get_lang(call.message.chat.id)
-    await state.update_data(alert_type="funding", menu_msg_id=call.message.message_id)
-    await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.update_data(alert_type="funding", menu_msg_id=call.message.message_id, back_target=back_target)
+    await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, back_target), parse_mode="HTML")
     await state.set_state(AlertStates.waiting_for_symbol)
     await call.answer()
 
-@router.callback_query(F.data == "cb_oi_alert_prompt")
+@router.callback_query(F.data.startswith("cb_oi_alert_prompt"))
 async def cb_oi_alert_prompt(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "cb_settings"
     lang = await db.get_lang(call.message.chat.id)
-    await state.update_data(alert_type="oi", menu_msg_id=call.message.message_id)
-    await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.update_data(alert_type="oi", menu_msg_id=call.message.message_id, back_target=back_target)
+    await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, back_target), parse_mode="HTML")
     await state.set_state(AlertStates.waiting_for_symbol)
     await call.answer()
 
@@ -174,6 +187,7 @@ async def process_alert_symbol(message: Message, state: FSMContext):
     lang = await db.get_lang(message.chat.id)
     symbol = message.text.strip().upper()
     data = await state.get_data()
+    back_target = data.get("back_target", "cb_settings")
     if len(symbol) > 10 or not symbol.isalnum():
         await message.answer(_t(lang, "watch_invalid"))
         return
@@ -186,12 +200,12 @@ async def process_alert_symbol(message: Message, state: FSMContext):
         pass
     if msg_id:
         try:
-            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, back_target), parse_mode="HTML")
             await state.set_state(AlertStates.waiting_for_target)
             return
         except Exception:
             pass
-    await message.answer(prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await message.answer(prompt, reply_markup=_back_kb(lang, back_target), parse_mode="HTML")
     await state.set_state(AlertStates.waiting_for_target)
 
 @router.message(AlertStates.waiting_for_target)
@@ -210,6 +224,7 @@ async def process_alert_target(message: Message, state: FSMContext):
     symbol = data.get("symbol")
     a_type = data.get("alert_type")
     msg_id = data.get("menu_msg_id")
+    back_target = data.get("back_target", "cb_settings")
     if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(await db.get_user_alerts(message.chat.id)), "billing_feature_alerts"):
         return
     ctx = await get_perps_context()
@@ -225,14 +240,24 @@ async def process_alert_target(message: Message, state: FSMContext):
     direction = "above" if target > current_val else "below"
     await db.add_alert(message.chat.id, symbol, target, direction, a_type)
     success_msg = _t(lang, "funding_alert_set" if a_type == "funding" else "oi_alert_set", symbol=symbol, dir="📈" if direction == "above" else "📉", val=target)
+    
+    # After setting alert, we might want to go back to the sub-menu we came from
+    target_kb = _settings_kb(lang)
+    if back_target == "sub:alerts":
+        from bot.handlers._common import _alerts_kb
+        target_kb = _alerts_kb(lang)
+    elif back_target == "cb_wallets_alerts_menu":
+        from bot.handlers._common import _wallets_alerts_settings_kb
+        target_kb = _wallets_alerts_settings_kb(lang)
+
     if msg_id:
         try:
-            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
+            await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=success_msg, reply_markup=target_kb, parse_mode="HTML")
             await state.clear()
             return
         except Exception:
             pass
-    await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
+    await message.answer(success_msg, reply_markup=target_kb, parse_mode="HTML")
     await state.clear()
 
 @router.message(Command("f_alert"))

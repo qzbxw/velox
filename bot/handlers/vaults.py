@@ -20,13 +20,15 @@ from bot.handlers._common import (
 router = Router(name="vaults")
 logger = logging.getLogger(__name__)
 
-@router.callback_query(F.data == "cb_vaults_overview")
+@router.callback_query(F.data.startswith("cb_vaults_overview"))
 async def cb_vaults_overview(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "sub:vaults"
     await call.answer("Loading vaults...")
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:vaults"))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
 
     sections = []
@@ -70,23 +72,25 @@ async def cb_vaults_overview(call: CallbackQuery):
 
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data="cb_vaults_overview"),
-        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data="cb_hlp_snapshot")
+        InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data=call.data),
+        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data=f"cb_hlp_snapshot:vaults:{back_target}")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data="cb_vault_reports_menu")
+        InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data=f"cb_vault_reports_menu:{back_target}")
     )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="sub:vaults"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "cb_hlp_snapshot")
+@router.callback_query(F.data.startswith("cb_hlp_snapshot"))
 async def cb_hlp_snapshot(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = parts[2] if len(parts) > 2 else "sub:vaults"
     await call.answer("Loading HLP...")
     lang = await db.get_lang(call.message.chat.id)
     user_id = call.message.chat.id
     wallets = await db.list_wallets(user_id)
     if not wallets:
-        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:vaults"))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
 
     now_ts = int(time.time())
@@ -125,7 +129,7 @@ async def cb_hlp_snapshot(call: CallbackQuery):
             await db.upsert_vault_snapshot(user_id, wallet, HLP_VAULT_ADDR, wallet_hlp, now_ts)
 
     if total_hlp_equity <= 0:
-        await smart_edit(call, f"{_t(lang, 'hlp_title')}\n\n<i>{_t(lang, 'hlp_not_found')}</i>", reply_markup=_back_kb(lang, "sub:vaults"))
+        await smart_edit(call, f"{_t(lang, 'hlp_title')}\n\n<i>{_t(lang, 'hlp_not_found')}</i>", reply_markup=_back_kb(lang, back_target))
         return
 
     period_lines = []
@@ -176,14 +180,16 @@ async def cb_hlp_snapshot(call: CallbackQuery):
 
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data="cb_hlp_snapshot"),
-        InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data="cb_vault_reports_menu")
+        InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data=call.data),
+        InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data=f"cb_vault_reports_menu:{back_target}")
     )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="sub:vaults"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "cb_vault_reports_menu")
+@router.callback_query(F.data.startswith("cb_vault_reports_menu"))
 async def cb_vault_reports_menu(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = parts[1] if len(parts) > 1 else "sub:vaults"
     lang = await db.get_lang(call.message.chat.id)
     if not await _ensure_billing_feature(call, call.message.chat.id, lang, "vault_reports", "billing_feature_vault_reports", is_callback=True):
         return
@@ -208,7 +214,7 @@ async def cb_vault_reports_menu(call: CallbackQuery):
     kb.row(
         InlineKeyboardButton(
             text=f"☀️ HLP Daily {'✅' if hlp_daily_enabled else '➕'}",
-            callback_data="vrep:hlp_daily"
+            callback_data=f"vrep:hlp_daily:{back_target}"
         )
     )
 
@@ -231,17 +237,17 @@ async def cb_vault_reports_menu(call: CallbackQuery):
             kb.row(
                 InlineKeyboardButton(
                     text=f"W {'✅' if weekly_on else '➕'}",
-                    callback_data=f"vrep:w:{idx}"
+                    callback_data=f"vrep:w:{idx}:{back_target}"
                 ),
                 InlineKeyboardButton(
                     text=f"M {'✅' if monthly_on else '➕'}",
-                    callback_data=f"vrep:m:{idx}"
+                    callback_data=f"vrep:m:{idx}:{back_target}"
                 )
             )
 
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data="cb_vault_reports_menu"))
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_digest_settings"), callback_data="cb_digest_settings_menu"))
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="sub:vaults"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data=call.data))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_digest_settings"), callback_data=f"cb_digest_settings_menu:cb_vault_reports_menu:{back_target}"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     text += f"\n<i>{_t(lang, 'vault_reports_hint')}</i>"
     await smart_edit(call, text, reply_markup=kb.as_markup())
 

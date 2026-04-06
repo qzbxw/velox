@@ -8,7 +8,7 @@ from bot.config import settings
 from bot.handlers._common import (
     smart_edit, _main_menu_text, _main_menu_kb, _overview_kb, 
     _portfolio_kb, _trading_kb, _market_kb, _vaults_kb,
-    _dashboard_kb, _alerts_kb, _ai_market_kb
+    _dashboard_kb, _alerts_kb
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -68,13 +68,15 @@ async def cb_sub_alerts(call: CallbackQuery):
 @router.callback_query(F.data == "sub:ai_market")
 async def cb_sub_ai_market(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
-    await smart_edit(call, _t(lang, "cat_ai_market"), reply_markup=_ai_market_kb(lang))
+    await smart_edit(call, _t(lang, "cat_market"), reply_markup=_market_kb(lang))
     await call.answer()
 
-@router.callback_query(F.data == "sub:market")
+@router.callback_query(F.data.startswith("sub:market"))
 async def cb_sub_market(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = f"sub:{parts[2]}" if len(parts) > 2 else "cb_menu"
     lang = await db.get_lang(call.message.chat.id)
-    await smart_edit(call, _t(lang, "cat_market"), reply_markup=_market_kb(lang))
+    await smart_edit(call, _t(lang, "cat_market"), reply_markup=_market_kb(lang, back_target=back_target))
     await call.answer()
 
 @router.callback_query(F.data == "sub:overview")

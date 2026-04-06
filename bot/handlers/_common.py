@@ -285,7 +285,7 @@ def _ai_market_kb(lang):
     kb = InlineKeyboardBuilder()
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_market_overview"), callback_data="cb_ai_overview_menu"),
-        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_reports")
+        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_alerts")
     )
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_fear_greed"), callback_data="cb_fear_greed"),
@@ -497,7 +497,7 @@ def _ai_config_kb(lang):
 def _digests_reports_kb(lang):
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_digest_settings"), callback_data="cb_digest_settings_menu"))
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_reports"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data="cb_market_alerts"))
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
     return kb.as_markup()
 

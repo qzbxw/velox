@@ -7,7 +7,8 @@ from bot.locales import _t
 from bot.config import settings
 from bot.handlers._common import (
     smart_edit, _main_menu_text, _main_menu_kb, _overview_kb, 
-    _portfolio_kb, _trading_kb, _market_kb, _vaults_kb
+    _portfolio_kb, _trading_kb, _market_kb, _vaults_kb,
+    _dashboard_kb, _alerts_kb, _ai_market_kb
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -51,29 +52,49 @@ async def cb_menu(call: CallbackQuery, state: FSMContext = None):
 @router.callback_query(F.data == "sub:dashboard")
 async def cb_sub_dashboard(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
-    from bot.handlers._common import _dashboard_kb
     await smart_edit(call, _t(lang, "cat_dashboard"), reply_markup=_dashboard_kb(lang))
     await call.answer()
 
 @router.callback_query(F.data == "sub:alerts")
 async def cb_sub_alerts(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
-    from bot.handlers._common import _alerts_kb
     await smart_edit(call, _t(lang, "cat_alerts"), reply_markup=_alerts_kb(lang))
     await call.answer()
 
 @router.callback_query(F.data == "sub:ai_market")
 async def cb_sub_ai_market(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
-    from bot.handlers._common import _ai_market_kb
     await smart_edit(call, _t(lang, "cat_ai_market"), reply_markup=_ai_market_kb(lang))
     await call.answer()
 
 @router.callback_query(F.data == "sub:market")
 async def cb_sub_market(call: CallbackQuery):
     lang = await db.get_lang(call.message.chat.id)
-    from bot.handlers._common import _market_kb
     await smart_edit(call, _t(lang, "cat_market"), reply_markup=_market_kb(lang))
+    await call.answer()
+
+@router.callback_query(F.data == "sub:overview")
+async def cb_sub_overview(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    await smart_edit(call, _t(lang, "menu_overview"), reply_markup=_overview_kb(lang))
+    await call.answer()
+
+@router.callback_query(F.data == "sub:portfolio")
+async def cb_sub_portfolio(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    await smart_edit(call, _t(lang, "menu_portfolio"), reply_markup=_portfolio_kb(lang))
+    await call.answer()
+
+@router.callback_query(F.data == "sub:trading")
+async def cb_sub_trading(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    await smart_edit(call, _t(lang, "menu_trading"), reply_markup=_trading_kb(lang))
+    await call.answer()
+
+@router.callback_query(F.data == "sub:vaults")
+async def cb_sub_vaults(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    await smart_edit(call, _t(lang, "menu_vaults"), reply_markup=_vaults_kb(lang))
     await call.answer()
 
 @router.message(Command("help"))

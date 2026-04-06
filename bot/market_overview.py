@@ -675,8 +675,10 @@ Provide a concise summary with key bullet points."""
                             text = text.split("```json")[1].split("```")[0].strip()
 
                         if not text:
+                            logger.warning(f"Hedge Agent: Empty response text for payload: {payload}")
                             return default_res
 
+                        logger.debug(f"Hedge Agent Response Text: {text}")
                         parsed = json.loads(text)
 
                         # Handle list wrapping
@@ -693,7 +695,7 @@ Provide a concise summary with key bullet points."""
                     else:
                         logger.error(f"Hedge Agent error: {resp.status} - {await resp.text()}")
         except Exception as e:
-            logger.error(f"Hedge Agent exception: {e}")
+            logger.error(f"Hedge Agent exception: {str(e)}", exc_info=True)
 
         return default_res
 

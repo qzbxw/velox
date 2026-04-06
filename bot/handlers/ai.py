@@ -167,7 +167,7 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
             "eth": market_data["ETH"],
             "sentiment": sentiment,
             "fng": fng if fng and not isinstance(fng, Exception) else {"value": 0, "classification": "N/A"},
-            "gemini_model": "3 Flash Preview",
+            "gemini_model": "gemini-3.1-flash-lite-preview",
             "top_gainer": {"sym": top_gainer, "val": top_gainer_pct},
             "top_loser": {"sym": top_loser, "val": top_loser_pct},
             "top_vol": {"sym": top_vol, "val": f"${top_vol_val/1e6:.0f}M"},

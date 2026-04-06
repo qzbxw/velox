@@ -97,10 +97,12 @@ async def cb_sub_trading(call: CallbackQuery):
     await smart_edit(call, _t(lang, "menu_trading"), reply_markup=_trading_kb(lang))
     await call.answer()
 
-@router.callback_query(F.data == "sub:vaults")
+@router.callback_query(F.data.startswith("sub:vaults"))
 async def cb_sub_vaults(call: CallbackQuery):
+    parts = call.data.split(":")
+    back_target = f"sub:{parts[2]}" if len(parts) > 2 else "cb_menu"
     lang = await db.get_lang(call.message.chat.id)
-    await smart_edit(call, _t(lang, "menu_vaults"), reply_markup=_vaults_kb(lang))
+    await smart_edit(call, _t(lang, "menu_vaults"), reply_markup=_vaults_kb(lang, back_target=back_target))
     await call.answer()
 
 @router.message(Command("help"))

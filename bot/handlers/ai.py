@@ -212,7 +212,7 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None, back_target=
 @router.callback_query(F.data.startswith("cb_ai_overview_menu"))
 async def cb_ai_overview_menu(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "sub:overview"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "sub:overview"
     lang = await db.get_lang(call.message.chat.id)
     if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs", is_callback=True):
         return
@@ -226,7 +226,7 @@ async def cb_ai_overview_menu(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("cb_market_overview_refresh"))
 async def cb_market_overview_refresh(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "sub:overview"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "sub:overview"
     lang = await db.get_lang(call.message.chat.id)
     if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs", is_callback=True):
         return
@@ -398,16 +398,19 @@ async def cb_hedge_toggle(call: CallbackQuery):
 
 # --- HEDGE CHAT ---
 
-@router.callback_query(F.data == "cb_hedge_chat_start")
+@router.callback_query(F.data.startswith("cb_hedge_chat_start"))
 async def cb_hedge_chat_start(call: CallbackQuery, state: FSMContext):
+    parts = call.data.split(":")
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "sub:overview"
     lang = await db.get_lang(call.message.chat.id)
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     text = "🛡️ <b>Velox Assistant</b>\n\nI’m your market and risk assistant. I have context on your portfolio, watchlist, and current market conditions.\n\nHow can I help you today?"
     if lang == "ru":
         text = "🛡️ <b>Velox Assistant</b>\n\nЯ твой помощник по рынку и риск-менеджменту. У меня есть контекст по твоему портфелю, вотчлисту и текущей ситуации на рынке.\n\nЧем я могу помочь сегодня?"
     await smart_edit(call, text, reply_markup=kb.as_markup())
     await state.set_state(AIStates.waiting_for_chat)
+    await state.update_data(hedge_chat_back_target=back_target)
     mem = await db.get_hedge_memory(call.message.chat.id, limit=10)
     await state.update_data(history=[{"role": m.get("role", "user"), "content": m.get("content", "")} for m in mem if m.get("content")])
     await call.answer()
@@ -419,6 +422,7 @@ async def process_hedge_chat(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     history = data.get("history", [])
+    back_target = data.get("hedge_chat_back_target", "sub:overview")
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
     history.append({"role": "user", "content": message.text})
     await db.append_hedge_memory(message.chat.id, role="user", content=message.text, meta={"context_type": "chat"})
@@ -436,7 +440,7 @@ async def process_hedge_chat(message: Message, state: FSMContext):
         history = history[-10:]
     await state.update_data(history=history)
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
+    kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     await message.answer(disp_response, reply_markup=kb.as_markup(), parse_mode="HTML")
 
 async def _send_hedge_insight(bot, chat_id, user_id, context_type, event_data, reply_to_id=None):

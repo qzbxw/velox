@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 @router.callback_query(F.data.startswith("cb_market"))
 async def cb_market(call: CallbackQuery):
     parts = call.data.split(":")
-    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
     await call.answer("Loading...")
     lang = await db.get_lang(call.message.chat.id)
     ws = getattr(call.message.bot, "ws_manager", None)
@@ -68,7 +68,7 @@ async def cb_market(call: CallbackQuery):
 async def cb_heatmap_sort(call: CallbackQuery):
     parts = call.data.split(":")
     sort_by = parts[1]
-    back_target = parts[2] if len(parts) > 2 else "cb_market"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
     await call.answer(f"Sorting by {sort_by}...")
     lang, ctx = await db.get_lang(call.message.chat.id), await get_perps_context()
     buf = generate_market_overview_image(ctx[1], ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0], sort_by=sort_by)
@@ -91,7 +91,7 @@ async def cb_heatmap_sort(call: CallbackQuery):
 @router.callback_query(F.data.startswith("cb_market_alerts"))
 async def cb_market_alerts(call: CallbackQuery):
     parts = call.data.split(":")
-    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
     lang, user_settings = await db.get_lang(call.message.chat.id), await db.get_user_settings(call.message.chat.id)
     alert_times = user_settings.get("market_alert_times", [])
     text = f"{_t(lang, 'market_alerts_title')}\n\n{_t(lang, 'market_alerts_msg')}\n\n"
@@ -111,7 +111,7 @@ async def cb_market_alerts(call: CallbackQuery):
 @router.callback_query(F.data.startswith("cb_add_market_alert_time"))
 async def cb_add_market_alert_time(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "sub:market"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "sub:market"
     lang, billing_state = await db.get_lang(call.message.chat.id), await _get_billing_state(call.message.chat.id)
     if not await _ensure_billing_quota(call, call.message.chat.id, lang, "market_reports", billing_state["counts"]["market_reports"], "billing_feature_market_reports", is_callback=True):
         return
@@ -193,7 +193,7 @@ async def cb_del_market_alert(call: CallbackQuery):
 @router.callback_query(F.data.startswith("cb_whales"))
 async def cb_whales(call: CallbackQuery):
     parts = call.data.split(":")
-    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
     lang, user_settings = await db.get_lang(call.message.chat.id), await db.get_user_settings(call.message.chat.id)
     is_on = user_settings.get("whale_alerts", False)
     threshold = user_settings.get("whale_threshold", 50_000)
@@ -216,7 +216,7 @@ async def cb_whales(call: CallbackQuery):
 @router.callback_query(F.data.startswith("set_whale_thr_prompt"))
 async def cb_set_whale_thr_prompt(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "cb_whales"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "cb_whales"
     from bot.handlers.states import SettingsStates
     await state.update_data(menu_msg_id=call.message.message_id, market_back_target=back_target)
     await call.message.edit_text(
@@ -246,7 +246,7 @@ async def cb_toggle_whales(call: CallbackQuery):
 @router.callback_query(F.data.startswith("cb_fear_greed"))
 async def cb_fear_greed(call: CallbackQuery):
     parts = call.data.split(":")
-    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
     lang, fng = await db.get_lang(call.message.chat.id), await get_fear_greed_index()
     if not fng:
         await smart_edit(call, "❌ Unable to fetch Fear & Greed data.", reply_markup=_back_kb(lang, back_target))

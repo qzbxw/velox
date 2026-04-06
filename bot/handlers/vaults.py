@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 @router.callback_query(F.data.startswith("cb_vaults_overview"))
 async def cb_vaults_overview(call: CallbackQuery):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "sub:vaults"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "sub:vaults"
     await call.answer("Loading vaults...")
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
@@ -84,7 +84,7 @@ async def cb_vaults_overview(call: CallbackQuery):
 @router.callback_query(F.data.startswith("cb_hlp_snapshot"))
 async def cb_hlp_snapshot(call: CallbackQuery):
     parts = call.data.split(":")
-    back_target = parts[2] if len(parts) > 2 else "sub:vaults"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:vaults"
     await call.answer("Loading HLP...")
     lang = await db.get_lang(call.message.chat.id)
     user_id = call.message.chat.id
@@ -189,7 +189,7 @@ async def cb_hlp_snapshot(call: CallbackQuery):
 @router.callback_query(F.data.startswith("cb_vault_reports_menu"))
 async def cb_vault_reports_menu(call: CallbackQuery):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "sub:vaults"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "sub:vaults"
     lang = await db.get_lang(call.message.chat.id)
     if not await _ensure_billing_feature(call, call.message.chat.id, lang, "vault_reports", "billing_feature_vault_reports", is_callback=True):
         return

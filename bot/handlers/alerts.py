@@ -47,7 +47,7 @@ async def cmd_alert(message: Message):
 @router.callback_query(F.data.startswith("cb_alerts"))
 async def cb_alerts(call: CallbackQuery):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "sub:market"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "sub:market"
     lang = await db.get_lang(call.message.chat.id)
     alerts = await db.get_user_alerts(call.message.chat.id)
     if not alerts:

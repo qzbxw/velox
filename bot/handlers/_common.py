@@ -265,9 +265,10 @@ def _dashboard_kb(lang):
     return kb.as_markup()
 
 def _alerts_kb(lang):
+    this_path = "sub:alerts"
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data="cb_alerts:alerts"),
+        InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data=f"cb_alerts:{this_path}"),
         InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data="sub:market:alerts") # For watchlist?
     )
     kb.row(
@@ -275,8 +276,8 @@ def _alerts_kb(lang):
         InlineKeyboardButton(text=_t(lang, "btn_oi_alert"), callback_data="cb_oi_alert_prompt")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data="cb_whales:alerts"),
-        InlineKeyboardButton(text=_t(lang, "btn_hedge_chat"), callback_data="cb_hedge_chat_start:alerts")
+        InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data=f"cb_whales:alerts:{this_path}"),
+        InlineKeyboardButton(text=_t(lang, "btn_hedge_chat"), callback_data=f"cb_hedge_chat_start:{this_path}")
     )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
@@ -326,32 +327,45 @@ def _trading_kb(lang):
     return kb.as_markup()
 
 def _market_kb(lang, back_target="cb_menu"):
+    # Reconstruct path to this menu
+    this_path = "sub:market"
+    if back_target.startswith("sub:"):
+        ctx = back_target.split(":")[1]
+        this_path = f"sub:market:{ctx}"
+        
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data=f"cb_market:market:{back_target}"),
-        InlineKeyboardButton(text=_t(lang, "btn_market_overview"), callback_data=f"cb_ai_overview_menu:{back_target}")
+        InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data=f"cb_market:market:{this_path}"),
+        InlineKeyboardButton(text=_t(lang, "btn_market_overview"), callback_data=f"cb_ai_overview_menu:{this_path}")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data=f"cb_whales:market:{back_target}"),
-        InlineKeyboardButton(text=_t(lang, "btn_fear_greed"), callback_data=f"cb_fear_greed:market:{back_target}")
+        InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data=f"cb_whales:market:{this_path}"),
+        InlineKeyboardButton(text=_t(lang, "btn_fear_greed"), callback_data=f"cb_fear_greed:market:{this_path}")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data=f"cb_alerts:market:{back_target}"),
-        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data=f"cb_hlp_snapshot:market:{back_target}")
+        InlineKeyboardButton(text=_t(lang, "btn_price_alerts"), callback_data=f"cb_alerts:{this_path}"),
+        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data=f"cb_hlp_snapshot:market:{this_path}")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data=f"cb_market_alerts:market:{back_target}")
+        InlineKeyboardButton(text=_t(lang, "btn_vaults_overview"), callback_data=f"sub:vaults:market"),
+        InlineKeyboardButton(text=_t(lang, "btn_market_alerts"), callback_data=f"cb_market_alerts:market:{this_path}")
     )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     return kb.as_markup()
 
 def _vaults_kb(lang, back_target="cb_menu"):
+    # Reconstruct path to this menu
+    this_path = "sub:vaults"
+    if back_target.startswith("sub:"):
+        ctx = back_target.split(":")[1]
+        this_path = f"sub:vaults:{ctx}"
+        
     kb = InlineKeyboardBuilder()
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_vaults_overview"), callback_data=f"cb_vaults_overview:{back_target}"),
-        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data=f"cb_hlp_snapshot:vaults:{back_target}")
+        InlineKeyboardButton(text=_t(lang, "btn_vaults_overview"), callback_data=f"cb_vaults_overview:{this_path}"),
+        InlineKeyboardButton(text=_t(lang, "btn_hlp_snapshot"), callback_data=f"cb_hlp_snapshot:vaults:{this_path}")
     )
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data=f"cb_vault_reports_menu:{back_target}"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_vault_reports"), callback_data=f"cb_vault_reports_menu:{this_path}"))
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     return kb.as_markup()
 

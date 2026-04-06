@@ -189,21 +189,24 @@ async def process_set_prox_state(message: Message, state: FSMContext):
     except ValueError:
         res = "❌ " + _t(lang, "invalid_number")
     
-    back_target = data.get("back_target") or data.get("market_back_target") or "cb_wallets_alerts_menu"
+    market_parent = data.get("market_back_target")
+    back_target = data.get("back_target") or "cb_wallets_alerts_menu"
     await state.clear()
     try:
         await message.delete()
     except Exception:
         pass
     
-    if back_target == "cb_whales":
-        from bot.handlers.market import cb_whales as target_handler
-    else:
-        from bot.handlers.settings import cb_wallets_alerts_menu as target_handler
-    
     await message.answer(res)
-    dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=back_target)
-    await target_handler(dummy_call)
+    
+    if market_parent:
+        from bot.handlers.market import cb_whales
+        dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=f"cb_whales:market:{market_parent}")
+        await cb_whales(dummy_call)
+    else:
+        from bot.handlers.settings import cb_wallets_alerts_menu
+        dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=back_target)
+        await cb_wallets_alerts_menu(dummy_call)
 
 @router.message(SettingsStates.waiting_for_vol)
 async def process_set_vol_state(message: Message, state: FSMContext):
@@ -215,21 +218,24 @@ async def process_set_vol_state(message: Message, state: FSMContext):
     except ValueError:
         res = "❌ " + _t(lang, "invalid_number")
     
-    back_target = data.get("back_target") or data.get("market_back_target") or "cb_wallets_alerts_menu"
+    market_parent = data.get("market_back_target")
+    back_target = data.get("back_target") or "cb_wallets_alerts_menu"
     await state.clear()
     try:
         await message.delete()
     except Exception:
         pass
     
-    if back_target == "cb_whales":
-        from bot.handlers.market import cb_whales as target_handler
-    else:
-        from bot.handlers.settings import cb_wallets_alerts_menu as target_handler
-    
     await message.answer(res)
-    dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=back_target)
-    await target_handler(dummy_call)
+    
+    if market_parent:
+        from bot.handlers.market import cb_whales
+        dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=f"cb_whales:market:{market_parent}")
+        await cb_whales(dummy_call)
+    else:
+        from bot.handlers.settings import cb_wallets_alerts_menu
+        dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=back_target)
+        await cb_wallets_alerts_menu(dummy_call)
 
 @router.message(SettingsStates.waiting_for_whale)
 async def process_set_whale_state(message: Message, state: FSMContext):
@@ -241,21 +247,24 @@ async def process_set_whale_state(message: Message, state: FSMContext):
     except ValueError:
         res = "❌ " + _t(lang, "invalid_number")
     
-    back_target = data.get("back_target") or data.get("market_back_target") or "cb_wallets_alerts_menu"
+    market_parent = data.get("market_back_target")
+    back_target = data.get("back_target") or "cb_wallets_alerts_menu"
     await state.clear()
     try:
         await message.delete()
     except Exception:
         pass
     
-    if back_target == "cb_whales":
-        from bot.handlers.market import cb_whales as target_handler
-    else:
-        from bot.handlers.settings import cb_wallets_alerts_menu as target_handler
-    
     await message.answer(res)
-    dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=back_target)
-    await target_handler(dummy_call)
+    
+    if market_parent:
+        from bot.handlers.market import cb_whales
+        dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=f"cb_whales:market:{market_parent}")
+        await cb_whales(dummy_call)
+    else:
+        from bot.handlers.settings import cb_wallets_alerts_menu
+        dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=back_target)
+        await cb_wallets_alerts_menu(dummy_call)
 
 @router.message(Command("set_prox"))
 async def cmd_set_prox(message: Message):

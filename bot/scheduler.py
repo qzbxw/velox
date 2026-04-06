@@ -56,7 +56,7 @@ async def _refresh_digest_cache():
     
     try:
         # Load users with digest settings and billing info
-        users = await db.users_col.find(
+        users = await db.users.find(
             {"digest_settings": {"$exists": True}},
             {"user_id": 1, "digest_settings": 1, "billing": 1, "lang": 1}
         ).to_list(None)

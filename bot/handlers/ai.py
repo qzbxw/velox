@@ -196,11 +196,6 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
 
         txt_msg = await bot.send_message(chat_id=chat_id, text=report_text, parse_mode="HTML", reply_markup=kb.as_markup())
         
-        # Access storage to save IDs
-        ctx_key = bot.fsm.resolve_context_key(chat_id, user_id)
-        state_obj = FSMContext(storage=bot.fsm.storage, key=ctx_key)
-        await state_obj.update_data(ai_overview_msg_ids=[img_msg.message_id, txt_msg.message_id])
-        
         await status_msg.delete()
         
     except Exception as e:
@@ -251,8 +246,8 @@ async def cb_ai_cleanup(call: CallbackQuery, state: FSMContext):
         except Exception:
             pass
     await state.update_data(ai_overview_msg_ids=None)
-    from bot.handlers.menu import cb_sub_overview
-    await cb_sub_overview(call)
+    from bot.handlers.menu import cb_sub_ai_market
+    await cb_sub_ai_market(call)
 
 @router.message(Command("overview"))
 async def cmd_overview(message: Message):

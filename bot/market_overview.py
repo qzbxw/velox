@@ -641,14 +641,12 @@ Provide a concise summary with key bullet points."""
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.2,
-                "response_mime_type": "application/json",
-                "thinking_config": {
-                    "thinking_level": "HIGH"
+                "responseMimeType": "application/json",
+                "thinkingConfig": {
+                    "thinkingLevel": "high"
                 }
             }
         }
-        if self.enable_search_news:
-            payload["tools"] = [{"google_search": {}}]
 
         default_res = {
             "summary": "Market data processing complete. Sentiment remains mixed as volatility clusters around major assets.",

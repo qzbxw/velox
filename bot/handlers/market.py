@@ -105,7 +105,7 @@ async def cb_market_overview(call: CallbackQuery, state: FSMContext):
         "eth": eth_data,
         "sentiment": data_alpha.get("sentiment_label", "NEUTRAL"),
         "fng": fng if fng and not isinstance(fng, Exception) else {"value": 0, "classification": "N/A"},
-        "gemini_model": "gemini-3.1-flash-lite-preview",
+        "gemini_model": "Velox Engine",
         "top_gainer": {"sym": top_gainer["name"], "val": top_gainer["change"]},
         "top_loser": {"sym": top_loser["name"], "val": top_loser["change"]},
         "top_vol": {"sym": (universe[top_vol_idx]["name"] if isinstance(universe[top_vol_idx], dict) else universe[top_vol_idx]) if top_vol_idx < len(universe) else "N/A", "val": f"${vol_indices[0][1]/1e6:.1f}M"},

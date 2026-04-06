@@ -793,7 +793,7 @@ async def _get_cached_overview(market_data, news, period_label, cfg, lang, p_uni
         "btc": market_data["BTC"], "eth": market_data["ETH"],
         "sentiment": ai_data.get("sentiment", "Neutral"),
         "fng": fng if fng and not isinstance(fng, Exception) else {"value": 0, "classification": "N/A"},
-        "gemini_model": "gemini-3.1-flash-lite-preview",
+        "gemini_model": "Velox Engine",
         "top_gainer": {"sym": p_universe[mover_indices[0][0]]["name"], "val": mover_indices[0][1]},
         "top_loser": {"sym": p_universe[mover_indices[-1][0]]["name"], "val": mover_indices[-1][1]},
         "top_vol": {"sym": p_universe[vol_indices[0][0]]["name"], "val": f"${vol_indices[0][1]/1e6:.0f}M"},

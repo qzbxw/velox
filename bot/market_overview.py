@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class MarketOverview:
     def __init__(self):
         # Main Hedge Agent - analyzes and responds
-        self.hedge_agent_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={settings.GEMINI_API_KEY}"
+        self.hedge_agent_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key={settings.GEMINI_API_KEY}"
 
         # News Agent - collects fresh news via Google Search
         self.news_agent_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={settings.GEMINI_API_KEY}"

@@ -13,13 +13,17 @@ logger = logging.getLogger(__name__)
 @router.inline_query()
 async def inline_query_handler(query: InlineQuery):
     query_text = query.query.strip().upper()
-    if not query_text: return
+    if not query_text:
+        return
     
     price, symbol = 0.0, query_text
     ws = getattr(query.bot, "ws_manager", None)
-    if ws: price = ws.get_price(symbol)
-    if not price: price = await get_mid_price(symbol)
-    if not price: return
+    if ws:
+        price = ws.get_price(symbol)
+    if not price:
+        price = await get_mid_price(symbol)
+    if not price:
+        return
 
     result_id = f"price_{symbol}_{time.time()}"
     title = f"{symbol}: ${pretty_float(price)}"

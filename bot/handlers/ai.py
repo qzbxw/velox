@@ -120,7 +120,8 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
         market_data["top_losers"] = movers[-5:][::-1]
 
         def get_change(idx):
-            if idx >= len(asset_ctxs): return 0
+            if idx >= len(asset_ctxs):
+                return 0
             ac = asset_ctxs[idx]
             p = float(ac.get("markPx", 0))
             prev = float(ac.get("prevDayPx", 0) or p)
@@ -204,7 +205,8 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
         
     except Exception as e:
         logger.error(f"Overview error: {e}", exc_info=True)
-        if status_msg: await status_msg.edit_text("❌ Failed to generate overview.")
+        if status_msg:
+            await status_msg.edit_text("❌ Failed to generate overview.")
 
 # --- HANDLERS ---
 
@@ -228,8 +230,10 @@ async def cb_market_overview_refresh(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     mids = data.get("ai_overview_msg_ids", [])
     for mid in mids:
-        try: await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
-        except Exception: pass
+        try:
+            await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
+        except Exception:
+            pass
     kb = InlineKeyboardBuilder()
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
     status_msg = await call.message.answer(_t(lang, "ai_generating"), reply_markup=kb.as_markup(), parse_mode="HTML")
@@ -240,9 +244,12 @@ async def cb_ai_cleanup(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     mids = data.get("ai_overview_msg_ids", [])
     for mid in mids:
-        if mid == call.message.message_id: continue
-        try: await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
-        except Exception: pass
+        if mid == call.message.message_id:
+            continue
+        try:
+            await call.message.bot.delete_message(chat_id=call.message.chat.id, message_id=mid)
+        except Exception:
+            pass
     await state.update_data(ai_overview_msg_ids=None)
     from bot.handlers.menu import cb_sub_overview
     await cb_sub_overview(call)
@@ -291,14 +298,18 @@ async def cb_overview_settings(call: CallbackQuery, state: FSMContext):
         await call.answer()
         return
     cfg = await db.get_overview_settings(user_id)
-    if action == "ov_toggle": cfg["enabled"] = not cfg["enabled"]
+    if action == "ov_toggle":
+        cfg["enabled"] = not cfg["enabled"]
     elif action.startswith("ov_del_time:"):
         t = action.split(":", 1)[1]
-        if t in cfg["schedules"]: cfg["schedules"].remove(t)
+        if t in cfg["schedules"]:
+            cfg["schedules"].remove(t)
     await db.update_overview_settings(user_id, cfg)
     text, kb = _build_overview_settings_ui(lang, cfg)
-    try: await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
-    except Exception: pass
+    try:
+        await call.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
+    except Exception:
+        pass
     await call.answer()
 
 @router.message(SettingsStates.waiting_for_ov_time)
@@ -335,7 +346,8 @@ async def _hedge_settings_render(call: CallbackQuery, user_id: int):
     enabled = cfg.get("enabled", False)
     triggers = cfg.get("triggers", {})
     def _btn_text(key, label):
-        if not enabled: return f"⚪️ {label}"
+        if not enabled:
+            return f"⚪️ {label}"
         return f"{'✅' if triggers.get(key, False) else '❌'} {label}"
     kb = InlineKeyboardBuilder()
     state_text = ("ON" if enabled else "OFF") if lang != "ru" else ("ВКЛ" if enabled else "ВЫКЛ")
@@ -343,7 +355,8 @@ async def _hedge_settings_render(call: CallbackQuery, user_id: int):
     trigger_list = [("liquidation", _t(lang, "hedge_trigger_liqs")), ("fills", _t(lang, "hedge_trigger_fills")), ("proximity", _t(lang, "hedge_trigger_prox")), ("volatility", _t(lang, "hedge_trigger_vol")), ("whale", _t(lang, "hedge_trigger_whale")), ("margin", _t(lang, "hedge_trigger_margin")), ("listings", _t(lang, "hedge_trigger_listings")), ("ledger", _t(lang, "hedge_trigger_ledger")), ("funding", _t(lang, "hedge_trigger_funding")), ("oi", _t(lang, "hedge_trigger_oi"))]
     for i in range(0, len(trigger_list), 2):
         row = [InlineKeyboardButton(text=_btn_text(trigger_list[i][0], trigger_list[i][1]), callback_data=f"hedge_toggle:{trigger_list[i][0]}")]
-        if i + 1 < len(trigger_list): row.append(InlineKeyboardButton(text=_btn_text(trigger_list[i+1][0], trigger_list[i+1][1]), callback_data=f"hedge_toggle:{trigger_list[i+1][0]}"))
+        if i + 1 < len(trigger_list):
+            row.append(InlineKeyboardButton(text=_btn_text(trigger_list[i+1][0], trigger_list[i+1][1]), callback_data=f"hedge_toggle:{trigger_list[i+1][0]}"))
         kb.row(*row)
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
     await smart_edit(call, f"{_t(lang, 'hedge_title')}\n\n{_t(lang, 'hedge_desc')}", reply_markup=kb.as_markup())
@@ -362,10 +375,12 @@ async def cb_hedge_toggle(call: CallbackQuery):
     if not await _ensure_billing_feature(call, call.message.chat.id, lang, "advanced_ai_settings", "billing_feature_ai_settings", is_callback=True):
         return
     user_id, cfg = call.message.chat.id, await db.get_hedge_settings(call.message.chat.id)
-    if call.data == "hedge_toggle_master": cfg["enabled"] = not cfg.get("enabled", False)
+    if call.data == "hedge_toggle_master":
+        cfg["enabled"] = not cfg.get("enabled", False)
     elif call.data.startswith("hedge_toggle:"):
         key = call.data.split(":")[1]
-        if "triggers" not in cfg: cfg["triggers"] = {}
+        if "triggers" not in cfg:
+            cfg["triggers"] = {}
         cfg["triggers"][key] = not cfg["triggers"].get(key, False)
     await db.update_hedge_settings(user_id, cfg)
     await _hedge_settings_render(call, user_id)
@@ -400,13 +415,15 @@ async def process_hedge_chat(message: Message, state: FSMContext):
     response = await market_overview.generate_hedge_comment(context_type="chat", event_data={"user_msg": message.text}, user_id=message.from_user.id, lang=lang, history=history)
     if not response:
         response = "⚠️ I am having trouble connecting to my brain. Please try again."
-        if lang == "ru": response = "⚠️ Возникли трудности с подключением. Попробуй еще раз."
+        if lang == "ru":
+            response = "⚠️ Возникли трудности с подключением. Попробуй еще раз."
     disp_response = html.escape(response)
     disp_response = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', disp_response)
     disp_response = re.sub(r'\*(.*?)\*', r'<i>\1</i>', disp_response)
     history.append({"role": "assistant", "content": response})
     await db.append_hedge_memory(message.chat.id, role="assistant", content=response, meta={"context_type": "chat"})
-    if len(history) > 10: history = history[-10:]
+    if len(history) > 10:
+        history = history[-10:]
     await state.update_data(history=history)
     kb = InlineKeyboardBuilder()
     kb.button(text=_t(lang, "btn_back"), callback_data="sub:overview")
@@ -415,15 +432,21 @@ async def process_hedge_chat(message: Message, state: FSMContext):
 async def _send_hedge_insight(bot, chat_id, user_id, context_type, event_data, reply_to_id=None):
     try:
         cfg = await db.get_hedge_settings(user_id)
-        if not cfg.get("enabled"): return
-        if not cfg.get("triggers", {}).get(context_type, True): return
+        if not cfg.get("enabled"):
+            return
+        if not cfg.get("triggers", {}).get(context_type, True):
+            return
         lang = await db.get_lang(chat_id)
-        try: await bot.send_chat_action(chat_id=chat_id, action="typing")
-        except Exception: pass
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+        except Exception:
+            pass
         comment = await market_overview.generate_hedge_comment(context_type=context_type, event_data=event_data, user_id=user_id, lang=lang)
         if comment:
-            try: event_txt = json.dumps(event_data, ensure_ascii=False)[:700]
-            except Exception: event_txt = str(event_data)[:700]
+            try:
+                event_txt = json.dumps(event_data, ensure_ascii=False)[:700]
+            except Exception:
+                event_txt = str(event_data)[:700]
             await db.append_hedge_memory(user_id, role="system", content=f"{context_type}: {event_txt}", meta={"context_type": context_type})
             await db.append_hedge_memory(user_id, role="assistant", content=comment, meta={"context_type": context_type})
             disp_comment = html.escape(comment)

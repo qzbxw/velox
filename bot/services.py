@@ -128,8 +128,10 @@ async def get_symbol_name(token_id: str | int, is_spot: bool = False) -> str:
 
     # Hardcoded overrides for canonical Perps (only if not spot)
     if not is_spot:
-        if s_id == "0": return "BTC"
-        if s_id == "1": return "ETH"
+        if s_id == "0":
+            return "BTC"
+        if s_id == "1":
+            return "ETH"
     
     # Check other cache as fallback? No, better be strict to avoid bugs.
     # But for safety with common names:

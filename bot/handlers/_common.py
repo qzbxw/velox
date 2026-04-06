@@ -36,8 +36,10 @@ class CallbackThrottleMiddleware(BaseMiddleware):
         key = (event.from_user.id, event.data)
         now = time.time()
         if key in self._last and now - self._last[key] < self.cooldown:
-            try: await event.answer("⏳")
-            except Exception: pass
+            try:
+                await event.answer("⏳")
+            except Exception:
+                pass
             return
         self._last[key] = now
         return await handler(event, data)

@@ -201,26 +201,31 @@ class WSManager:
     async def handle_trades(self, data):
         """Handle public trades for Whale Watcher."""
         trades = data.get("data", [])
-        if not trades: return
+        if not trades:
+            return
         
         # Use cached subscribers
         whale_users = self.whale_subscribers_cache
-        if not whale_users: return
+        if not whale_users:
+            return
 
         for t in trades:
             sym = t.get("coin")
-            if not sym: continue 
+            if not sym:
+                continue 
             
             sz = float(t.get("sz", 0))
             px = float(t.get("px", 0))
             val = sz * px
             
             # Global min threshold to even bother ($50k)
-            if val < 50_000: continue
+            if val < 50_000:
+                continue
             
             # Dedup
             tid = t.get("hash") or f"{sym}-{t.get('time')}-{sz}"
-            if tid in self.whale_cache: continue
+            if tid in self.whale_cache:
+                continue
             self.whale_cache.append(tid)
             
             side = t.get("side", "").upper()
@@ -231,7 +236,8 @@ class WSManager:
                 user_id = u.get("user_id")
                 # Check user specific threshold if any
                 thr = u.get("whale_threshold", 50_000)
-                if val < thr: continue
+                if val < thr:
+                    continue
 
                 # Watchlist filter
                 if u.get("whale_watchlist_only"):
@@ -451,7 +457,8 @@ class WSManager:
         return list(self.open_orders.get(wallet.lower(), []))
 
     async def subscribe_user(self, wallet):
-        if not self.ws: return
+        if not self.ws:
+            return
         wallet = wallet.lower()
         # User Fills
         await self.ws.send(json.dumps({
@@ -471,7 +478,8 @@ class WSManager:
         logger.info(f"Subscribed to updates (Fills, Orders, WebData2) for {wallet}")
 
     async def subscribe_all_mids(self):
-        if not self.ws: return
+        if not self.ws:
+            return
         await self.ws.send(json.dumps({
             "method": "subscribe",
             "subscription": {"type": "allMids"}
@@ -503,9 +511,11 @@ class WSManager:
                 
                 current_assets = set()
                 if meta["spot"]:
-                    for u in meta["spot"].get("universe", []): current_assets.add(u["name"])
+                    for u in meta["spot"].get("universe", []):
+                        current_assets.add(u["name"])
                 if meta["perps"]:
-                    for u in meta["perps"].get("universe", []): current_assets.add(u["name"])
+                    for u in meta["perps"].get("universe", []):
+                        current_assets.add(u["name"])
                 
                 if not current_assets:
                     await asyncio.sleep(300)
@@ -561,17 +571,20 @@ class WSManager:
     async def _check_market_stats_alerts(self):
         """Check funding and OI alerts using metaAndAssetCtxs."""
         ctx = await get_perps_context()
-        if not ctx or not isinstance(ctx, list) or len(ctx) != 2: return
+        if not ctx or not isinstance(ctx, list) or len(ctx) != 2:
+            return
         
         universe = ctx[0].get("universe", [])
         asset_ctxs = ctx[1]
         
         for alert in self.active_alerts:
             a_type = alert.get("type", "price")
-            if a_type not in ("funding", "oi"): continue
+            if a_type not in ("funding", "oi"):
+                continue
             
             aid = str(alert["_id"])
-            if aid in self.triggered_alerts: continue
+            if aid in self.triggered_alerts:
+                continue
             
             sym = alert["symbol"]
             target = alert.get("target")
@@ -583,7 +596,8 @@ class WSManager:
             
             # Find data
             idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
-            if idx == -1 or idx >= len(asset_ctxs): continue
+            if idx == -1 or idx >= len(asset_ctxs):
+                continue
             
             data = asset_ctxs[idx]
             current_val = 0.0
@@ -712,7 +726,8 @@ class WSManager:
                     msg += asset_data + "\n\n"
 
                 # Generate 3 images
-                if isinstance(hlp_info, Exception): hlp_info = None
+                if isinstance(hlp_info, Exception):
+                    hlp_info = None
                 data_alpha = prepare_modern_market_data(asset_ctxs, universe, hlp_info)
                 data_liq = prepare_liquidity_data(asset_ctxs, universe)
                 
@@ -873,7 +888,8 @@ class WSManager:
                     continue
                 current_px = self.get_price(coin, original_id=coin)
                 
-                if not current_px: continue
+                if not current_px:
+                    continue
                 
                 side = self._extract_order_side(order)
                 sz = self._extract_order_size(order)
@@ -920,8 +936,10 @@ class WSManager:
             # Because check_proximity uses global settings to trigger this function
             # We must re-verify for this specific user
             eff_thresh = user_prox_pct if user_prox_pct is not None else settings.PROXIMITY_THRESHOLD
-            if side == "buy" and not user_prox_pct: eff_thresh = settings.BUY_PROXIMITY_THRESHOLD
-            elif side == "sell" and not user_prox_pct: eff_thresh = settings.SELL_PROXIMITY_THRESHOLD
+            if side == "buy" and not user_prox_pct:
+                eff_thresh = settings.BUY_PROXIMITY_THRESHOLD
+            elif side == "sell" and not user_prox_pct:
+                eff_thresh = settings.SELL_PROXIMITY_THRESHOLD
             
             if pct_diff > eff_thresh and (price_dist > settings.PROXIMITY_USD_THRESHOLD):
                 # If both failed (pct too high AND usd too high), skip
@@ -1211,7 +1229,8 @@ class WSManager:
         account_value = float(margin_summary.get("accountValue", 0) or 0)
         total_margin_used = float(margin_summary.get("totalMarginUsed", 0) or 0)
         
-        if account_value <= 0: return
+        if account_value <= 0:
+            return
         
         margin_ratio = total_margin_used / account_value
         

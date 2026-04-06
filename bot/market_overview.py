@@ -141,11 +141,13 @@ class MarketOverview:
                 # Iterate rows from bottom up (latest usually at bottom)
                 for row in reversed(rows):
                     cols = row.find_all(['td', 'th'])
-                    if not cols: continue
+                    if not cols:
+                        continue
                     
                     date_text = cols[0].get_text(strip=True)
                     # Check if it looks like a date (digits involved)
-                    if not re.search(r'\d', date_text): continue
+                    if not re.search(r'\d', date_text):
+                        continue
                     
                     # Get value
                     flow_val = None
@@ -170,7 +172,8 @@ class MarketOverview:
     def _clean_number(self, text: str) -> float | None:
         try:
             # Remove ( ) for negative, $ for currency, commas
-            if not text: return None
+            if not text:
+                return None
             t = text.replace('$', '').replace(',', '')
             if '(' in t and ')' in t:
                 t = '-' + t.replace('(', '').replace(')', '')
@@ -208,7 +211,8 @@ class MarketOverview:
         for entries in results:
             if isinstance(entries, Exception):
                 continue
-            if not entries: continue
+            if not entries:
+                continue
             for entry in entries:
                 # Deduplicate by link
                 link = getattr(entry, "link", "") or ""
@@ -249,19 +253,32 @@ class MarketOverview:
         return articles
 
     def _extract_source(self, link: str) -> str:
-        if "decrypt.co" in link: return "Decrypt"
-        if "coindesk.com" in link: return "CoinDesk"
-        if "cointelegraph.com" in link: return "CoinTelegraph"
-        if "cryptopanic.com" in link: return "CryptoPanic"
-        if "theblock.co" in link: return "The Block"
-        if "bitcoinmagazine.com" in link: return "Bitcoin Magazine"
-        if "coinbase.com" in link: return "Coinbase Blog"
-        if "binance.com" in link: return "Binance"
-        if "messari.io" in link: return "Messari"
-        if "coinglass.com" in link: return "Coinglass"
-        if "newsbtc.com" in link: return "NewsBTC"
-        if "cryptoslate.com" in link: return "CryptoSlate"
-        if "u.today" in link: return "U.Today"
+        if "decrypt.co" in link:
+            return "Decrypt"
+        if "coindesk.com" in link:
+            return "CoinDesk"
+        if "cointelegraph.com" in link:
+            return "CoinTelegraph"
+        if "cryptopanic.com" in link:
+            return "CryptoPanic"
+        if "theblock.co" in link:
+            return "The Block"
+        if "bitcoinmagazine.com" in link:
+            return "Bitcoin Magazine"
+        if "coinbase.com" in link:
+            return "Coinbase Blog"
+        if "binance.com" in link:
+            return "Binance"
+        if "messari.io" in link:
+            return "Messari"
+        if "coinglass.com" in link:
+            return "Coinglass"
+        if "newsbtc.com" in link:
+            return "NewsBTC"
+        if "cryptoslate.com" in link:
+            return "CryptoSlate"
+        if "u.today" in link:
+            return "U.Today"
         return "News"
 
     def _format_news_digest(self, news: list[dict], limit: int = 10) -> str:

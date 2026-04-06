@@ -21,28 +21,51 @@ logger = logging.getLogger(__name__)
 
 @router.message(Command("alert"))
 async def cmd_alert(message: Message):
-    lang, alerts = await db.get_lang(message.chat.id), await db.get_user_alerts(message.chat.id)
-    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(alerts), "billing_feature_alerts"): return
+    lang = await db.get_lang(message.chat.id)
+    alerts = await db.get_user_alerts(message.chat.id)
+    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(alerts), "billing_feature_alerts"):
+        return
     args = message.text.split()
-    if len(args) < 3: await message.answer(_t(lang, "alert_usage"), parse_mode="HTML"); return
-    symbol, ws = html.escape(args[1].upper()), getattr(message.bot, "ws_manager", None)
-    try: target = float(args[2].replace(",", "."))
-    except ValueError: await message.answer(_t(lang, "alert_error")); return
+    if len(args) < 3:
+        await message.answer(_t(lang, "alert_usage"), parse_mode="HTML")
+        return
+    symbol = html.escape(args[1].upper())
+    ws = getattr(message.bot, "ws_manager", None)
+    try:
+        target = float(args[2].replace(",", "."))
+    except ValueError:
+        await message.answer(_t(lang, "alert_error"))
+        return
     current = (ws.get_price(symbol) if ws else 0.0) or await get_mid_price(symbol)
-    if not current: await message.answer(_t(lang, "unknown_price", symbol=symbol), parse_mode="HTML"); return
+    if not current:
+        await message.answer(_t(lang, "unknown_price", symbol=symbol), parse_mode="HTML")
+        return
     direction = "above" if target > current else "below"
     await db.add_price_alert(message.chat.id, symbol, target, direction)
     await message.answer(_t(lang, "alert_added").format(symbol=symbol, dir="📈" if direction == "above" else "📉", price=pretty_float(target)), parse_mode="HTML")
 
 @router.callback_query(F.data == "cb_alerts")
 async def cb_alerts(call: CallbackQuery):
-    lang, alerts = await db.get_lang(call.message.chat.id), await db.get_user_alerts(call.message.chat.id)
-    if not alerts: await smart_edit(call, f"{_t(lang, 'market_title')} > <b>{_t(lang, 'btn_price_alerts')}</b>\n\n{_t(lang, 'no_alerts')}\n{_t(lang, 'alert_usage')}\n\n<i>Last update: {time.strftime('%H:%M:%S')}</i>", reply_markup=_back_kb(lang, "sub:market")); return
-    kb, text = InlineKeyboardBuilder(), _t(lang, "alerts_list") + "\n"
+    lang = await db.get_lang(call.message.chat.id)
+    alerts = await db.get_user_alerts(call.message.chat.id)
+    if not alerts:
+        text = f"{_t(lang, 'market_title')} > <b>{_t(lang, 'btn_price_alerts')}</b>\n\n{_t(lang, 'no_alerts')}\n{_t(lang, 'alert_usage')}\n\n<i>Last update: {time.strftime('%H:%M:%S')}</i>"
+        await smart_edit(call, text, reply_markup=_back_kb(lang, "sub:market"))
+        return
+    
+    kb = InlineKeyboardBuilder()
+    text = _t(lang, "alerts_list") + "\n"
     for a in alerts:
-        aid, s, p, d = str(a["_id"]), a.get("symbol", "???"), pretty_float(a.get("target", 0)), "📈" if a.get("direction") == "above" else "📉"
-        text += f"\n• {s} {d} {p}"; kb.button(text=f"❌ Del {s}", callback_data=f"del_alert:{aid}")
-    kb.button(text="🗑️ Clear All", callback_data="clear_all_alerts"); kb.button(text=_t(lang, "btn_back"), callback_data="sub:market"); kb.adjust(1)
+        aid = str(a["_id"])
+        s = a.get("symbol", "???")
+        p = pretty_float(a.get("target", 0))
+        d = "📈" if a.get("direction") == "above" else "📉"
+        text += f"\n• {s} {d} {p}"
+        kb.button(text=f"❌ Del {s}", callback_data=f"del_alert:{aid}")
+    
+    kb.button(text="🗑️ Clear All", callback_data="clear_all_alerts")
+    kb.button(text=_t(lang, "btn_back"), callback_data="sub:market")
+    kb.adjust(1)
     await smart_edit(call, text + f"\n\n<i>Last update: {time.strftime('%H:%M:%S')}</i>", reply_markup=kb.as_markup())
 
 @router.callback_query(F.data == "clear_all_alerts")
@@ -61,7 +84,8 @@ async def cb_del_alert(call: CallbackQuery):
 
 @router.callback_query(F.data.startswith("quick_alert:"))
 async def cb_quick_alert(call: CallbackQuery):
-    symbol, lang = call.data.split(":")[1], await db.get_lang(call.message.chat.id)
+    symbol = call.data.split(":")[1]
+    lang = await db.get_lang(call.message.chat.id)
     current_price = await get_mid_price(symbol)
     if not current_price:
         await call.answer("❌ Cannot get price", show_alert=True)
@@ -82,7 +106,10 @@ async def cb_quick_alert(call: CallbackQuery):
 @router.callback_query(F.data.startswith("set_quick_alert:"))
 async def cb_set_quick_alert(call: CallbackQuery):
     parts = call.data.split(":")
-    symbol, direction, target, lang = parts[1], parts[2], float(parts[3]), await db.get_lang(call.message.chat.id)
+    symbol = parts[1]
+    direction = parts[2]
+    target = float(parts[3])
+    lang = await db.get_lang(call.message.chat.id)
     if not await _ensure_billing_quota(call, call.message.chat.id, lang, "alerts", len(await db.get_user_alerts(call.message.chat.id)), "billing_feature_alerts", is_callback=True):
         return
     await db.add_price_alert(call.message.chat.id, symbol, target, direction)
@@ -91,38 +118,62 @@ async def cb_set_quick_alert(call: CallbackQuery):
 
 @router.message(Command("watch"))
 async def cmd_watch(message: Message):
-    lang, args = await db.get_lang(message.chat.id), message.text.split()
-    if len(args) < 2: await message.answer(_t(lang, "watch_usage"), parse_mode="HTML"); return
+    lang = await db.get_lang(message.chat.id)
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer(_t(lang, "watch_usage"), parse_mode="HTML")
+        return
     symbol = args[1].upper()
-    if len(symbol) > 10 or not symbol.isalnum(): await message.answer(_t(lang, "watch_invalid")); return
+    if len(symbol) > 10 or not symbol.isalnum():
+        await message.answer(_t(lang, "watch_invalid"))
+        return
     watchlist = await db.get_watchlist(message.chat.id)
     if symbol not in watchlist:
-        if not await _ensure_billing_quota(message, message.chat.id, lang, "watchlist", len(watchlist), "billing_feature_watchlist"): return
-    await db.add_watch_symbol(message.chat.id, symbol); ws = getattr(message.bot, "ws_manager", None)
+        if not await _ensure_billing_quota(message, message.chat.id, lang, "watchlist", len(watchlist), "billing_feature_watchlist"):
+            return
+    await db.add_watch_symbol(message.chat.id, symbol)
+    ws = getattr(message.bot, "ws_manager", None)
     if ws:
-        if symbol not in ws.watch_subscribers: ws.watch_subscribers[symbol] = set()
+        if symbol not in ws.watch_subscribers:
+            ws.watch_subscribers[symbol] = set()
         ws.watch_subscribers[symbol].add(message.chat.id)
     await message.answer(_t(lang, "watch_added").format(symbol=symbol), parse_mode="HTML")
 
 @router.message(Command("unwatch"))
 async def cmd_unwatch(message: Message):
-    lang, args = await db.get_lang(message.chat.id), message.text.split()
-    if len(args) < 2: await message.answer(_t(lang, "unwatch_usage"), parse_mode="HTML"); return
-    symbol = args[1].upper(); await db.remove_watch_symbol(message.chat.id, symbol); ws = getattr(message.bot, "ws_manager", None)
-    if ws and symbol in ws.watch_subscribers: ws.watch_subscribers[symbol].discard(message.chat.id)
+    lang = await db.get_lang(message.chat.id)
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer(_t(lang, "unwatch_usage"), parse_mode="HTML")
+        return
+    symbol = args[1].upper()
+    await db.remove_watch_symbol(message.chat.id, symbol)
+    ws = getattr(message.bot, "ws_manager", None)
+    if ws and symbol in ws.watch_subscribers:
+        ws.watch_subscribers[symbol].discard(message.chat.id)
     await message.answer(_t(lang, "watch_removed").format(symbol=symbol), parse_mode="HTML")
 
 @router.callback_query(F.data == "cb_funding_alert_prompt")
 async def cb_funding_alert_prompt(call: CallbackQuery, state: FSMContext):
-    lang = await db.get_lang(call.message.chat.id); await state.update_data(alert_type="funding", menu_msg_id=call.message.message_id); await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML"); await state.set_state(AlertStates.waiting_for_symbol); await call.answer()
+    lang = await db.get_lang(call.message.chat.id)
+    await state.update_data(alert_type="funding", menu_msg_id=call.message.message_id)
+    await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.set_state(AlertStates.waiting_for_symbol)
+    await call.answer()
 
 @router.callback_query(F.data == "cb_oi_alert_prompt")
 async def cb_oi_alert_prompt(call: CallbackQuery, state: FSMContext):
-    lang = await db.get_lang(call.message.chat.id); await state.update_data(alert_type="oi", menu_msg_id=call.message.message_id); await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML"); await state.set_state(AlertStates.waiting_for_symbol); await call.answer()
+    lang = await db.get_lang(call.message.chat.id)
+    await state.update_data(alert_type="oi", menu_msg_id=call.message.message_id)
+    await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
+    await state.set_state(AlertStates.waiting_for_symbol)
+    await call.answer()
 
 @router.message(AlertStates.waiting_for_symbol)
 async def process_alert_symbol(message: Message, state: FSMContext):
-    lang, symbol, data = await db.get_lang(message.chat.id), message.text.strip().upper(), await state.get_data()
+    lang = await db.get_lang(message.chat.id)
+    symbol = message.text.strip().upper()
+    data = await state.get_data()
     if len(symbol) > 10 or not symbol.isalnum():
         await message.answer(_t(lang, "watch_invalid"))
         return
@@ -131,13 +182,15 @@ async def process_alert_symbol(message: Message, state: FSMContext):
     msg_id = data.get("menu_msg_id")
     try:
         await message.delete()
-    except Exception: pass
+    except Exception:
+        pass
     if msg_id:
         try:
             await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
             await state.set_state(AlertStates.waiting_for_target)
             return
-        except Exception: pass
+        except Exception:
+            pass
     await message.answer(prompt, reply_markup=_back_kb(lang, "cb_settings"), parse_mode="HTML")
     await state.set_state(AlertStates.waiting_for_target)
 
@@ -145,7 +198,8 @@ async def process_alert_symbol(message: Message, state: FSMContext):
 async def process_alert_target(message: Message, state: FSMContext):
     try:
         await message.delete()
-    except Exception: pass
+    except Exception:
+        pass
     lang = await db.get_lang(message.chat.id)
     try:
         target = float(message.text.replace(",", "."))
@@ -153,11 +207,14 @@ async def process_alert_target(message: Message, state: FSMContext):
         await message.answer(_t(lang, "invalid_number"))
         return
     data = await state.get_data()
-    symbol, a_type, msg_id = data.get("symbol"), data.get("alert_type"), data.get("menu_msg_id")
+    symbol = data.get("symbol")
+    a_type = data.get("alert_type")
+    msg_id = data.get("menu_msg_id")
     if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(await db.get_user_alerts(message.chat.id)), "billing_feature_alerts"):
         return
     ctx = await get_perps_context()
-    universe, asset_ctxs = ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0], ctx[1]
+    universe = ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0]
+    asset_ctxs = ctx[1]
     idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == symbol), -1)
     current_val = 0.0
     if idx != -1 and idx < len(asset_ctxs):
@@ -173,28 +230,47 @@ async def process_alert_target(message: Message, state: FSMContext):
             await message.bot.edit_message_text(chat_id=message.chat.id, message_id=msg_id, text=success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
             await state.clear()
             return
-        except Exception: pass
+        except Exception:
+            pass
     await message.answer(success_msg, reply_markup=_settings_kb(lang), parse_mode="HTML")
     await state.clear()
 
 @router.message(Command("f_alert"))
 async def cmd_f_alert(message: Message):
-    lang, args = await db.get_lang(message.chat.id), message.text.split()
-    if len(args) < 3: await message.answer(_t(lang, "f_alert_usage"), parse_mode="HTML"); return
-    symbol, target = args[1].upper(), float(args[2].replace(",", "."))
-    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(await db.get_user_alerts(message.chat.id)), "billing_feature_alerts"): return
-    ctx = await get_perps_context(); universe, asset_ctxs = ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0], ctx[1]; idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == symbol), -1)
+    lang = await db.get_lang(message.chat.id)
+    args = message.text.split()
+    if len(args) < 3:
+        await message.answer(_t(lang, "f_alert_usage"), parse_mode="HTML")
+        return
+    symbol = args[1].upper()
+    target = float(args[2].replace(",", "."))
+    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(await db.get_user_alerts(message.chat.id)), "billing_feature_alerts"):
+        return
+    ctx = await get_perps_context()
+    universe = ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0]
+    asset_ctxs = ctx[1]
+    idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == symbol), -1)
     curr = float(asset_ctxs[idx].get("funding", 0)) * 24 * 365 * 100 if idx != -1 else 0.0
-    direction = "above" if target > curr else "below"; await db.add_alert(message.chat.id, symbol, target, direction, "funding")
+    direction = "above" if target > curr else "below"
+    await db.add_alert(message.chat.id, symbol, target, direction, "funding")
     await message.answer(_t(lang, "funding_alert_set", symbol=symbol, dir="📈" if direction == "above" else "📉", val=target), parse_mode="HTML")
 
 @router.message(Command("oi_alert"))
 async def cmd_oi_alert(message: Message):
-    lang, args = await db.get_lang(message.chat.id), message.text.split()
-    if len(args) < 3: await message.answer(_t(lang, "oi_alert_usage"), parse_mode="HTML"); return
-    symbol, target = args[1].upper(), float(args[2].replace(",", "."))
-    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(await db.get_user_alerts(message.chat.id)), "billing_feature_alerts"): return
-    ctx = await get_perps_context(); universe, asset_ctxs = ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0], ctx[1]; idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == symbol), -1)
+    lang = await db.get_lang(message.chat.id)
+    args = message.text.split()
+    if len(args) < 3:
+        await message.answer(_t(lang, "oi_alert_usage"), parse_mode="HTML")
+        return
+    symbol = args[1].upper()
+    target = float(args[2].replace(",", "."))
+    if not await _ensure_billing_quota(message, message.chat.id, lang, "alerts", len(await db.get_user_alerts(message.chat.id)), "billing_feature_alerts"):
+        return
+    ctx = await get_perps_context()
+    universe = ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0]
+    asset_ctxs = ctx[1]
+    idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == symbol), -1)
     curr = float(asset_ctxs[idx].get("openInterest", 0)) * float(asset_ctxs[idx].get("markPx", 0)) / 1e6 if idx != -1 else 0.0
-    direction = "above" if target > curr else "below"; await db.add_alert(message.chat.id, symbol, target, direction, "oi")
+    direction = "above" if target > curr else "below"
+    await db.add_alert(message.chat.id, symbol, target, direction, "oi")
     await message.answer(_t(lang, "oi_alert_set", symbol=symbol, dir="📈" if direction == "above" else "📉", val=target), parse_mode="HTML")

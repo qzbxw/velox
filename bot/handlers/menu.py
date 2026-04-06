@@ -33,7 +33,8 @@ async def cmd_start(message: Message):
 
 @router.callback_query(F.data == "cb_menu")
 async def cb_menu(call: CallbackQuery, state: FSMContext = None):
-    if state: await state.clear()
+    if state:
+        await state.clear()
     lang = await db.get_lang(call.message.chat.id)
     wallets = await db.list_wallets(call.message.chat.id)
     

@@ -69,7 +69,8 @@ async def cb_fills(call: CallbackQuery):
         if coin.startswith("@"):
              try:
                  coin = await get_symbol_name(coin, is_spot=True)
-             except Exception: pass
+             except Exception:
+                 pass
         px, sz, pnl = float(f.get("px", 0)), float(f.get("sz", 0)), float(f.get("closedPnl", 0) or 0)
         lines.append(f"{'🟢' if side == 'B' else '🔴'} <b>{coin}</b> {_t(lang, 'hist_buy' if side == 'B' else 'hist_sell')} ${pretty_float(px)}\n   <i>{datetime.datetime.fromtimestamp(f.get('time', 0)/1000).strftime('%H:%M')} | Sz: {sz} (${pretty_float(px*sz, 0)}){(' | PnL: ' + ('+' if pnl>0 else '') + pretty_float(pnl, 2)) if pnl != 0 else ''}</i>")
     if not all_fills:
@@ -79,7 +80,10 @@ async def cb_fills(call: CallbackQuery):
 @router.callback_query(F.data == "cb_risk_check")
 async def cb_risk_check(call: CallbackQuery):
     await call.answer("Scanning for risks...")
-    lang, wallets, ws, risky_positions = await db.get_lang(call.message.chat.id), await db.list_wallets(call.message.chat.id), getattr(call.message.bot, "ws_manager", None), []
+    lang = await db.get_lang(call.message.chat.id)
+    wallets = await db.list_wallets(call.message.chat.id)
+    ws = getattr(call.message.bot, "ws_manager", None)
+    risky_positions = []
     if not wallets:
         return
     for wallet in wallets:
@@ -148,7 +152,8 @@ async def calc_set_side(call: CallbackQuery, state: FSMContext):
 
 @router.message(CalcStates.balance)
 async def calc_set_balance(message: Message, state: FSMContext):
-    lang, data = await db.get_lang(message.chat.id), await state.get_data()
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
     try:
         await state.update_data(balance=float(message.text.replace(",", ".")))
         try:
@@ -171,7 +176,8 @@ async def calc_set_balance(message: Message, state: FSMContext):
 
 @router.message(CalcStates.entry)
 async def calc_set_entry(message: Message, state: FSMContext):
-    lang, data = await db.get_lang(message.chat.id), await state.get_data()
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
     try:
         await state.update_data(entry=float(message.text.replace(",", ".")))
         try:
@@ -194,7 +200,8 @@ async def calc_set_entry(message: Message, state: FSMContext):
 
 @router.message(CalcStates.sl)
 async def calc_set_sl(message: Message, state: FSMContext):
-    lang, data = await db.get_lang(message.chat.id), await state.get_data()
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
     try:
         await state.update_data(sl=float(message.text.replace(",", ".")))
         prompt = "💰 Enter <b>Risk Amount ($)</b> (e.g. 50):" if data.get("mode") == "reverse" else _t(lang, "calc_tp")
@@ -218,7 +225,8 @@ async def calc_set_sl(message: Message, state: FSMContext):
 
 @router.message(CalcStates.tp)
 async def calc_set_tp(message: Message, state: FSMContext):
-    lang, data = await db.get_lang(message.chat.id), await state.get_data()
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
     try:
         val = float(message.text.replace(",", "."))
         await state.update_data(tp=val)
@@ -227,79 +235,209 @@ async def calc_set_tp(message: Message, state: FSMContext):
         except Exception:
             pass
         if data.get("mode") == "reverse":
-            e, sl = float(data.get("entry", 0)), float(data.get("sl", 0))
-            if e <= 0 or sl <= 0 or val <= 0 or e == sl: await message.answer("❌ Invalid inputs."); await state.clear(); return
-            dist = abs(e - sl) / e; sz = val / dist; res = f"🛡️ <b>Risk Calculation Result</b>\n\nRisk: <b>{format_money(val)}</b>\nEntry: ${e}\nStop Loss: ${sl} ({'LONG' if e > sl else 'SHORT'})\nDistance: {dist*100:.2f}%\n\n👉 <b>Position Size: {format_money(sz)}</b>\n(Qty: {sz/e:.4f})"
-            kb = InlineKeyboardBuilder(); kb.button(text=_t(lang, "btn_back"), callback_data="calc_start")
+            e = float(data.get("entry", 0))
+            sl = float(data.get("sl", 0))
+            if e <= 0 or sl <= 0 or val <= 0 or e == sl:
+                await message.answer("❌ Invalid inputs.")
+                await state.clear()
+                return
+            dist = abs(e - sl) / e
+            sz = val / dist
+            res = (
+                f"🛡️ <b>Risk Calculation Result</b>\n\n"
+                f"Risk: <b>{format_money(val)}</b>\n"
+                f"Entry: ${e}\n"
+                f"Stop Loss: ${sl} ({'LONG' if e > sl else 'SHORT'})\n"
+                f"Distance: {dist*100:.2f}%\n\n"
+                f"👉 <b>Position Size: {format_money(sz)}</b>\n"
+                f"(Qty: {sz/e:.4f})"
+            )
+            kb = InlineKeyboardBuilder()
+            kb.button(text=_t(lang, "btn_back"), callback_data="calc_start")
             if data.get("menu_msg_id"):
-                try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=data["menu_msg_id"], text=res, reply_markup=kb.as_markup(), parse_mode="HTML")
-                except Exception: await message.answer(res, reply_markup=kb.as_markup(), parse_mode="HTML")
-            else: await message.answer(res, reply_markup=kb.as_markup(), parse_mode="HTML")
-            await state.clear(); return
-        if data.get("menu_msg_id"): await message.bot.edit_message_text(chat_id=message.chat.id, message_id=data["menu_msg_id"], text=_t(lang, "calc_risk"), reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
-        else: await message.answer(_t(lang, "calc_risk"), reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
+                try:
+                    await message.bot.edit_message_text(
+                        chat_id=message.chat.id,
+                        message_id=data["menu_msg_id"],
+                        text=res,
+                        reply_markup=kb.as_markup(),
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    await message.answer(res, reply_markup=kb.as_markup(), parse_mode="HTML")
+            else:
+                await message.answer(res, reply_markup=kb.as_markup(), parse_mode="HTML")
+            await state.clear()
+            return
+        if data.get("menu_msg_id"):
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=data["menu_msg_id"],
+                text=_t(lang, "calc_risk"),
+                reply_markup=_back_kb(lang, "calc_start"),
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer(_t(lang, "calc_risk"), reply_markup=_back_kb(lang, "calc_start"), parse_mode="HTML")
         await state.set_state(CalcStates.risk)
-    except ValueError: await message.answer(_t(lang, "calc_error"))
+    except ValueError:
+        await message.answer(_t(lang, "calc_error"))
 
 @router.message(CalcStates.risk)
 async def calc_calculate(message: Message, state: FSMContext):
-    lang, data = await db.get_lang(message.chat.id), await state.get_data()
+    lang = await db.get_lang(message.chat.id)
+    data = await state.get_data()
     try:
-        risk = float(message.text.replace(",", ".")); await state.clear()
-        b, e, sl, tp, side = data.get("balance", 0), data.get("entry", 0), data.get("sl", 0), data.get("tp", 0), data.get("side")
-        if (side == "long" and sl >= e) or (side == "short" and sl <= e): await message.answer(_t(lang, "calc_side_wrong"), parse_mode="HTML"); return
+        risk = float(message.text.replace(",", "."))
+        await state.clear()
+        b = data.get("balance", 0)
+        e = data.get("entry", 0)
+        sl = data.get("sl", 0)
+        tp = data.get("tp", 0)
+        side = data.get("side")
+        if (side == "long" and sl >= e) or (side == "short" and sl <= e):
+            await message.answer(_t(lang, "calc_side_wrong"), parse_mode="HTML")
+            return
         rpc = abs(e - sl)
-        if rpc == 0: await message.answer(_t(lang, "calc_error")); return
-        pos_coins = risk / rpc; pos_usd = pos_coins * e; fees = pos_usd * 0.00035 * 2; lev = pos_usd / b if b > 0 else 1.0; rr = abs(tp - e) / rpc
-        liq_px = (e * (1 - (1/lev) + 0.01)) if side == "long" else (e * (1 + (1/lev) - 0.01)) if lev > 1 else 0
+        if rpc == 0:
+            await message.answer(_t(lang, "calc_error"))
+            return
+        pos_coins = risk / rpc
+        pos_usd = pos_coins * e
+        fees = pos_usd * 0.00035 * 2
+        lev = pos_usd / b if b > 0 else 1.0
+        rr = abs(tp - e) / rpc
+        liq_px = 0
+        if side == "long":
+            liq_px = (e * (1 - (1/lev) + 0.01))
+        elif side == "short" and lev > 1:
+            liq_px = (e * (1 + (1/lev) - 0.01))
+
         total_p = (pos_coins * abs(tp - e)) - fees
-        msg = _t(lang, "calc_result", side=side.upper(), mode="PERP" if lev > 1 else "SPOT", balance=pretty_float(b), risk=pretty_float(risk), entry=pretty_float(e), sl=pretty_float(sl), sl_pct=f"{((sl - e) / e) * 100:+.2f}", tp=pretty_float(tp), tp_pct=f"{((tp - e) / e) * 100:+.2f}", rr=f"{rr:.2f}", lev_row=(_t(lang, "calc_lev_lbl", lev=f"{lev:.1f}") if lev > 1 else ""), liq_row=(_t(lang, "calc_liq_lbl", liq=pretty_float(liq_px)) if liq_px > 0 else ""), size_usd=pretty_float(pos_usd), size_coins=pretty_float(pos_coins, 4), fees=pretty_float(fees), total_loss=pretty_float(risk + fees), total_profit=pretty_float(total_p), p50=pretty_float(total_p/2), p100=pretty_float(total_p)) + (_t(lang, "calc_liq_warn") if (lev > 1 and ((side == "long" and liq_px > sl) or (side == "short" and liq_px < sl))) else "")
-        try: await message.delete()
-        except Exception: pass
-        kb = InlineKeyboardBuilder(); kb.button(text=_t(lang, "btn_back"), callback_data="sub:trading")
+        msg = _t(
+            lang, "calc_result",
+            side=side.upper(),
+            mode="PERP" if lev > 1 else "SPOT",
+            balance=pretty_float(b),
+            risk=pretty_float(risk),
+            entry=pretty_float(e),
+            sl=pretty_float(sl),
+            sl_pct=f"{((sl - e) / e) * 100:+.2f}",
+            tp=pretty_float(tp),
+            tp_pct=f"{((tp - e) / e) * 100:+.2f}",
+            rr=f"{rr:.2f}",
+            lev_row=(_t(lang, "calc_lev_lbl", lev=f"{lev:.1f}") if lev > 1 else ""),
+            liq_row=(_t(lang, "calc_liq_lbl", liq=pretty_float(liq_px)) if liq_px > 0 else ""),
+            size_usd=pretty_float(pos_usd),
+            size_coins=pretty_float(pos_coins, 4),
+            fees=pretty_float(fees),
+            total_loss=pretty_float(risk + fees),
+            total_profit=pretty_float(total_p),
+            p50=pretty_float(total_p/2),
+            p100=pretty_float(total_p)
+        )
+        if (lev > 1 and ((side == "long" and liq_px > sl) or (side == "short" and liq_px < sl))):
+            msg += _t(lang, "calc_liq_warn")
+
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+        kb = InlineKeyboardBuilder()
+        kb.button(text=_t(lang, "btn_back"), callback_data="sub:trading")
         if data.get("menu_msg_id"):
-            try: await message.bot.edit_message_text(chat_id=message.chat.id, message_id=data["menu_msg_id"], text=msg, reply_markup=kb.as_markup(), parse_mode="HTML")
-            except Exception: await message.answer(msg, reply_markup=kb.as_markup(), parse_mode="HTML")
-        else: await message.answer(msg, reply_markup=kb.as_markup(), parse_mode="HTML")
-    except ValueError: await message.answer(_t(lang, "calc_error"))
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=data["menu_msg_id"],
+                    text=msg,
+                    reply_markup=kb.as_markup(),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                await message.answer(msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+        else:
+            await message.answer(msg, reply_markup=kb.as_markup(), parse_mode="HTML")
+    except ValueError:
+        await message.answer(_t(lang, "calc_error"))
 
 async def _render_funding_page(bot, chat_id, page=0, edit=False, msg_id=None):
-    lang, wallets = await db.get_lang(chat_id), await db.list_wallets(chat_id)
+    lang = await db.get_lang(chat_id)
+    wallets = await db.list_wallets(chat_id)
     if not wallets:
         if edit and msg_id:
-            try: await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=_t(lang, "need_wallet"), parse_mode="HTML")
-            except Exception: pass
-        else: await bot.send_message(chat_id, _t(lang, "need_wallet"), parse_mode="HTML")
+            try:
+                await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=_t(lang, "need_wallet"), parse_mode="HTML")
+            except Exception:
+                pass
+        else:
+            await bot.send_message(chat_id, _t(lang, "need_wallet"), parse_mode="HTML")
         return
-    start_ts, all_updates = int((time.time() - 86400) * 1000), []
+    start_ts = int((time.time() - 86400) * 1000)
+    all_updates = []
     for wallet in wallets:
         updates = await get_user_funding(wallet, start_time=start_ts)
         if updates:
-            for u in updates: u['wallet'] = wallet; all_updates.append(u)
+            for u in updates:
+                u['wallet'] = wallet
+                all_updates.append(u)
     all_updates.sort(key=lambda x: int(x.get("time", 0)), reverse=True)
     ITEMS_PER_PAGE = 10
     total_items = len(all_updates)
     total_pages = math.ceil(total_items / ITEMS_PER_PAGE)
-    page = max(0, min(page, total_pages - 1)) if total_items > 0 else 0
+    if total_items > 0:
+        page = max(0, min(page, total_pages - 1))
+    else:
+        page = 0
     items = all_updates[page * ITEMS_PER_PAGE : (page + 1) * ITEMS_PER_PAGE]
     total_sum_usd = sum([float(u.get("delta", {}).get("amount", 0) or 0) for u in all_updates])
-    msg_text = f"💰 <b>{_t(lang, 'funding_log_title')}</b>\nTotal (24h): <b>${pretty_float(total_sum_usd, 2)}</b>\n\n" + (f"<i>{_t(lang, 'funding_empty')}</i>" if not items else "\n".join([f"• {datetime.datetime.fromtimestamp(int(item.get('time', 0))/1000).strftime('%H:%M')} <b>{item.get('delta', {}).get('coin', '???')}</b>: <b>${float(item.get('delta', {}).get('amount', 0) or 0):+.2f}</b> [{item['wallet'][:4]}..{item['wallet'][-3:]}]" for item in items])) + f"\n\n<i>Page {page+1}/{max(1, total_pages)}</i>"
-    kb = InlineKeyboardBuilder(); row = []
-    if page > 0: row.append(InlineKeyboardButton(text="<<", callback_data=f"cb_funding:{page-1}"))
+    
+    msg_text = f"💰 <b>{_t(lang, 'funding_log_title')}</b>\nTotal (24h): <b>${pretty_float(total_sum_usd, 2)}</b>\n\n"
+    if not items:
+        msg_text += f"<i>{_t(lang, 'funding_empty')}</i>"
+    else:
+        log_lines = []
+        for item in items:
+            ts = int(item.get('time', 0))
+            time_str = datetime.datetime.fromtimestamp(ts / 1000).strftime('%H:%M')
+            coin = item.get('delta', {}).get('coin', '???')
+            amount = float(item.get('delta', {}).get('amount', 0) or 0)
+            wallet_short = f"{item['wallet'][:4]}..{item['wallet'][-3:]}"
+            log_lines.append(f"• {time_str} <b>{coin}</b>: <b>${amount:+.2f}</b> [{wallet_short}]")
+        msg_text += "\n".join(log_lines)
+    
+    msg_text += f"\n\n<i>Page {page+1}/{max(1, total_pages)}</i>"
+    
+    kb = InlineKeyboardBuilder()
+    row = []
+    if page > 0:
+        row.append(InlineKeyboardButton(text="<<", callback_data=f"cb_funding:{page-1}"))
     row.append(InlineKeyboardButton(text="🔄", callback_data=f"cb_funding:{page}"))
-    if page < total_pages - 1: row.append(InlineKeyboardButton(text=">>", callback_data=f"cb_funding:{page+1}"))
+    if page < total_pages - 1:
+        row.append(InlineKeyboardButton(text=">>", callback_data=f"cb_funding:{page+1}"))
     kb.row(*row)
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
+    
     if edit and msg_id:
         try:
             await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=msg_text, reply_markup=kb.as_markup(), parse_mode="HTML")
             return
-        except Exception: pass
+        except Exception:
+            pass
     await bot.send_message(chat_id, msg_text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
 @router.message(Command("funding"))
-async def cmd_funding(message: Message): await _render_funding_page(message.bot, message.chat.id, page=0, edit=False)
+async def cmd_funding(message: Message):
+    await _render_funding_page(message.bot, message.chat.id, page=0, edit=False)
 
 @router.callback_query(F.data.startswith("cb_funding:"))
 async def cb_funding_page(call: CallbackQuery):
-    await _render_funding_page(call.message.bot, call.message.chat.id, page=int(call.data.split(":")[1]), edit=True, msg_id=call.message.message_id); await call.answer()
+    await _render_funding_page(
+        call.message.bot, 
+        call.message.chat.id, 
+        page=int(call.data.split(":")[1]), 
+        edit=True, 
+        msg_id=call.message.message_id
+    )
+    await call.answer()

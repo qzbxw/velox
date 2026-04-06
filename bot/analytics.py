@@ -319,7 +319,8 @@ def format_funding_heatmap(assets_ctx: list, universe: list) -> str:
     data = []
     
     for idx, ctx in enumerate(assets_ctx):
-        if idx >= len(universe): break
+        if idx >= len(universe):
+            break
         
         name = universe[idx]["name"]
         funding = float(ctx.get("funding", 0))
@@ -354,7 +355,8 @@ def generate_market_overview_image(assets_ctx: list, universe: list, sort_by: st
     # Prepare Data
     data = []
     for i, u in enumerate(universe):
-        if i >= len(assets_ctx): break
+        if i >= len(assets_ctx):
+            break
         ctx = assets_ctx[i]
         
         name = u["name"]
@@ -380,7 +382,8 @@ def generate_market_overview_image(assets_ctx: list, universe: list, sort_by: st
         
     df = pd.DataFrame(data)
     
-    if df.empty: return None
+    if df.empty:
+        return None
     
     # Sort
     if sort_by == "funding":
@@ -412,13 +415,17 @@ def generate_market_overview_image(assets_ctx: list, universe: list, sort_by: st
     for index, row in top_n.iterrows():
         # Colorize Funding
         fund_color = "#ffffff"
-        if row["Funding%"] > 50: fund_color = "#00ff00"
-        elif row["Funding%"] < -20: fund_color = "#ff0000"
+        if row["Funding%"] > 50:
+            fund_color = "#00ff00"
+        elif row["Funding%"] < -20:
+            fund_color = "#ff0000"
         
         # Colorize Change
         ch_color = "#ffffff"
-        if row["Change%"] > 0: ch_color = "#00ff00"
-        elif row["Change%"] < 0: ch_color = "#ff0000"
+        if row["Change%"] > 0:
+            ch_color = "#00ff00"
+        elif row["Change%"] < 0:
+            ch_color = "#ff0000"
         
         # Format rows
         r = [
@@ -480,7 +487,8 @@ def generate_market_report_card(assets_ctx: list, universe: list) -> io.BytesIO:
     
     data = []
     for i, u in enumerate(universe):
-        if i >= len(assets_ctx): break
+        if i >= len(assets_ctx):
+            break
         ctx = assets_ctx[i]
         name = u["name"]
         price = float(ctx.get("markPx", 0))
@@ -496,7 +504,8 @@ def generate_market_report_card(assets_ctx: list, universe: list) -> io.BytesIO:
             ask_impact = float(impact_pxs[1])
             if bid_impact > 0 and ask_impact > 0:
                 slippage = (abs(ask_impact - price) + abs(price - bid_impact)) / (2 * price) * 100
-                if slippage == 0: slippage = 99.9
+                if slippage == 0:
+                    slippage = 99.9
         
         data.append({
             "Symbol": name, "Price": price, "Funding": funding,
@@ -505,7 +514,8 @@ def generate_market_report_card(assets_ctx: list, universe: list) -> io.BytesIO:
         })
         
     df = pd.DataFrame(data)
-    if df.empty: return None
+    if df.empty:
+        return None
 
     top_vol = df.sort_values("Volume", ascending=False).head(5)
     top_gainers = df.sort_values("Change", ascending=False).head(3)
@@ -562,7 +572,8 @@ def generate_alpha_dashboard(assets_ctx: list, universe: list) -> io.BytesIO:
     
     data = []
     for i, u in enumerate(universe):
-        if i >= len(assets_ctx): break
+        if i >= len(assets_ctx):
+            break
         ctx = assets_ctx[i]
         name = u["name"]
         mark = float(ctx.get("markPx", 0))
@@ -581,14 +592,16 @@ def generate_alpha_dashboard(assets_ctx: list, universe: list) -> io.BytesIO:
             ask_impact = float(impact_pxs[1])
             if bid_impact > 0 and ask_impact > 0:
                 slippage = (abs(ask_impact - mark) + abs(mark - bid_impact)) / (2 * mark) * 100
-                if slippage == 0: slippage = 99.9
+                if slippage == 0:
+                    slippage = 99.9
         
         data.append({
             "Density": lev_density, "OI": oi, "Slippage": slippage
         })
         
     df = pd.DataFrame(data)
-    if df.empty: return None
+    if df.empty:
+        return None
 
     # Sections
     high_funding = df.sort_values("Funding", ascending=False).head(4)
@@ -641,7 +654,8 @@ def generate_ecosystem_dashboard(assets_ctx: list, universe: list, hlp_info: dic
     
     data = []
     for i, u in enumerate(universe):
-        if i >= len(assets_ctx): break
+        if i >= len(assets_ctx):
+            break
         ctx = assets_ctx[i]
         name = u["name"]
         mark = float(ctx.get("markPx", 0))
@@ -655,7 +669,8 @@ def generate_ecosystem_dashboard(assets_ctx: list, universe: list, hlp_info: dic
             ask_impact = float(impact_pxs[1])
             if bid_impact > 0 and ask_impact > 0:
                 slippage = (abs(ask_impact - mark) + abs(mark - bid_impact)) / (2 * mark) * 100
-                if slippage == 0: slippage = 99.9
+                if slippage == 0:
+                    slippage = 99.9
         
         data.append({
             "Symbol": name, "Slippage": slippage, "Efficiency": vol / oi if oi > 0 else 0,
@@ -663,7 +678,8 @@ def generate_ecosystem_dashboard(assets_ctx: list, universe: list, hlp_info: dic
         })
         
     df = pd.DataFrame(data)
-    if df.empty: return None
+    if df.empty:
+        return None
 
     # Sorts
     deepest = df.sort_values("Slippage", ascending=True).head(4)
@@ -802,7 +818,8 @@ def prepare_liquidity_data(assets_ctx: list, universe: list) -> dict:
     total_oi = 0.0
     
     for i, u in enumerate(universe):
-        if i >= len(assets_ctx): break
+        if i >= len(assets_ctx):
+            break
         ctx = assets_ctx[i]
         name = u["name"]
         mark = float(ctx.get("markPx", 0))
@@ -839,7 +856,8 @@ def prepare_liquidity_data(assets_ctx: list, universe: list) -> dict:
         })
         
     df = pd.DataFrame(data)
-    if df.empty: return {}
+    if df.empty:
+        return {}
 
     # Sorts
     deepest = df.sort_values("slippage", ascending=True).head(8)
@@ -869,7 +887,8 @@ def prepare_modern_market_data(assets_ctx: list, universe: list, hlp_info: dict 
     total_oi = 0.0
     
     for i, u in enumerate(universe):
-        if i >= len(assets_ctx): break
+        if i >= len(assets_ctx):
+            break
         ctx = assets_ctx[i]
         name = u["name"]
         mark = float(ctx.get("markPx", 0))
@@ -893,7 +912,8 @@ def prepare_modern_market_data(assets_ctx: list, universe: list, hlp_info: dict 
         })
         
     df = pd.DataFrame(data)
-    if df.empty: return {}
+    if df.empty:
+        return {}
 
     # Sorts
     gainers = df.sort_values("change", ascending=False).head(5)
@@ -963,7 +983,8 @@ def prepare_coin_prices_data(assets_ctx: list, universe: list) -> dict:
     
     data = []
     for i, u in enumerate(universe):
-        if i >= len(assets_ctx): break
+        if i >= len(assets_ctx):
+            break
         ctx = assets_ctx[i]
         name = u["name"]
         mark = float(ctx.get("markPx", 0))
@@ -979,7 +1000,8 @@ def prepare_coin_prices_data(assets_ctx: list, universe: list) -> dict:
         })
         
     df = pd.DataFrame(data)
-    if df.empty: return {}
+    if df.empty:
+        return {}
 
     # Sort by Volume descending to show most relevant coins
     df = df.sort_values("vol", ascending=False).head(33)

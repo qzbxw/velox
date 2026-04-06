@@ -535,7 +535,8 @@ async def send_market_reports(bot):
         watchlist_lines = []
         if watchlist:
             for sym in watchlist:
-                if sym in major_symbols: continue
+                if sym in major_symbols:
+                    continue
                 idx = next((i for i, u in enumerate(universe) if u["name"] == sym), -1)
                 if idx != -1:
                     ac = asset_ctxs[idx]
@@ -586,7 +587,8 @@ async def send_daily_digest(bot, target_user_ids: set[int | str] | None = None):
         data = portf.get("data", {})
         history = data.get("accountValueHistory", [])
         
-        if not history: continue
+        if not history:
+            continue
         
         # Sort and Find 24h change
         history.sort(key=lambda x: x[0])
@@ -616,7 +618,8 @@ async def send_daily_digest(bot, target_user_ids: set[int | str] | None = None):
                 if abs(closest[0] - target_ms) < 3600000 * 6: # 6h tolerance
                     start_val = float(closest[1])
         
-        if start_val == 0: continue
+        if start_val == 0:
+            continue
         
         diff = current_val - start_val
         pct = (diff / start_val) * 100
@@ -774,7 +777,8 @@ async def _get_cached_overview(market_data, news, period_label, cfg, lang, p_uni
 
     # Prepare Render Data
     def get_change(idx):
-        if idx >= len(p_assets): return 0
+        if idx >= len(p_assets):
+            return 0
         ac = p_assets[idx]
         p = float(ac.get("markPx", 0))
         prev = float(ac.get("prevDayPx", 0) or p)
@@ -811,7 +815,8 @@ async def send_scheduled_overviews(bot):
         settings = await db.get_overview_settings(u["user_id"])
         if settings.get("enabled") and now_utc in settings.get("schedules", []):
             users_to_send.append((u["user_id"], settings, u.get("lang", "en")))
-    if not users_to_send: return
+    if not users_to_send:
+        return
 
     logger.info(f"Sending Market Overview to {len(users_to_send)} users.")
     p_ctx = await get_perps_context()
@@ -828,9 +833,12 @@ async def send_scheduled_overviews(bot):
     for sym in ["BTC", "ETH"]:
         idx = next((i for i, u in enumerate(p_universe) if u.get("name") == sym), -1)
         if idx != -1 and idx < len(p_assets):
-            ac = p_assets[idx]; p = float(ac.get("markPx", 0)); prev = float(ac.get("prevDayPx", 0) or p)
+            ac = p_assets[idx]
+            p = float(ac.get("markPx", 0))
+            prev = float(ac.get("prevDayPx", 0) or p)
             res[sym] = {"price": pretty_float(p), "change": round(((p - prev)/prev)*100 if prev else 0, 2)}
-        else: res[sym] = {"price": "0", "change": 0.0}
+        else:
+            res[sym] = {"price": "0", "change": 0.0}
     
     news, flow, fng = await asyncio.gather(market_overview.fetch_news_rss(since_timestamp=time.time() - 43200), market_overview.fetch_etf_flows(), get_fear_greed_index(), return_exceptions=True)
     market_data = {**res, "btc_etf_flow": flow.get("btc_flow", 0) if not isinstance(flow, Exception) else 0, "eth_etf_flow": flow.get("eth_flow", 0) if not isinstance(flow, Exception) else 0}
@@ -845,8 +853,10 @@ async def send_scheduled_overviews(bot):
             header = f"<b>BTC: ${btc_d.get('price', '0')} ({'🟢' if btc_d.get('change', 0) >= 0 else '🔴'} {btc_d.get('change', 0):+.2f}%)</b>\n<b>ETH: ${eth_d.get('price', '0')} ({'🟢' if eth_d.get('change', 0) >= 0 else '🔴'} {eth_d.get('change', 0):+.2f}%)</b>"
             await bot.send_photo(user_id, BufferedInputFile(img_bytes, filename="overview.png"), caption=f"{header}\n\n<b>VELOX AI ({period_label})</b>", parse_mode="HTML")
             report_text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', html.escape(ai_data.get("summary", ""))))
-            if report_text.strip(): await bot.send_message(user_id, report_text, parse_mode="HTML")
-        except Exception as e: logger.error(f"Failed to send overview to {user_id}: {e}")
+            if report_text.strip():
+                await bot.send_message(user_id, report_text, parse_mode="HTML")
+        except Exception as e:
+            logger.error(f"Failed to send overview to {user_id}: {e}")
 
 
 @safe_job
@@ -854,13 +864,15 @@ async def run_delta_neutral_alerts(bot):
     """Periodic delta-neutral monitor and safety alerts with rate limiting."""
     logger.info("Running delta-neutral monitor...")
     users = await db.get_all_users()
-    if not users: return
+    if not users:
+        return
 
     pairs = await _get_user_wallet_pairs()
     wallets_by_user: dict[int | str, list[str]] = {}
     for user_id, wallet in pairs:
         wallets_by_user.setdefault(user_id, []).append(wallet)
-    if not wallets_by_user: return
+    if not wallets_by_user:
+        return
 
     ws = getattr(bot, "ws_manager", None)
     perps_ctx = await get_perps_context()
@@ -869,9 +881,11 @@ async def run_delta_neutral_alerts(bot):
 
     async def process_user(user):
         user_id = user.get("user_id")
-        if not user_id: return
+        if not user_id:
+            return
         wallets = wallets_by_user.get(user_id, [])
-        if not wallets: return
+        if not wallets:
+            return
 
         async with sem:
             try:
@@ -882,7 +896,8 @@ async def run_delta_neutral_alerts(bot):
                 if alerts:
                     lang = user.get("lang", "ru")
                     msg = format_alert_digest(alerts, lang=lang)
-                    if msg: await bot.send_message(user_id, msg, parse_mode="HTML")
+                    if msg:
+                        await bot.send_message(user_id, msg, parse_mode="HTML")
             except Exception as e:
                 logger.error(f"Delta-neutral monitor failed for user {user_id}: {e}")
 

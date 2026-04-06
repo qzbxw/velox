@@ -13,6 +13,16 @@ class Settings(BaseSettings):
     # External APIs
     GEMINI_API_KEY: str = Field("", description="Google Gemini API Key")
     MARKET_OVERVIEW_ENABLE_SEARCH_NEWS: bool = Field(False, description="Enable Gemini Google Search enrichment for news digests")
+
+    # RSS Engine
+    RSS_REFRESH_INTERVAL_MIN: int = Field(15, description="RSS cache refresh interval in minutes")
+    RSS_ARTICLE_TTL_HOURS: int = Field(24, description="How long to keep articles in cache (hours)")
+    RSS_FETCH_TIMEOUT: int = Field(12, description="Timeout per single RSS feed fetch (seconds)")
+
+    # News Summarizer (AI subagent)
+    NEWS_SUMMARIZER_ENABLED: bool = Field(True, description="Enable AI pre-summarization of RSS headlines")
+    NEWS_SUMMARIZER_MODEL: str = Field("gemini-2.0-flash-lite", description="Gemini model for news summarization")
+
     FARSIDE_BTC_URL: str = Field("https://farside.co.uk/btc/", description="Farside BTC ETF Flow URL")
     FARSIDE_ETH_URL: str = Field("https://farside.co.uk/eth/", description="Farside ETH ETF Flow URL")
     PAY_SUPPORT_CONTACT: str = Field("", description="Telegram handle or URL for payment support")

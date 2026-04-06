@@ -10,6 +10,7 @@ from bot.services import (
 )
 from bot.analytics import prepare_modern_market_data
 from bot.market_overview import market_overview
+from bot.rss_engine import rss_engine
 from bot.renderer import render_html_to_image
 from bot.delta_neutral import (
     collect_delta_neutral_snapshot,
@@ -840,7 +841,9 @@ async def send_scheduled_overviews(bot):
         else:
             res[sym] = {"price": "0", "change": 0.0}
     
-    news, flow, fng = await asyncio.gather(market_overview.fetch_news_rss(since_timestamp=time.time() - 43200), market_overview.fetch_etf_flows(), get_fear_greed_index(), return_exceptions=True)
+    # Use cached RSS articles (refreshed by refresh_news_cache job)
+    news = rss_engine.get_cached_articles(limit=200)
+    flow, fng = await asyncio.gather(market_overview.fetch_etf_flows(), get_fear_greed_index(), return_exceptions=True)
     market_data = {**res, "btc_etf_flow": flow.get("btc_flow", 0) if not isinstance(flow, Exception) else 0, "eth_etf_flow": flow.get("eth_flow", 0) if not isinstance(flow, Exception) else 0}
 
     h = int(now_utc.split(":")[0])
@@ -934,6 +937,12 @@ async def cleanup_triggered_alerts(bot):
     logger.info("Running daily cleanup of triggered alerts...")
     # Example: await db.users_col.update_many({}, {"$set": {"transient_alerts": {}}})
 
+@safe_job
+async def refresh_news_cache(bot):
+    """Periodically refresh the global RSS article cache via rss_engine."""
+    articles = await rss_engine.fetch_all(since_hours=settings.RSS_ARTICLE_TTL_HOURS)
+    logger.info(f"RSS cache refreshed: {len(articles)} articles, age={rss_engine.cache_age_seconds:.0f}s")
+
 def setup_scheduler(bot):
     scheduler = AsyncIOScheduler()
 
@@ -1012,6 +1021,17 @@ def setup_scheduler(bot):
         args=[bot],
         misfire_grace_time=3600,
         max_instances=1
+    )
+
+    # NEW: RSS cache refresh
+    scheduler.add_job(
+        refresh_news_cache,
+        'cron',
+        minute=f'*/{settings.RSS_REFRESH_INTERVAL_MIN}',
+        args=[bot],
+        misfire_grace_time=300,
+        max_instances=1,
+        jitter=30
     )
     
     scheduler.start()

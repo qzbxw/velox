@@ -3,13 +3,13 @@ import asyncio
 import logging
 import time
 import json
-import feedparser
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone
 import re
-from urllib.parse import quote_plus
 from bot.config import settings
 from bot.services import pretty_float
+from bot.rss_engine import rss_engine
+from bot.news_summarizer import news_summarizer
 
 logger = logging.getLogger(__name__)
 
@@ -22,116 +22,17 @@ class MarketOverview:
         self.news_agent_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={settings.GEMINI_API_KEY}"
         self.enable_search_news = settings.MARKET_OVERVIEW_ENABLE_SEARCH_NEWS
 
-        self.publisher_rss_feeds = [
-            {"name": "Decrypt", "url": "https://decrypt.co/feed", "category": "crypto"},
-            {"name": "CoinDesk", "url": "https://www.coindesk.com/arc/outboundfeeds/rss/", "category": "crypto"},
-            {"name": "Cointelegraph", "url": "https://cointelegraph.com/rss", "category": "crypto"},
-            {"name": "The Block", "url": "https://www.theblock.co/rss.xml", "category": "crypto"},
-            {"name": "Bitcoin Magazine", "url": "https://bitcoinmagazine.com/.rss/full/", "category": "crypto"},
-            {"name": "NewsBTC", "url": "https://www.newsbtc.com/feed/", "category": "crypto"},
-            {"name": "CryptoSlate", "url": "https://cryptoslate.com/feed/", "category": "crypto"},
-            {"name": "U.Today", "url": "https://u.today/rss", "category": "crypto"},
-            {"name": "Blockworks", "url": "https://blockworks.co/feed/", "category": "crypto"},
-            {"name": "Crypto Briefing", "url": "https://cryptobriefing.com/feed/", "category": "crypto"},
-            {"name": "Cryptopolitan", "url": "https://www.cryptopolitan.com/feed/", "category": "crypto"},
-            {"name": "Bitcoinist", "url": "https://bitcoinist.com/feed/", "category": "crypto"},
-            {"name": "BeInCrypto", "url": "https://beincrypto.com/feed/", "category": "crypto"},
-            {"name": "CoinGape", "url": "https://coingape.com/feed/", "category": "crypto"},
-            {"name": "The Daily Hodl", "url": "https://dailyhodl.com/feed/", "category": "crypto"},
-            {"name": "The Defiant", "url": "https://thedefiant.io/api/feed", "category": "crypto"},
-            {"name": "Glassnode Insights", "url": "https://insights.glassnode.com/rss/", "category": "crypto"},
-            {"name": "Chainalysis Reports", "url": "https://blog.chainalysis.com/reports/feed/", "category": "crypto"},
-            {"name": "Coin Metrics", "url": "https://coinmetrics.substack.com/feed", "category": "crypto"},
-            {"name": "Deribit Insights", "url": "https://insights.deribit.com/feed/", "category": "crypto"},
-            {"name": "a16z Crypto", "url": "https://a16zcrypto.substack.com/feed", "category": "crypto"},
-            {"name": "The Daily Gwei", "url": "https://thedailygwei.substack.com/feed", "category": "crypto"},
-            {"name": "Elliptic Blog", "url": "https://www.elliptic.co/blog/rss.xml", "category": "regulatory"},
-            {"name": "POLITICO Politics", "url": "https://rss.politico.com/politics-news.xml", "category": "politics"},
-            {"name": "POLITICO Playbook", "url": "https://rss.politico.com/playbook.xml", "category": "politics"},
-            {"name": "NPR Politics", "url": "https://feeds.npr.org/1014/rss.xml", "category": "politics"},
-            {"name": "RealClearPolitics", "url": "https://www.realclearpolitics.com/index.xml", "category": "politics"},
-            {"name": "Reason", "url": "https://reason.com/feed/", "category": "politics"},
-        ]
-        self.topic_rss_queries = [
-            {"query": "crypto market", "category": "crypto"},
-            {"query": "bitcoin", "category": "crypto"},
-            {"query": "ethereum", "category": "crypto"},
-            {"query": "hyperliquid", "category": "crypto"},
-            {"query": "spot bitcoin etf", "category": "crypto"},
-            {"query": "us politics", "category": "politics"},
-            {"query": "federal reserve", "category": "politics"},
-            {"query": "white house crypto", "category": "politics"},
-            {"query": "crypto regulation", "category": "regulatory"},
-            {"query": "sec crypto", "category": "regulatory"},
-            {"query": "cftc crypto", "category": "regulatory"},
-            {"query": "congress crypto regulation", "category": "regulatory"},
-        ]
-        self.category_order = ["crypto", "politics", "regulatory"]
-        self.category_labels = {
-            "crypto": "CRYPTO",
-            "politics": "POLITICS",
-            "regulatory": "REGULATORY",
-        }
-        self.source_domains = {
-            "decrypt.co": "Decrypt",
-            "coindesk.com": "CoinDesk",
-            "cointelegraph.com": "Cointelegraph",
-            "theblock.co": "The Block",
-            "bitcoinmagazine.com": "Bitcoin Magazine",
-            "newsbtc.com": "NewsBTC",
-            "cryptoslate.com": "CryptoSlate",
-            "u.today": "U.Today",
-            "blockworks.co": "Blockworks",
-            "cryptobriefing.com": "Crypto Briefing",
-            "cryptopolitan.com": "Cryptopolitan",
-            "bitcoinist.com": "Bitcoinist",
-            "beincrypto.com": "BeInCrypto",
-            "coingape.com": "CoinGape",
-            "dailyhodl.com": "The Daily Hodl",
-            "thedefiant.io": "The Defiant",
-            "insights.glassnode.com": "Glassnode Insights",
-            "blog.chainalysis.com": "Chainalysis Reports",
-            "coinmetrics.substack.com": "Coin Metrics",
-            "insights.deribit.com": "Deribit Insights",
-            "a16zcrypto.substack.com": "a16z Crypto",
-            "thedailygwei.substack.com": "The Daily Gwei",
-            "elliptic.co": "Elliptic Blog",
-            "politico.com": "POLITICO",
-            "npr.org": "NPR Politics",
-            "realclearpolitics.com": "RealClearPolitics",
-            "reason.com": "Reason",
-            "news.google.com": "Google News",
-        }
-        self.rss_feeds = self.publisher_rss_feeds + self._build_google_news_feeds()
-        # Common browser headers to avoid 403 Forbidden
+        # Browser headers for ETF scraping etc.
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Pragma": "no-cache",
-            "Cache-Control": "no-cache",
         }
         self._toxic_patterns = [
             r"\bidiot\b", r"\bstupid\b", r"\btrash\b", r"\bpoor\b", r"\bloser\b",
             r"\bni[\w-]*brod\b", r"\bговн\w*\b", r"\bжалк\w*\b", r"\bнищ\w*\b"
         ]
-
-    def _build_google_news_feeds(self) -> list[dict]:
-        feeds = []
-        for item in self.topic_rss_queries:
-            query = item["query"]
-            encoded_query = quote_plus(f"{query} when:1d")
-            feeds.append({
-                "name": f"Google News: {query}",
-                "url": f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en",
-                "category": item["category"],
-            })
-        return feeds
 
     async def fetch_etf_flows(self) -> dict:
         """
@@ -263,134 +164,22 @@ class MarketOverview:
 
     async def fetch_news_rss(self, since_timestamp: float = 0) -> list[dict]:
         """
-        Fetches news from RSS feeds published after since_timestamp.
+        Compatibility shim — delegates to rss_engine.
+        If cache is fresh, returns cached articles; otherwise does a live fetch.
         """
-        articles = []
-        
-        async def fetch_feed(session: aiohttp.ClientSession, feed_cfg: dict):
-            url = feed_cfg["url"]
-            try:
-                async with session.get(url, headers=self.headers, timeout=15) as resp:
-                    if resp.status == 200:
-                        content = await resp.text()
-                        feed = feedparser.parse(content)
-                        if feed.bozo:
-                            logger.warning(f"Feedparser bozo exception for {url}: {feed.bozo_exception}")
-                        return feed_cfg, feed.entries
-                    else:
-                        logger.warning(f"RSS fetch failed {resp.status} for {url}")
-            except Exception as e:
-                logger.error(f"Failed to fetch RSS {url}: {e}")
-            return feed_cfg, []
-
-        async with aiohttp.ClientSession() as session:
-            results = await asyncio.gather(
-                *[fetch_feed(session, feed_cfg) for feed_cfg in self.rss_feeds],
-                return_exceptions=True
-            )
-        
-        seen_links = set()
-        seen_titles = set()
-
-        for result in results:
-            if isinstance(result, Exception):
-                continue
-            feed_cfg, entries = result
-            if not entries:
-                continue
-            for entry in entries:
-                # Deduplicate by link
-                link = getattr(entry, "link", "") or ""
-                title = (getattr(entry, "title", "") or "").strip()
-                t_norm = re.sub(r"\s+", " ", title.lower())
-                if link in seen_links or (t_norm and t_norm in seen_titles):
-                    continue
-                if link:
-                    seen_links.add(link)
-                if t_norm:
-                    seen_titles.add(t_norm)
-
-                # Parse published time
-                try:
-                    pub_ts = 0
-                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                        import calendar
-                        pub_ts = calendar.timegm(entry.published_parsed)
-                    elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
-                        import calendar
-                        pub_ts = calendar.timegm(entry.updated_parsed)
-                    
-                    if pub_ts < since_timestamp:
-                        continue
-                        
-                    articles.append({
-                        "title": title,
-                        "link": link,
-                        "source": self._extract_source(entry, link, feed_cfg.get("name", "News")),
-                        "category": feed_cfg.get("category", "crypto"),
-                        "published": pub_ts,
-                        "summary": getattr(entry, 'summary', '')[:1000]
-                    })
-                except Exception:
-                    continue
-        
-        # Sort by date desc
-        articles.sort(key=lambda x: x["published"], reverse=True)
-        return articles
-
-    def _extract_source(self, entry, link: str, fallback: str = "News") -> str:
-        source_meta = getattr(entry, "source", None)
-        if source_meta:
-            if isinstance(source_meta, dict):
-                source_title = (source_meta.get("title") or "").strip()
-            else:
-                source_title = (getattr(source_meta, "title", "") or "").strip()
-            if source_title:
-                return source_title[:80]
-
-        for domain, source_name in self.source_domains.items():
-            if domain in link:
-                return source_name
-        return fallback
+        since_hours = (time.time() - since_timestamp) / 3600 if since_timestamp else 12
+        # Use cached articles when available and fresh (<20 min)
+        if rss_engine.cache_age_seconds < 1200 and rss_engine.cached_count > 0:
+            return rss_engine.get_cached_articles(limit=200)
+        return await rss_engine.fetch_all(since_hours=since_hours)
 
     def _format_news_digest(self, news: list[dict], limit: int = 10) -> str:
-        if not news:
-            return "No RSS headlines."
-        lines = []
-        for item in news[:limit]:
-            title = (item.get("title") or "").strip()
-            source = (item.get("source") or "News").strip()
-            if not title:
-                continue
-            lines.append(f"- {title} ({source})")
-        return "\n".join(lines) if lines else "No RSS headlines."
+        """Thin wrapper around rss_engine formatter."""
+        return rss_engine.format_digest(news, limit=limit)
 
     def _format_news_digest_by_category(self, news: list[dict], per_category_limits: dict[str, int]) -> str:
-        if not news:
-            return "No RSS headlines."
-
-        sections = []
-        for category in self.category_order:
-            limit = int(per_category_limits.get(category, 0) or 0)
-            if limit <= 0:
-                continue
-
-            lines = []
-            for item in news:
-                if item.get("category", "crypto") != category:
-                    continue
-                title = (item.get("title") or "").strip()
-                source = (item.get("source") or "News").strip()
-                if not title:
-                    continue
-                lines.append(f"- {title} ({source})")
-                if len(lines) >= limit:
-                    break
-
-            if lines:
-                sections.append(f"{self.category_labels.get(category, category.upper())}:\n" + "\n".join(lines))
-
-        return "\n\n".join(sections) if sections else "No RSS headlines."
+        """Thin wrapper around rss_engine formatter."""
+        return rss_engine.format_digest_by_category(news, per_category_limits=per_category_limits)
 
     def _sanitize_comment(self, text: str) -> str:
         if not text:
@@ -593,21 +382,24 @@ Provide a concise summary with key bullet points."""
         """
         target_lang = "Russian" if lang == "ru" else "English"
 
-        # Step 1: Use RSS headlines as the primary news layer and optional Search enrichment
-        logger.info("News digest: Building RSS-first market context...")
+        # Step 1: Build AI-summarized news digest via subagent
+        logger.info("News digest: Building RSS + AI summarizer context...")
         topics = ["Hyperliquid", "Bitcoin", "Ethereum", "crypto market"]
 
         # Add top gainers/losers to search topics
         if market_data.get('top_gainers'):
             for g in market_data['top_gainers'][:2]:
                 topics.append(g.get('name', ''))
-        
-        fresh_news = await self.fetch_news_with_search(timeframe="24h", topics=topics)
-        rss_news = self._format_news_digest_by_category(
-            news,
-            per_category_limits={"crypto": 6, "politics": 2, "regulatory": 3},
+
+        # Run AI summarizer + optional Google Search in parallel
+        ai_digest, fresh_news = await asyncio.gather(
+            news_summarizer.get_digest(
+                news, lang=lang,
+                per_category_limits={"crypto": 12, "defi": 5, "regulatory": 4, "politics": 4, "macro": 4, "tech": 2, "ru_news": 2}
+            ),
+            self.fetch_news_with_search(timeframe="24h", topics=topics),
         )
-        combined_news = f"RSS HEADLINES:\n{rss_news}\n\nSEARCH DIGEST:\n{fresh_news or 'No search digest'}"
+        combined_news = f"AI NEWS DIGEST:\n{ai_digest}\n\nSEARCH ENRICHMENT:\n{fresh_news or 'No search digest'}"
 
         # Step 2: Hedge Agent analyzes everything
         logger.info("Hedge Agent: Generating grounded analysis...")
@@ -743,16 +535,15 @@ Provide a concise summary with key bullet points."""
         if event_symbol:
             topics.append(event_symbol)
 
-        logger.info(f"Hedge Chat: Building RSS-first news context for context_type={context_type}")
+        logger.info(f"Hedge Chat: Building RSS + AI digest for context_type={context_type}")
+        # Use cached RSS articles (refreshed by scheduler) + optional search
+        cached_articles = rss_engine.get_cached_articles(limit=80)
+        digest_task = news_summarizer.get_digest(
+            cached_articles, lang=lang,
+            per_category_limits={"crypto": 8, "defi": 3, "regulatory": 3, "politics": 2, "macro": 2}
+        )
         search_task = self.fetch_news_with_search(timeframe="12h", topics=topics)
-        rss_news, fresh_news = await asyncio.gather(
-            self.fetch_news_rss(since_timestamp=time.time() - 12 * 3600),
-            search_task,
-        )
-        news_digest = self._format_news_digest_by_category(
-            rss_news,
-            per_category_limits={"crypto": 5, "politics": 1, "regulatory": 2},
-        )
+        news_digest, fresh_news = await asyncio.gather(digest_task, search_task)
 
         target_lang = "Russian" if lang == "ru" else "English"
 

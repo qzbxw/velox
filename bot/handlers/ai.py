@@ -17,6 +17,7 @@ from bot.services import (
     get_perps_context, get_fear_greed_index, pretty_float
 )
 from bot.market_overview import market_overview
+from bot.rss_engine import rss_engine
 from bot.renderer import render_html_to_image
 from bot.handlers._common import (
     smart_edit, _back_kb, _ensure_billing_feature, _consume_billing_usage,
@@ -72,12 +73,13 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None):
     
     try:
         # Fetch data in parallel
-        ctx, news, fng = await asyncio.gather(
+        ctx, fng = await asyncio.gather(
             get_perps_context(),
-            market_overview.fetch_news_rss(since_timestamp=time.time() - 86400),
             get_fear_greed_index(),
             return_exceptions=True
         )
+        # Use cached RSS articles (refreshed by scheduler every 15 min)
+        news = rss_engine.get_cached_articles(limit=200)
 
         if isinstance(ctx, Exception) or not ctx:
             raise ValueError("Failed to fetch market context")

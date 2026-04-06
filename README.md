@@ -96,9 +96,9 @@ Triggered via `/overview` or cron jobs (Morning/Evening schedules).
     *   **Farside ETF Scraper**: Uses BeautifulSoup to parse HTML from `farside.co.uk/btc/` and `eth/`, finding the exact daily flow in millions.
     *   **Hyperliquid Stats**: Calculates 24h Global Volume and Total Open Interest.
     *   **Fear & Greed Index**: REST call to `alternative.me`.
-2.  **News Agent (Google Search Tooling)**: 
-    *   Fires a distinct prompt using the `google_search` tool to ground responses in current crypto events.
-    *   Also ingests 13 hardcoded RSS feeds (CoinDesk, The Block, Decrypt, etc.) utilizing `feedparser`.
+2.  **News Layer (RSS-first, optional Google Search Tooling)**: 
+    *   Ingests an expanded set of publisher RSS feeds plus topic-driven Google News RSS searches to keep market context fresh without depending on search quota.
+    *   Gemini `google_search` enrichment can be enabled via `MARKET_OVERVIEW_ENABLE_SEARCH_NEWS=true`, but RSS is the default source of fresh headlines.
 3.  **Synthesis (Hedge Agent)**: 
     *   Receives the numerical data + the text digest with `groundingMetadata` for source transparency.
     *   Prompt explicitly demands a 500-char summary, a single-word sentiment (BULLISH/BEARISH/NEUTRAL/EXPLOSIVE), and the "next_event" to watch.

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     # External APIs
     GEMINI_API_KEY: str = Field("", description="Google Gemini API Key")
+    MARKET_OVERVIEW_ENABLE_SEARCH_NEWS: bool = Field(False, description="Enable Gemini Google Search enrichment for news digests")
     FARSIDE_BTC_URL: str = Field("https://farside.co.uk/btc/", description="Farside BTC ETF Flow URL")
     FARSIDE_ETH_URL: str = Field("https://farside.co.uk/eth/", description="Farside ETH ETF Flow URL")
     PAY_SUPPORT_CONTACT: str = Field("", description="Telegram handle or URL for payment support")

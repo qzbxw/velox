@@ -641,7 +641,10 @@ Provide a concise summary with key bullet points."""
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.2,
-                "response_mime_type": "application/json"
+                "response_mime_type": "application/json",
+                "thinking_config": {
+                    "thinking_level": "HIGH"
+                }
             }
         }
         if self.enable_search_news:
@@ -658,10 +661,23 @@ Provide a concise summary with key bullet points."""
                 async with session.post(self.hedge_agent_url, json=payload, timeout=20) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        
+                        # Gemma 4 thinking mode returns parts. Final answer is usually the last text part.
+                        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                        text = ""
+                        for part in parts:
+                            if "text" in part and not part.get("thought"):
+                                text = part["text"].strip()
+                        
+                        if not text and parts:
+                            text = parts[-1].get("text", "").strip()
+
                         # Clean markdown if present
                         if "```json" in text:
                             text = text.split("```json")[1].split("```")[0].strip()
+
+                        if not text:
+                            return default_res
 
                         parsed = json.loads(text)
 

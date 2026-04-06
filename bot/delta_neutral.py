@@ -354,11 +354,13 @@ async def collect_delta_neutral_snapshot(
     funding_30d_total = sum(_safe_float(c.get("funding_earned_30d", 0)) for c in active_coins)
     funding_total_active = sum(_safe_float(c.get("funding_earned_all", 0)) for c in active_coins)
 
-    margin_health = 0.0
+    margin_health = 100.0
     margin_util = 0.0
     if perps_account_value > 0:
         margin_util = (perps_margin_used / perps_account_value) * 100
         margin_health = max(0.0, 100.0 - margin_util)
+    elif perps_account_value < 0 or perps_margin_used > 0:
+        margin_health = 0.0
     margin_level, margin_icon = _margin_level_icon(margin_health)
 
     total_delta_pct = (abs(delta_usd_total) / hedge_base_usd_total * 100) if hedge_base_usd_total > 0 else 0.0
@@ -673,7 +675,7 @@ def format_alert_digest(alerts: list[dict], lang: str = "ru") -> str:
             elif kind == "delta_warning":
                 lines.append(f"⚖️ <b>{sym}</b> дельта {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) &gt; 5%")
             elif kind == "margin_low":
-                lines.append(f"🔴 Margin ratio {a.get('margin_health_pct', 0):.1f}% &lt; 30%")
+                lines.append(f"🔴 Маржа {a.get('margin_health_pct', 0):.1f}% &lt; 30%")
             elif kind == "funding_negative":
                 lines.append(f"💸 <b>{sym}</b> funding отрицательный: {_fmt_signed_pct_hour(a.get('funding_current', 0))}")
             elif kind == "funding_negative_streak":
@@ -690,7 +692,7 @@ def format_alert_digest(alerts: list[dict], lang: str = "ru") -> str:
             elif kind == "delta_warning":
                 lines.append(f"⚖️ <b>{sym}</b> delta drift {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) &gt; 5%")
             elif kind == "margin_low":
-                lines.append(f"🔴 Margin ratio {a.get('margin_health_pct', 0):.1f}% &lt; 30%")
+                lines.append(f"🔴 Margin health {a.get('margin_health_pct', 0):.1f}% &lt; 30%")
             elif kind == "funding_negative":
                 lines.append(f"💸 <b>{sym}</b> funding turned negative: {_fmt_signed_pct_hour(a.get('funding_current', 0))}")
             elif kind == "funding_negative_streak":

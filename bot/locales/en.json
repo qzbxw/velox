@@ -371,7 +371,7 @@
     "delta_dashboard_title": "⚖️ <b>Delta-Neutral Dashboard</b>",
     "delta_dashboard_portfolio": "💰 Equity (Raw): <b>${value}</b>",
     "delta_dashboard_delta": "⚖️ Net Delta: <b>${value}</b> ({pct:.2f}%) {icon}",
-    "delta_dashboard_margin": "📊 Margin Usage: <b>{pct:.1f}%</b> {icon}",
+    "delta_dashboard_margin": "📊 Margin Health: <b>{pct:.1f}%</b> {icon}",
     "delta_dashboard_funding_24h": "💸 Funding 24h: <b>${value}</b>",
     "delta_dashboard_funding_7d": "💸 Funding 7d: <b>${value}</b>",
     "delta_dashboard_funding_30d": "💸 Funding 30d: <b>${value}</b>",

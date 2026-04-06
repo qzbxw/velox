@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime, timezone
 import re
 from bot.config import settings
-from bot.services import pretty_float
+from bot.services import pretty_float, get_session
 from bot.rss_engine import rss_engine
 from bot.news_summarizer import news_summarizer
 
@@ -55,10 +55,10 @@ class MarketOverview:
         async def fetch_farside(url):
             try:
                 logger.info(f"Fetching Farside URL: {url}")
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, headers=self.headers, timeout=15) as resp:
-                        logger.info(f"Farside {url} Status: {resp.status}")
-                        if resp.status == 200:
+                session = await get_session()
+                async with session.get(url, headers=self.headers, timeout=30) as resp:
+                    logger.info(f"Farside {url} Status: {resp.status}")
+                    if resp.status == 200:
                             text = await resp.text()
                             logger.info(f"Farside HTML length: {len(text)}")
                             logger.debug(f"Farside HTML snippet: {text[:500]}...") 
@@ -349,9 +349,9 @@ Provide a concise summary with key bullet points."""
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.news_agent_url, json=payload, timeout=25) as resp:
-                    if resp.status == 200:
+            session = await get_session()
+            async with session.post(self.news_agent_url, json=payload, timeout=90) as resp:
+                if resp.status == 200:
                         data = await resp.json()
                         candidate = data["candidates"][0]
                         text = candidate["content"]["parts"][0]["text"].strip()
@@ -447,9 +447,9 @@ Provide a concise summary with key bullet points."""
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.hedge_agent_url, json=payload, timeout=20) as resp:
-                    if resp.status == 200:
+            session = await get_session()
+            async with session.post(self.hedge_agent_url, json=payload, timeout=120) as resp:
+                if resp.status == 200:
                         data = await resp.json()
                         
                         # Gemma 4 thinking mode returns parts. Final answer is usually the last text part.
@@ -621,9 +621,9 @@ Provide a concise summary with key bullet points."""
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(self.hedge_agent_url, json=payload, timeout=15) as resp:
-                    if resp.status == 200:
+            session = await get_session()
+            async with session.post(self.hedge_agent_url, json=payload, timeout=60) as resp:
+                if resp.status == 200:
                         data = await resp.json()
                         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                         return self._sanitize_comment(text)

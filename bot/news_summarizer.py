@@ -124,7 +124,7 @@ Omit trivial announcements, opinion pieces, and duplicate stories."""
             from bot.services import get_session
             session = await get_session()
             async with session.post(
-                self._model_url, json=payload, timeout=aiohttp.ClientTimeout(total=25)
+                self._model_url, json=payload, timeout=aiohttp.ClientTimeout(total=90)
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()

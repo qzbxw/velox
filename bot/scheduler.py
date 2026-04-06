@@ -1,7 +1,7 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from bot.billing import get_plan_config, normalize_plan
 from bot.database import db
-from bot.config import HLP_VAULT_ADDR, DIGEST_TARGETS
+from bot.config import HLP_VAULT_ADDR, DIGEST_TARGETS, settings
 from bot.utils import _vault_display_name, pretty_float
 from bot.services import (
     get_spot_balances, get_user_portfolio, get_perps_context, 

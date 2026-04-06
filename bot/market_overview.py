@@ -59,12 +59,12 @@ class MarketOverview:
                 async with session.get(url, headers=self.headers, timeout=30) as resp:
                     logger.info(f"Farside {url} Status: {resp.status}")
                     if resp.status == 200:
-                            text = await resp.text()
-                            logger.info(f"Farside HTML length: {len(text)}")
-                            logger.debug(f"Farside HTML snippet: {text[:500]}...") 
-                            return text
-                        else:
-                            logger.warning(f"Farside returned status {resp.status} for {url}")
+                        text = await resp.text()
+                        logger.info(f"Farside HTML length: {len(text)}")
+                        logger.debug(f"Farside HTML snippet: {text[:500]}...") 
+                        return text
+                    else:
+                        logger.warning(f"Farside returned status {resp.status} for {url}")
             except Exception as e:
                 logger.error(f"Failed to fetch Farside {url}: {e}")
             return None

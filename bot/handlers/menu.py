@@ -32,6 +32,10 @@ async def cmd_start(message: Message):
     
     await db.add_user(message.chat.id, None)
 
+@router.callback_query(F.data == "noop")
+async def cb_noop(call: CallbackQuery):
+    await call.answer()
+
 @router.callback_query(F.data == "cb_menu")
 async def cb_menu(call: CallbackQuery, state: FSMContext = None):
     if state:

@@ -310,6 +310,18 @@ async def cb_whales(call: CallbackQuery):
     kb.adjust(1)
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
+@router.callback_query(F.data == "set_whale_thr_prompt")
+async def cb_set_whale_thr_prompt(call: CallbackQuery, state: FSMContext):
+    from bot.handlers.states import SettingsStates
+    await state.update_data(menu_msg_id=call.message.message_id, back_target="cb_whales")
+    await call.message.edit_text(
+        _t(await db.get_lang(call.message.chat.id), "whale_input"),
+        reply_markup=_back_kb(await db.get_lang(call.message.chat.id), "cb_whales"),
+        parse_mode="HTML"
+    )
+    await state.set_state(SettingsStates.waiting_for_whale)
+    await call.answer()
+
 @router.callback_query(F.data.startswith("toggle_whale_wl:"))
 async def cb_toggle_whale_wl(call: CallbackQuery):
     await db.update_user_settings(call.message.chat.id, {"whale_watchlist_only": call.data.split(":")[1] == "on"})

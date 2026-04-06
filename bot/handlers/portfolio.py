@@ -97,14 +97,16 @@ async def cb_balance(call: CallbackQuery):
     text = _t(lang, "balance_title") + "\n\n" + "\n\n".join(msg_parts)
     kb = InlineKeyboardBuilder()
     kb.button(text=_t(lang, "btn_refresh"), callback_data=f"cb_balance:{context}")
-    kb.button(text="📊 Portfolio Chart", callback_data="cb_portfolio_chart")
+    kb.button(text="📊 Portfolio Chart", callback_data=f"cb_portfolio_chart:{context}")
     kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "cb_portfolio_chart")
+@router.callback_query(F.data.startswith("cb_portfolio_chart"))
 async def cb_portfolio_chart(call: CallbackQuery):
     await call.answer("Analyzing portfolio composition...")
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) > 1 else "portfolio"
     lang, wallets, ws, assets_map = await db.get_lang(call.message.chat.id), await db.list_wallets(call.message.chat.id), getattr(call.message.bot, "ws_manager", None), {}
     for wallet in wallets:
         spot_bals = await get_spot_balances(wallet)
@@ -124,7 +126,7 @@ async def cb_portfolio_chart(call: CallbackQuery):
     comp_data = prepare_portfolio_composition_data([{"name": k, "value": v} for k, v in assets_map.items() if v > 1])
     try:
         buf = await render_html_to_image("portfolio_composition.html", comp_data, lang=lang)
-        await smart_edit_media(call, BufferedInputFile(buf.read(), filename="portfolio.png"), "📊 <b>Portfolio Composition</b>", reply_markup=_back_kb(lang, "cb_balance:portfolio"))
+        await smart_edit_media(call, BufferedInputFile(buf.read(), filename="portfolio.png"), "📊 <b>Portfolio Composition</b>", reply_markup=_back_kb(lang, f"cb_balance:{context}"))
     except Exception as e:
         logger.error(f"Error rendering portfolio composition: {e}")
         await call.message.answer("❌ Error generating image.")
@@ -168,12 +170,16 @@ async def cb_positions(call: CallbackQuery):
         cb_data = f"cx:{i['sym']}:{i['entry']:.2f}:{abs(i['szi']):.4f}:{i['lev']:.0f}:{is_l}:{i['liq']:.2f}"
         if len(cb_data) > 64: cb_data = f"cx:{i['sym']}:{i['entry']:.1f}:{abs(i['szi']):.2f}:{i['lev']:.0f}:{is_l}:{i['liq']:.1f}"
         kb.inline_keyboard.insert(-1, [InlineKeyboardButton(text=_t(lang, "calc_exit_btn", sym=i['sym']), callback_data=cb_data)])
-    kb.inline_keyboard.insert(-1, [InlineKeyboardButton(text="🖼 Positions Table", callback_data="cb_positions_img")])
+    kb.inline_keyboard.insert(-1, [InlineKeyboardButton(text="🖼 Positions Table", callback_data=f"cb_positions_img:{context}:{page}")])
     await smart_edit(call, f"{_t(lang, 'positions_title')} ({page+1}/{total_pages})\n\n" + "\n\n".join(msg_parts), reply_markup=kb)
 
-@router.callback_query(F.data == "cb_positions_img")
+@router.callback_query(F.data.startswith("cb_positions_img"))
 async def cb_positions_img(call: CallbackQuery):
     await call.answer("Generating Table...")
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) >= 2 else "trading"
+    try: page = int(parts[2]) if len(parts) >= 3 else 0
+    except Exception: page = 0
     lang, wallets, combined_positions, ws = await db.get_lang(call.message.chat.id), await db.list_wallets(call.message.chat.id), [], getattr(call.message.bot, "ws_manager", None)
     if not wallets: return
     for wallet in wallets:
@@ -207,7 +213,7 @@ async def cb_positions_img(call: CallbackQuery):
         return
     try:
         buf = await render_html_to_image("positions_table.html", prepare_positions_table_data(combined_positions), lang=lang)
-        await smart_edit_media(call, BufferedInputFile(buf.read(), filename="positions.png"), "📋 <b>Open Positions</b>", reply_markup=_back_kb(lang, "sub:trading"))
+        await smart_edit_media(call, BufferedInputFile(buf.read(), filename="positions.png"), "📋 <b>Open Positions</b>", reply_markup=_back_kb(lang, f"cb_positions:{context}:{page}"))
     except Exception as e:
         logger.error(f"Error rendering positions table: {e}")
         await call.message.answer("❌ Error generating image.")
@@ -395,14 +401,16 @@ async def cb_pnl(call: CallbackQuery):
     g_upnl = g_spot_upnl + g_perps_upnl
     text = f"{_t(lang, 'pnl_title')}\n\n{_t(lang, 'net_worth')}: <b>${pretty_float(g_spot_eq + g_perps_eq, 2)}</b>\n   {_t(lang, 'spot_bal')}: ${pretty_float(g_spot_eq, 2)}\n   {_t(lang, 'perps_bal')}: ${pretty_float(g_perps_eq, 2)}\n   {_t(lang, 'total_upnl')}: {'🟢' if g_upnl>=0 else '🔴'} <b>${pretty_float(g_upnl, 2)}</b>\n\n" + "\n\n".join(wallet_cards)
     kb = InlineKeyboardBuilder()
-    kb.button(text=_t(lang, "btn_graph"), callback_data="cb_pnl_graph")
+    kb.button(text=_t(lang, "btn_graph"), callback_data=f"cb_pnl_graph:{context}")
     kb.button(text=_t(lang, "btn_back"), callback_data=back_target)
     kb.adjust(1)
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "cb_pnl_graph")
+@router.callback_query(F.data.startswith("cb_pnl_graph"))
 async def cb_pnl_graph(call: CallbackQuery):
     await call.answer("Generating graph...")
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) > 1 else "portfolio"
     lang, wallets = await db.get_lang(call.message.chat.id), await db.list_wallets(call.message.chat.id)
     if not wallets:
         await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang)); return
@@ -421,7 +429,7 @@ async def cb_pnl_graph(call: CallbackQuery):
         await call.message.answer("📭 No history data for graph."); return
     try:
         buf = generate_pnl_chart([[ts, val] for ts, val in sorted(aggregated_history.items())], "Total Portfolio" if len(wallets) > 1 else wallets[0])
-        await smart_edit_media(call, BufferedInputFile(buf.read(), filename="pnl_chart.png"), "📈 <b>Equity History & Drawdown</b>", reply_markup=_back_kb(lang, "cb_pnl"))
+        await smart_edit_media(call, BufferedInputFile(buf.read(), filename="pnl_chart.png"), "📈 <b>Equity History & Drawdown</b>", reply_markup=_back_kb(lang, f"cb_pnl:{context}"))
     except Exception as e:
         logger.error(f"Error rendering chart: {e}")
         await call.message.answer("❌ Error generating graph.")

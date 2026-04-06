@@ -669,15 +669,15 @@ def format_alert_digest(alerts: list[dict], lang: str = "ru") -> str:
 
         if is_ru:
             if kind == "delta_critical":
-                lines.append(f"⚖️ <b>{sym}</b> дельта {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) > 10%")
+                lines.append(f"⚖️ <b>{sym}</b> дельта {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) &gt; 10%")
             elif kind == "delta_warning":
-                lines.append(f"⚖️ <b>{sym}</b> дельта {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) > 5%")
+                lines.append(f"⚖️ <b>{sym}</b> дельта {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) &gt; 5%")
             elif kind == "margin_low":
-                lines.append(f"🔴 Margin ratio {a.get('margin_health_pct', 0):.1f}% < 30%")
+                lines.append(f"🔴 Margin ratio {a.get('margin_health_pct', 0):.1f}% &lt; 30%")
             elif kind == "funding_negative":
                 lines.append(f"💸 <b>{sym}</b> funding отрицательный: {_fmt_signed_pct_hour(a.get('funding_current', 0))}")
             elif kind == "funding_negative_streak":
-                lines.append(f"⏰ <b>{sym}</b> funding < 0 уже {a.get('hours', 0):.1f}ч подряд")
+                lines.append(f"⏰ <b>{sym}</b> funding &lt; 0 уже {a.get('hours', 0):.1f}ч подряд")
             elif kind == "funding_extreme":
                 lines.append(f"⚠️ <b>{sym}</b> аномальный: {_fmt_signed_pct_hour(a.get('funding_current', 0))}")
             elif kind == "price_move_1h":
@@ -686,11 +686,11 @@ def format_alert_digest(alerts: list[dict], lang: str = "ru") -> str:
                 lines.append(f"📉 <b>{sym}</b> OI за 1ч: {a.get('change_pct', 0):+.2f}%")
         else:
             if kind == "delta_critical":
-                lines.append(f"⚖️ <b>{sym}</b> delta drift {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) > 10%")
+                lines.append(f"⚖️ <b>{sym}</b> delta drift {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) &gt; 10%")
             elif kind == "delta_warning":
-                lines.append(f"⚖️ <b>{sym}</b> delta drift {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) > 5%")
+                lines.append(f"⚖️ <b>{sym}</b> delta drift {a.get('delta_pct', 0):.2f}% (${pretty_float(a.get('delta_usd', 0), 2)}) &gt; 5%")
             elif kind == "margin_low":
-                lines.append(f"🔴 Margin ratio {a.get('margin_health_pct', 0):.1f}% < 30%")
+                lines.append(f"🔴 Margin ratio {a.get('margin_health_pct', 0):.1f}% &lt; 30%")
             elif kind == "funding_negative":
                 lines.append(f"💸 <b>{sym}</b> funding turned negative: {_fmt_signed_pct_hour(a.get('funding_current', 0))}")
             elif kind == "funding_negative_streak":

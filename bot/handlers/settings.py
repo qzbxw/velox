@@ -184,20 +184,34 @@ async def process_set_prox_state(message: Message, state: FSMContext):
         await message.delete()
     except Exception:
         pass
-    from bot.handlers._common import _wallets_alerts_settings_kb
+    
+    back_target = data.get("back_target", "cb_wallets_alerts_menu")
+    if back_target == "cb_whales":
+        from bot.handlers.market import cb_whales as target_handler
+    else:
+        from bot.handlers.settings import cb_wallets_alerts_menu as target_handler
+    
     if data.get("menu_msg_id"):
         try:
-            await message.bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=data["menu_msg_id"],
-                text=f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}",
-                reply_markup=_wallets_alerts_settings_kb(lang),
-                parse_mode="HTML"
-            )
-            return
+            # We cannot easily call handler with call.message because message object is different.
+            # Best is to just answer and then the user can navigate back.
+            # Or manually edit the message if we know what it was.
+            pass
         except Exception:
             pass
-    await message.answer(f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML")
+    
+    # Simple way: just send message and re-show menu
+    await message.answer(res)
+    # We create a dummy CallbackQuery to reuse the handler
+    from aiogram.types import User, Chat
+    dummy_call = CallbackQuery(
+        id="0",
+        from_user=message.from_user,
+        chat_instance="0",
+        message=message,
+        data=back_target
+    )
+    await target_handler(dummy_call)
 
 @router.message(SettingsStates.waiting_for_vol)
 async def process_set_vol_state(message: Message, state: FSMContext):
@@ -213,20 +227,16 @@ async def process_set_vol_state(message: Message, state: FSMContext):
         await message.delete()
     except Exception:
         pass
-    from bot.handlers._common import _wallets_alerts_settings_kb
-    if data.get("menu_msg_id"):
-        try:
-            await message.bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=data["menu_msg_id"],
-                text=f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}",
-                reply_markup=_wallets_alerts_settings_kb(lang),
-                parse_mode="HTML"
-            )
-            return
-        except Exception:
-            pass
-    await message.answer(f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML")
+    
+    back_target = data.get("back_target", "cb_wallets_alerts_menu")
+    if back_target == "cb_whales":
+        from bot.handlers.market import cb_whales as target_handler
+    else:
+        from bot.handlers.settings import cb_wallets_alerts_menu as target_handler
+    
+    await message.answer(res)
+    dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=back_target)
+    await target_handler(dummy_call)
 
 @router.message(SettingsStates.waiting_for_whale)
 async def process_set_whale_state(message: Message, state: FSMContext):
@@ -242,20 +252,16 @@ async def process_set_whale_state(message: Message, state: FSMContext):
         await message.delete()
     except Exception:
         pass
-    from bot.handlers._common import _wallets_alerts_settings_kb
-    if data.get("menu_msg_id"):
-        try:
-            await message.bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=data["menu_msg_id"],
-                text=f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}",
-                reply_markup=_wallets_alerts_settings_kb(lang),
-                parse_mode="HTML"
-            )
-            return
-        except Exception:
-            pass
-    await message.answer(f"{res}\n\n{_t(lang, 'btn_wallets_alerts')}", reply_markup=_wallets_alerts_settings_kb(lang), parse_mode="HTML")
+    
+    back_target = data.get("back_target", "cb_wallets_alerts_menu")
+    if back_target == "cb_whales":
+        from bot.handlers.market import cb_whales as target_handler
+    else:
+        from bot.handlers.settings import cb_wallets_alerts_menu as target_handler
+    
+    await message.answer(res)
+    dummy_call = CallbackQuery(id="0", from_user=message.from_user, chat_instance="0", message=message, data=back_target)
+    await target_handler(dummy_call)
 
 @router.message(Command("set_prox"))
 async def cmd_set_prox(message: Message):

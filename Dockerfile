@@ -13,10 +13,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright and its dependencies
-RUN python -m playwright install-deps chromium && \
-    python -m playwright install chromium && \
-    rm -rf /tmp/* /var/lib/apt/lists/*
+# Install Playwright dependencies (as root)
+RUN python -m playwright install-deps chromium
 
 # Copy the application code
 COPY . .
@@ -25,6 +23,10 @@ COPY . .
 RUN chown -R velox:velox /app
 
 USER velox
+
+# Install Playwright browser (as velox user)
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/velox/.cache/ms-playwright
+RUN python -m playwright install chromium
 
 ENV PYTHONUNBUFFERED=1
 

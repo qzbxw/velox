@@ -68,19 +68,57 @@ async def cb_market_overview(call: CallbackQuery, state: FSMContext):
     if not await _consume_billing_usage(call, call.message.chat.id, lang, BILLING_USAGE_OVERVIEW, "overview_runs_daily", "billing_feature_overview_runs", is_callback=True):
         return
     await call.answer("Generating Market Insights...")
-    ctx, hlp_info = await asyncio.gather(get_perps_context(), get_hlp_info(), return_exceptions=True)
+    ctx, hlp_info, fng = await asyncio.gather(get_perps_context(), get_hlp_info(), get_fear_greed_index(), return_exceptions=True)
     if isinstance(ctx, Exception) or not ctx:
         await call.message.answer("❌ Error fetching market data.")
         return
+    
     universe, asset_ctxs = (ctx[0].get("universe", []) if isinstance(ctx[0], dict) else ctx[0]), ctx[1]
-    data_alpha, data_liq, data_prices, fng = prepare_modern_market_data(asset_ctxs, universe, hlp_info if not isinstance(hlp_info, Exception) else None), prepare_liquidity_data(asset_ctxs, universe), prepare_coin_prices_data(asset_ctxs, universe), await get_fear_greed_index()
+    data_alpha = prepare_modern_market_data(asset_ctxs, universe, hlp_info if not isinstance(hlp_info, Exception) else None)
+    
+    # Extract BTC/ETH prices for market_overview.html
+    btc_data = {"price": "0", "change": 0.0}
+    eth_data = {"price": "0", "change": 0.0}
+    for sym, target in [("BTC", btc_data), ("ETH", eth_data)]:
+        idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == sym), -1)
+        if idx != -1 and idx < len(asset_ctxs):
+            ac = asset_ctxs[idx]
+            p = float(ac.get("markPx", 0))
+            target["price"] = pretty_float(p)
+            target["change"] = round(((p - float(ac.get("prevDayPx", p))) / float(ac.get("prevDayPx", p))) * 100 if float(ac.get("prevDayPx", p)) > 0 else 0.0, 2)
+
+    # Top stats
+    top_gainer = data_alpha["gainers"][0] if data_alpha.get("gainers") else {"name": "N/A", "change": 0}
+    top_loser = data_alpha["losers"][0] if data_alpha.get("losers") else {"name": "N/A", "change": 0}
+    
+    # Volume/Funding
+    vol_indices = sorted([(i, float(ac.get("dayNtlVlm", 0))) for i, ac in enumerate(asset_ctxs)], key=lambda x: x[1], reverse=True)
+    fund_indices = sorted([(i, abs(float(ac.get("funding", 0)))) for i, ac in enumerate(asset_ctxs)], key=lambda x: x[1], reverse=True)
+    
+    top_vol_idx = vol_indices[0][0] if vol_indices else 0
+    top_fund_idx = fund_indices[0][0] if fund_indices else 0
+    
+    render_data = {
+        "period_label": "MARKET INSIGHTS",
+        "date": datetime.now().strftime("%d %b %H:%M"),
+        "btc": btc_data,
+        "eth": eth_data,
+        "sentiment": data_alpha.get("sentiment_label", "NEUTRAL"),
+        "fng": fng if fng and not isinstance(fng, Exception) else {"value": 0, "classification": "N/A"},
+        "gemini_model": "Velox Engine",
+        "top_gainer": {"sym": top_gainer["name"], "val": top_gainer["change"]},
+        "top_loser": {"sym": top_loser["name"], "val": top_loser["change"]},
+        "top_vol": {"sym": (universe[top_vol_idx]["name"] if isinstance(universe[top_vol_idx], dict) else universe[top_vol_idx]) if top_vol_idx < len(universe) else "N/A", "val": f"${vol_indices[0][1]/1e6:.1f}M"},
+        "top_fund": {"sym": (universe[top_fund_idx]["name"] if isinstance(universe[top_fund_idx], dict) else universe[top_fund_idx]) if top_fund_idx < len(universe) else "N/A", "val": f"{float(asset_ctxs[top_fund_idx].get('funding',0))*100*24*365:.1f}%"}
+    }
+
     try:
-        buf_alpha, buf_liq, buf_heat, buf_prices = await asyncio.gather(
-            render_html_to_image("market_stats.html", data_alpha, lang=lang),
-            render_html_to_image("liquidity_stats.html", data_liq, lang=lang),
-            render_html_to_image("funding_heatmap.html", data_alpha, lang=lang),
-            render_html_to_image("coin_prices.html", data_prices, lang=lang)
+        # Use market_overview.html as main and funding_heatmap.html as secondary
+        buf_main, buf_heat = await asyncio.gather(
+            render_html_to_image("market_overview.html", render_data, width=1000, height=1000, lang=lang),
+            render_html_to_image("funding_heatmap.html", data_alpha, lang=lang)
         )
+        
         majors_text = ""
         for sym in ["BTC", "ETH", "SOL", "HYPE"]:
             idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == sym), -1)
@@ -93,11 +131,11 @@ async def cb_market_overview(call: CallbackQuery, state: FSMContext):
                     f"   ├ F: <code>{float(ac.get('funding', 0))*24*365*100:+.1f}% APR</code>\n"
                     f"   └ OI: <b>${float(ac.get('openInterest', 0))*p/1e6:.1f}M</b> | Vol: <b>${float(ac.get('dayNtlVlm', 0))/1e6:.1f}M</b>\n\n"
                 )
+        
         watchlist, watchlist_lines = await db.get_watchlist(call.message.chat.id), []
         if watchlist:
             for sym in watchlist:
-                if sym in ["BTC", "ETH", "SOL", "HYPE"]:
-                    continue
+                if sym in ["BTC", "ETH", "SOL", "HYPE"]: continue
                 idx = next((i for i, u in enumerate(universe) if (u["name"] if isinstance(u, dict) else u) == sym), -1)
                 if idx != -1:
                     ac = asset_ctxs[idx]
@@ -105,27 +143,24 @@ async def cb_market_overview(call: CallbackQuery, state: FSMContext):
                     change = ((p - float(ac.get("prevDayPx", p))) / float(ac.get("prevDayPx", p))) * 100 if float(ac.get("prevDayPx", p)) > 0 else 0.0
                     watchlist_lines.append(f"• {sym}: ${pretty_float(p)} ({'🟢' if change>=0 else '🔴'} {change:+.2f}%)")
         
-        fng_text = f"• Fear/Greed: {fng[chr(101)]} <b>{fng[chr(118)]}</b> ({fng[chr(99)]})" if fng else ""
-        watchlist_title = _t(lang, chr(109)) + _t(lang, chr(97)) + _t(lang, chr(114)) + _t(lang, chr(107)) + _t(lang, chr(101)) + _t(lang, chr(116)) + _t(lang, chr(95)) + _t(lang, chr(114)) + _t(lang, chr(101)) + _t(lang, chr(112)) + _t(lang, chr(111)) + _t(lang, chr(114)) + _t(lang, chr(116)) + _t(lang, chr(95)) + _t(lang, chr(119)) + _t(lang, chr(97)) + _t(lang, chr(116)) + _t(lang, chr(99)) + _t(lang, chr(104)) + _t(lang, chr(108)) + _t(lang, chr(105)) + _t(lang, chr(115)) + _t(lang, chr(116))
-        watchlist_text = f"⭐ <b>{watchlist_title}</b>:\n" + "\n".join(watchlist_lines) + "\n\n" if watchlist_lines else ""
+        fng_text = f"• Fear/Greed: {fng['emoji']} <b>{fng['value']}</b> ({fng['classification']})" if fng and not isinstance(fng, Exception) else ""
+        watchlist_text = f"⭐ <b>Watchlist</b>:\n" + "\n".join(watchlist_lines) + "\n\n" if watchlist_lines else ""
         
         text_report = (
-            f"📊 <b>{_t(lang, 'market_alerts_title')}</b>\n\n"
-            f"<b>{_t(lang, 'market_report_global')}</b>\n"
+            f"📊 <b>Market Intelligence</b>\n\n"
             f"• Vol 24h: <b>${data_alpha['global_volume']}</b>\n"
             f"• Total OI: <b>${data_alpha['total_oi']}</b>\n"
             f"• Sentiment: <code>{data_alpha['sentiment_label']}</code>\n"
-            f"{fng_text}\n"
-            f"<b>{_t(lang, 'market_report_majors')}</b>\n"
+            f"{fng_text}\n\n"
+            f"<b>Majors & Watchlist</b>\n"
             f"{majors_text}{watchlist_text}"
-            f"🕒 <i>{_t(lang, 'market_report_footer', time=time.strftime('%H:%M') + ' UTC')}</i>"
+            f"🕒 <i>{time.strftime('%H:%M')} UTC</i>"
         )
+        
         await call.message.delete()
         mids = await call.message.answer_media_group([
-            InputMediaPhoto(media=BufferedInputFile(buf_prices.read(), filename="i1.png")),
-            InputMediaPhoto(media=BufferedInputFile(buf_heat.read(), filename="i2.png")),
-            InputMediaPhoto(media=BufferedInputFile(buf_alpha.read(), filename="i3.png")),
-            InputMediaPhoto(media=BufferedInputFile(buf_liq.read(), filename="i4.png"))
+            InputMediaPhoto(media=BufferedInputFile(buf_main.read(), filename="i1.png")),
+            InputMediaPhoto(media=BufferedInputFile(buf_heat.read(), filename="i2.png"))
         ])
         await state.update_data(market_media_ids=[m.message_id for m in mids])
         kb = InlineKeyboardBuilder()
@@ -133,7 +168,7 @@ async def cb_market_overview(call: CallbackQuery, state: FSMContext):
         await call.message.answer(text_report, reply_markup=kb.as_markup(), parse_mode="HTML")
     except Exception as e:
         logger.error(f"Error generating images: {e}")
-        await call.message.answer("❌ Error generating images.")
+        await call.message.answer("❌ Error generating insights.")
 
 @router.callback_query(F.data == "cb_market_cleanup")
 async def cb_market_cleanup(call: CallbackQuery, state: FSMContext):

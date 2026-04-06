@@ -69,6 +69,13 @@ async def cb_sub_ai_market(call: CallbackQuery):
     await smart_edit(call, _t(lang, "cat_ai_market"), reply_markup=_ai_market_kb(lang))
     await call.answer()
 
+@router.callback_query(F.data == "sub:market")
+async def cb_sub_market(call: CallbackQuery):
+    lang = await db.get_lang(call.message.chat.id)
+    from bot.handlers._common import _market_kb
+    await smart_edit(call, _t(lang, "cat_market"), reply_markup=_market_kb(lang))
+    await call.answer()
+
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     lang = await db.get_lang(message.chat.id)

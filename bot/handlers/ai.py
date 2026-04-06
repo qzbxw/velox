@@ -16,7 +16,7 @@ from bot.locales import _t
 from bot.services import (
     get_perps_context, get_fear_greed_index, pretty_float
 )
-from bot import market_overview
+from bot.market_overview import market_overview
 from bot.renderer import render_html_to_image
 from bot.handlers._common import (
     smart_edit, _back_kb, _ensure_billing_feature, _consume_billing_usage,

@@ -148,6 +148,7 @@
     "prompt_target_oi": "⌨️ Enter <b>Target OI ($M)</b> (e.g., 100):",
     "btn_lang": "🌍 Language",
     "btn_back": "🔙 Back",
+    "btn_fear_greed": "📊 Fear & Greed",
     "btn_main_menu": "🏠 Menu",
     "btn_graph": "📈 Graph",
     "btn_prox": "⚡ Prox %",

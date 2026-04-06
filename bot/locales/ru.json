@@ -148,6 +148,7 @@
     "prompt_target_oi": "⌨️ Введи <b>Цель OI ($M)</b> (напр. 100):",
     "btn_lang": "🌍 Язык",
     "btn_back": "🔙 Назад",
+    "btn_fear_greed": "📊 Страх и Жадность",
     "btn_main_menu": "🏠 Меню",
     "btn_graph": "📈 График",
     "btn_prox": "⚡ Отступ %",

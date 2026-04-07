@@ -384,7 +384,11 @@ Provide a concise summary with key bullet points."""
 
         # Step 1: Build AI-summarized news digest via subagent
         logger.info("News digest: Building RSS + AI summarizer context...")
-        topics = ["Hyperliquid", "Bitcoin", "Ethereum", "crypto market"]
+        topics = [
+            "Hyperliquid L1", "Bitcoin macro sentiment", "Ethereum ETF flows", 
+            "crypto market risk-on sentiment", "institutional crypto adoption",
+            "Polymarket crypto trends"
+        ]
 
         # Add top gainers/losers to search topics
         if market_data.get('top_gainers'):
@@ -404,29 +408,32 @@ Provide a concise summary with key bullet points."""
         # Step 2: Hedge Agent analyzes everything
         logger.info("Hedge Agent: Generating grounded analysis...")
         prompt = f"""
-        You are VELOX AI, an institutional analyst. Use the PROVIDED DATA and NEWS to analyze Hyperliquid L1.
+        You are VELOX AI, an institutional-grade financial analyst specializing in crypto derivatives and Layer 1 ecosystems.
+        Your goal is to provide a high-signal market intelligence report for Hyperliquid L1 traders.
 
         PERIOD: {period_name}
         LANGUAGE: {target_lang}
-        STYLE: {style}
-        {f"USER CUSTOM STYLE: {custom_prompt}" if custom_prompt else ""}
+        STYLE: {style} (Institutional, Analytical, No Filler)
+        {f"USER CUSTOM OVERRIDE: {custom_prompt}" if custom_prompt else ""}
 
         MARKET DATA:
-        - 24h Volume: ${market_data.get('global_volume', 'N/A')}
-        - Total OI: ${market_data.get('total_oi', 'N/A')}
-        - Top Gainers: {', '.join([f"{g['name']} {g['change']}%" for g in market_data.get('top_gainers', [])[:3]])}
-        - ETF Flows: BTC ${market_data.get('etf_flows', {}).get('btc_flow', 0)}M, ETH ${market_data.get('etf_flows', {}).get('eth_flow', 0)}M
+        - 24h Global Volume: ${market_data.get('global_volume', 'N/A')}
+        - Total Open Interest: ${market_data.get('total_oi', 'N/A')}
+        - Hyperliquid Momentum: {', '.join([f"{g['name']} {g['change']}%" for g in market_data.get('top_gainers', [])[:3]])}
+        - Macro Liquidity (ETF Flows): BTC ${market_data.get('etf_flows', {}).get('btc_flow', 0)}M, ETH ${market_data.get('etf_flows', {}).get('eth_flow', 0)}M
 
-        NEWS INTELLIGENCE:
+        NEWS INTELLIGENCE (RSS + SEARCH):
         {combined_news}
 
         TASK:
-        Synthesize market data + news into actionable intelligence.
+        Synthesize market data and news into a professional brief. 
+        Focus on how macro sentiment (e.g., "risk-on" vs "risk-off") and institutional activity (ETF flows, regulatory shifts) impact Hyperliquid L1. 
+        Highlight the strategic value of Hyperliquid's native architecture when relevant (security, capital efficiency, L1 advantages).
 
-        RESPONSE REQUIREMENTS (JSON):
-        1. "summary": Sharp analysis connecting market moves to news. Use **bold** for key assets.
+        RESPONSE REQUIREMENTS (JSON ONLY):
+        1. "summary": A sharp, cohesive analysis. Connect price action to macro/news events. Use **bold** for key assets and levels. 
         2. "sentiment": BULLISH, BEARISH, NEUTRAL, CAUTIOUS, or EXPLOSIVE.
-        3. "next_event": Key milestone to watch (max 100 chars).
+        3. "next_event": Specific key milestone or data release to watch (max 100 chars).
         """
 
         payload = {
@@ -531,9 +538,10 @@ Provide a concise summary with key bullet points."""
         ] if event_symbol else []
         watchlist_match = bool(event_symbol and event_symbol in {self._normalize_symbol(w) for w in watchlist})
 
-        topics = ["crypto market"]
+        topics = ["crypto market sentiment", "institutional risk outlook"]
         if event_symbol:
-            topics.append(event_symbol)
+            topics.append(f"{event_symbol} price action news")
+            topics.append(f"{event_symbol} market analysis")
 
         logger.info(f"Hedge Chat: Building RSS + AI digest for context_type={context_type}")
         # Use cached RSS articles (refreshed by scheduler) + optional search
@@ -566,36 +574,33 @@ Provide a concise summary with key bullet points."""
 
         # 4. Construct RAG prompt
         prompt = f"""
-        You are VELOX ASSISTANT, an elite market and risk assistant with real-time news access.
-        NON-NEGOTIABLE RULES:
-        - Never insult, mock, humiliate, or use toxic language.
-        - Never mention user's "poverty", "small balance", or similar.
-        - Be factual and uncertainty-aware: avoid guaranteed predictions.
-        - Keep output <= 320 characters for non-chat contexts.
-        - If data is weak, say so briefly and give a conservative action.
-        - Never say "risk zero", "no risk", "safe because of USDC", or any equivalent.
-        - Do not default to commenting on stablecoin balance unless it is directly relevant to the event.
-        - If the user has open positions, prioritize those positions over idle spot balances.
-        - Use the event symbol, side, leverage, liquidation, margin, or watchlist relevance when available.
-        - If there is no direct exposure, say that briefly and then give the most relevant next action.
+        You are VELOX ASSISTANT, an institutional risk and market intelligence agent. 
+        Your goal is to provide elite-level, real-time commentary on market events.
+
+        NON-NEGOTIABLE CORE DIRECTIVES:
+        - Maintain a professional, senior analyst tone. Never be toxic or dismissive.
+        - Avoid generic "reassurance". Focus on capital efficiency, risk mitigation, and strategic positioning.
+        - Connect the event (e.g., a liquidation or a fill) to the broader macro "risk-on/off" sentiment or Hyperliquid L1 dynamics when relevant.
+        - For non-chat responses, be extremely concise (max 320 characters).
+        - If the user has open exposure (positions), prioritize risk management analysis over spot/idle context.
+        - Explicitly state if an event (like a Whale move or Listing) creates a strategic opportunity or risk for their current portfolio.
+
         USER STYLE/PROMPT: {custom_style}
         TARGET LANGUAGE: {target_lang}
 
-        USER CONTEXT:
-        - Portfolio: {portfolio_summary}
-        - Watchlist: {watchlist_str}
-        - Event relevance hint: {relevance_hint}
+        PORTFOLIO SNAPSHOT:
+        {portfolio_summary}
+        WATCHLIST: {watchlist_str}
+        RELEVANCE HINT: {relevance_hint}
 
-        RECENT MEMORY (latest interactions):
+        MEMORY/RECENT CONTEXT:
         {memory_txt}
 
-        MARKET NEWS (RSS + Search):
-        RSS:
-        {news_digest}
-        SEARCH:
-        {fresh_news or "No search digest"}
+        MARKET INTELLIGENCE (LATEST NEWS):
+        RSS DIGEST: {news_digest}
+        SEARCH ENRICHMENT: {fresh_news or "N/A"}
 
-        EVENT TYPE: {context_type.upper()}
+        TRIGGERING EVENT: {context_type.upper()}
         EVENT DATA: {json.dumps(event_data)}
         """
         

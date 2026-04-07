@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # News Summarizer (AI subagent)
     NEWS_SUMMARIZER_ENABLED: bool = Field(True, description="Enable AI pre-summarization of RSS headlines")
-    NEWS_SUMMARIZER_MODEL: str = Field("gemini-2.0-flash-lite", description="Gemini model for news summarization")
+    NEWS_SUMMARIZER_MODEL: str = Field("gemma-4-31b-it", description="Gemini model for news summarization")
 
     FARSIDE_BTC_URL: str = Field("https://farside.co.uk/btc/", description="Farside BTC ETF Flow URL")
     FARSIDE_ETH_URL: str = Field("https://farside.co.uk/eth/", description="Farside ETH ETF Flow URL")

@@ -73,7 +73,7 @@ async def cb_alerts(call: CallbackQuery):
 @router.callback_query(F.data.startswith("clear_all_alerts"))
 async def cb_clear_all_alerts(call: CallbackQuery):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "sub:market"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "sub:market"
     await db.delete_all_user_alerts(call.message.chat.id)
     await call.answer(_t(await db.get_lang(call.message.chat.id), "deleted"))
     call.data = f"cb_alerts:{back_target}"
@@ -83,7 +83,7 @@ async def cb_clear_all_alerts(call: CallbackQuery):
 async def cb_del_alert(call: CallbackQuery):
     parts = call.data.split(":")
     aid = parts[1]
-    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
     if await db.delete_alert(aid):
         await call.answer(_t(await db.get_lang(call.message.chat.id), "deleted"))
     else:
@@ -123,6 +123,7 @@ async def cb_set_quick_alert(call: CallbackQuery):
         return
     await db.add_price_alert(call.message.chat.id, symbol, target, direction)
     await call.answer(_t(lang, "alert_added", symbol=symbol, dir=direction, price=pretty_float(target)), show_alert=True)
+    call.data = "cb_alerts:sub:market"
     await cb_alerts(call)
 
 @router.message(Command("watch"))
@@ -165,7 +166,7 @@ async def cmd_unwatch(message: Message):
 @router.callback_query(F.data.startswith("cb_funding_alert_prompt"))
 async def cb_funding_alert_prompt(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "cb_settings"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "cb_settings"
     lang = await db.get_lang(call.message.chat.id)
     await state.update_data(alert_type="funding", menu_msg_id=call.message.message_id, back_target=back_target)
     await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, back_target), parse_mode="HTML")
@@ -175,7 +176,7 @@ async def cb_funding_alert_prompt(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("cb_oi_alert_prompt"))
 async def cb_oi_alert_prompt(call: CallbackQuery, state: FSMContext):
     parts = call.data.split(":")
-    back_target = parts[1] if len(parts) > 1 else "cb_settings"
+    back_target = ":".join(parts[1:]) if len(parts) > 1 else "cb_settings"
     lang = await db.get_lang(call.message.chat.id)
     await state.update_data(alert_type="oi", menu_msg_id=call.message.message_id, back_target=back_target)
     await call.message.edit_text(_t(lang, "prompt_symbol"), reply_markup=_back_kb(lang, back_target), parse_mode="HTML")

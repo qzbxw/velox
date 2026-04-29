@@ -27,7 +27,7 @@ from bot.handlers.states import MarketAlertStates
 router = Router(name="market")
 logger = logging.getLogger(__name__)
 
-@router.callback_query(F.data.startswith("cb_market"))
+@router.callback_query(F.data.regexp(r"^cb_market(:|$)"))
 async def cb_market(call: CallbackQuery):
     parts = call.data.split(":")
     back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
@@ -163,7 +163,7 @@ async def process_market_alert_type(call: CallbackQuery, state: FSMContext):
     time_str, alert_type = data.get("pending_time"), call.data.split(":")[1]
     # Extract back_target from callback data
     parts = call.data.split(":")
-    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
     
     user_settings = await db.get_user_settings(call.message.chat.id)
     alert_times = [t for t in user_settings.get("market_alert_times", []) if (t["t"] if isinstance(t, dict) else t) != time_str]
@@ -178,8 +178,9 @@ async def process_market_alert_type(call: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("del_market_alert:"))
 async def cb_del_market_alert(call: CallbackQuery):
     parts = call.data.split(":")
-    time_str, lang = parts[1], await db.get_lang(call.message.chat.id)
-    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    time_str = ":".join(parts[1:3]) if len(parts) >= 3 else ""
+    lang = await db.get_lang(call.message.chat.id)
+    back_target = ":".join(parts[3:]) if len(parts) > 3 else "sub:market"
     user_settings = await db.get_user_settings(call.message.chat.id)
     alert_times = [t for t in user_settings.get("market_alert_times", []) if (t["t"] if isinstance(t, dict) else t) != time_str]
     if len(alert_times) < len(user_settings.get("market_alert_times", [])):
@@ -231,7 +232,7 @@ async def cb_set_whale_thr_prompt(call: CallbackQuery, state: FSMContext):
 async def cb_toggle_whale_wl(call: CallbackQuery):
     parts = call.data.split(":")
     await db.update_user_settings(call.message.chat.id, {"whale_watchlist_only": parts[1] == "on"})
-    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
     call.data = f"cb_whales:market:{back_target}"
     await cb_whales(call)
 
@@ -239,7 +240,7 @@ async def cb_toggle_whale_wl(call: CallbackQuery):
 async def cb_toggle_whales(call: CallbackQuery):
     parts = call.data.split(":")
     await db.update_user_settings(call.message.chat.id, {"whale_alerts": parts[1] == "on"})
-    back_target = parts[2] if len(parts) > 2 else "sub:market"
+    back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:market"
     call.data = f"cb_whales:market:{back_target}"
     await cb_whales(call)
 
@@ -268,22 +269,28 @@ async def cb_fear_greed(call: CallbackQuery):
     await smart_edit(call, text, reply_markup=kb.as_markup())
     await call.answer()
 
-@router.callback_query(F.data == "cb_delta_neutral")
+@router.callback_query(F.data.regexp(r"^cb_delta_neutral(:|$)"))
 async def cb_delta_neutral(call: CallbackQuery):
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) > 1 else "overview"
+    back_target = "sub:dashboard" if context == "dashboard" else "sub:overview"
     await call.answer("Loading...")
     lang = await db.get_lang(call.message.chat.id)
     text, _ = await _build_delta_neutral_dashboard(call.message.chat.id, call.message.bot, interval_hours=0.0, emit_alerts=False)
     if not text:
-        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:overview"))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
     kb = InlineKeyboardBuilder()
     from aiogram.types import InlineKeyboardButton
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data="cb_delta_neutral_refresh"))
-    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="sub:overview"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_refresh"), callback_data=f"cb_delta_neutral_refresh:{context}"))
+    kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data=back_target))
     await smart_edit(call, text, reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "cb_delta_neutral_refresh")
+@router.callback_query(F.data.startswith("cb_delta_neutral_refresh"))
 async def cb_delta_neutral_refresh(call: CallbackQuery):
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) > 1 else "overview"
+    call.data = f"cb_delta_neutral:{context}"
     await cb_delta_neutral(call)
 
 @router.message(Command("status"))
@@ -295,15 +302,18 @@ async def cmd_status(message: Message):
         return
     await message.answer(text, parse_mode="HTML")
 
-@router.callback_query(F.data == "cb_terminal")
+@router.callback_query(F.data.startswith("cb_terminal"))
 async def cb_terminal(call: CallbackQuery):
+    parts = call.data.split(":")
+    context = parts[1] if len(parts) > 1 else "overview"
+    back_target = "sub:dashboard" if context == "dashboard" else "sub:overview"
     lang = await db.get_lang(call.message.chat.id)
     if not await _ensure_billing_feature(call, call.message.chat.id, lang, "terminal", "billing_feature_terminal", is_callback=True):
         return
     await call.answer("Loading Terminal...")
     wallets = await db.list_wallets(call.message.chat.id)
     if not wallets:
-        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, "sub:overview"))
+        await smart_edit(call, _t(lang, "need_wallet"), reply_markup=_back_kb(lang, back_target))
         return
     ws = getattr(call.message.bot, "ws_manager", None)
     total_equity, total_upnl, total_margin_used, total_withdrawable, total_ntl = 0.0, 0.0, 0.0, 0.0, 0.0
@@ -359,7 +369,7 @@ async def cb_terminal(call: CallbackQuery):
     try:
         buf = await render_html_to_image("terminal_dashboard.html", data, width=1000, height=600, lang=lang)
         caption = "🖥️ <b>Velox Terminal</b>" + (f" ({len(wallets)} wallets)" if len(wallets) > 1 else "")
-        await smart_edit_media(call, BufferedInputFile(buf.read(), filename="terminal.png"), caption, reply_markup=_back_kb(lang, "sub:overview"))
+        await smart_edit_media(call, BufferedInputFile(buf.read(), filename="terminal.png"), caption, reply_markup=_back_kb(lang, back_target))
     except Exception as e:
         logger.error(f"Error rendering terminal: {e}")
         await call.message.answer("❌ Error generating terminal.")

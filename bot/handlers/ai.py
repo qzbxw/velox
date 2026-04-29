@@ -193,7 +193,7 @@ async def _send_ai_overview(bot, chat_id, user_id, status_msg=None, back_target=
         report_text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', report_text)
         
         kb = InlineKeyboardBuilder()
-        kb.button(text=_t(lang, "btn_refresh"), callback_data="cb_market_overview_refresh")
+        kb.button(text=_t(lang, "btn_refresh"), callback_data=f"cb_market_overview_refresh:{back_target}")
         kb.button(text=_t(lang, "btn_settings"), callback_data="cb_overview_settings_menu")
         kb.button(text=_t(lang, "btn_back"), callback_data="cb_ai_cleanup")
         kb.adjust(1, 2)
@@ -260,6 +260,16 @@ async def cb_ai_cleanup(call: CallbackQuery, state: FSMContext):
     if back_target == "sub:ai_market":
         from bot.handlers.menu import cb_sub_ai_market
         await cb_sub_ai_market(call)
+    elif back_target == "sub:overview":
+        from bot.handlers.menu import cb_sub_overview
+        await cb_sub_overview(call)
+    elif back_target.startswith("sub:market"):
+        from bot.handlers.menu import cb_sub_market
+        call.data = back_target
+        await cb_sub_market(call)
+    elif back_target == "sub:alerts":
+        from bot.handlers.menu import cb_sub_alerts
+        await cb_sub_alerts(call)
     else:
         from bot.handlers.menu import cb_menu
         await cb_menu(call, state)

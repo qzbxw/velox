@@ -272,8 +272,8 @@ def _alerts_kb(lang):
         InlineKeyboardButton(text=_t(lang, "btn_market"), callback_data="sub:market:alerts") # For watchlist?
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_funding_alert"), callback_data="cb_funding_alert_prompt"),
-        InlineKeyboardButton(text=_t(lang, "btn_oi_alert"), callback_data="cb_oi_alert_prompt")
+        InlineKeyboardButton(text=_t(lang, "btn_funding_alert"), callback_data=f"cb_funding_alert_prompt:{this_path}"),
+        InlineKeyboardButton(text=_t(lang, "btn_oi_alert"), callback_data=f"cb_oi_alert_prompt:{this_path}")
     )
     kb.row(
         InlineKeyboardButton(text=_t(lang, "btn_whales"), callback_data=f"cb_whales:alerts:{this_path}"),
@@ -289,8 +289,8 @@ def _overview_kb(lang):
         InlineKeyboardButton(text=_t(lang, "btn_delta_neutral"), callback_data="cb_delta_neutral:overview")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_hedge_ai"), callback_data="cb_ai_overview_menu:overview"),
-        InlineKeyboardButton(text=_t(lang, "btn_hedge_chat"), callback_data="cb_hedge_chat_start:overview")
+        InlineKeyboardButton(text=_t(lang, "btn_hedge_ai"), callback_data="cb_ai_overview_menu:sub:overview"),
+        InlineKeyboardButton(text=_t(lang, "btn_hedge_chat"), callback_data="cb_hedge_chat_start:sub:overview")
     )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_menu"))
     return kb.as_markup()
@@ -484,8 +484,8 @@ def _wallets_alerts_settings_kb(lang):
         InlineKeyboardButton(text=_t(lang, "btn_whale"), callback_data="set_whale_prompt")
     )
     kb.row(
-        InlineKeyboardButton(text=_t(lang, "btn_funding_alert"), callback_data="cb_funding_alert_prompt"),
-        InlineKeyboardButton(text=_t(lang, "btn_oi_alert"), callback_data="cb_oi_alert_prompt")
+        InlineKeyboardButton(text=_t(lang, "btn_funding_alert"), callback_data="cb_funding_alert_prompt:cb_wallets_alerts_menu"),
+        InlineKeyboardButton(text=_t(lang, "btn_oi_alert"), callback_data="cb_oi_alert_prompt:cb_wallets_alerts_menu")
     )
     kb.row(InlineKeyboardButton(text=_t(lang, "btn_back"), callback_data="cb_settings"))
     return kb.as_markup()

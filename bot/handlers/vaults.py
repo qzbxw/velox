@@ -257,7 +257,9 @@ async def cb_toggle_vault_report(call: CallbackQuery):
     if not await _ensure_billing_feature(call, call.message.chat.id, lang, "vault_reports", "billing_feature_vault_reports", is_callback=True):
         return
 
-    if call.data == "vrep:hlp_daily":
+    parts = call.data.split(":")
+    if parts[:2] == ["vrep", "hlp_daily"]:
+        back_target = ":".join(parts[2:]) if len(parts) > 2 else "sub:vaults"
         digest_cfg = await db.get_digest_settings(call.message.chat.id)
         if not bool(digest_cfg.get("hlp_daily", {}).get("enabled", False)):
             if not await _ensure_billing_feature(call, call.message.chat.id, lang, "digests", "billing_feature_digests", is_callback=True):
@@ -267,15 +269,16 @@ async def cb_toggle_vault_report(call: CallbackQuery):
         enabled = await db.toggle_digest_enabled(call.message.chat.id, "hlp_daily")
         state_lbl = "ON" if enabled else "OFF"
         await call.answer(_t(lang, "vault_report_daily_toggled").format(state=state_lbl))
+        call.data = f"cb_vault_reports_menu:{back_target}"
         await cb_vault_reports_menu(call)
         return
 
-    parts = call.data.split(":")
-    if len(parts) != 3:
+    if len(parts) < 3:
         await call.answer("Invalid toggle")
         return
 
     period_short = parts[1]
+    back_target = ":".join(parts[3:]) if len(parts) > 3 else "sub:vaults"
     try:
         idx = int(parts[2])
     except ValueError:
@@ -305,4 +308,5 @@ async def cb_toggle_vault_report(call: CallbackQuery):
     period_lbl = _t(lang, "vault_reports_weekly") if period == "weekly" else _t(lang, "vault_reports_monthly")
     state_lbl = "ON" if enabled else "OFF"
     await call.answer(_t(lang, "vault_report_toggled").format(period=period_lbl, state=state_lbl))
+    call.data = f"cb_vault_reports_menu:{back_target}"
     await cb_vault_reports_menu(call)

@@ -510,7 +510,8 @@ def apply_delta_monitoring(
 
         delta_pct = _safe_float(coin.get("delta_pct", 0))
         delta_usd = _safe_float(coin.get("delta_usd", 0))
-        if _safe_float(coin.get("hedge_base_qty", 0)) > 0:
+        is_hedged_pair = _safe_float(coin.get("spot_qty", 0)) > 0 and _safe_float(coin.get("short_qty", 0)) > 0
+        if is_hedged_pair and _safe_float(coin.get("hedge_base_qty", 0)) > 0:
             if delta_pct >= DELTA_CRIT_PCT:
                 key = f"delta_crit:{sym}"
                 if not _on_cooldown(cooldowns, key, now_ts, 1800):

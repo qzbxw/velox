@@ -813,9 +813,9 @@ async def send_scheduled_overviews(bot):
     users = await db.get_all_users()
     users_to_send = []
     for u in users:
-        settings = await db.get_overview_settings(u["user_id"])
-        if settings.get("enabled") and now_utc in settings.get("schedules", []):
-            users_to_send.append((u["user_id"], settings, u.get("lang", "en")))
+        overview_settings = await db.get_overview_settings(u["user_id"])
+        if overview_settings.get("enabled") and now_utc in overview_settings.get("schedules", []):
+            users_to_send.append((u["user_id"], overview_settings, u.get("lang", "en")))
     if not users_to_send:
         return
 

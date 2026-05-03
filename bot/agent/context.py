@@ -162,6 +162,8 @@ class AgentRunContext:
     user_id: int | str | None = None
     event_data: dict[str, Any] | None = None
     lang: str = "en"
+    custom_prompt: str | None = None
+    style: str = "detailed"
     max_sources: int = 80
     max_queries: int = 12
     errors: list[dict[str, Any]] = field(default_factory=list)

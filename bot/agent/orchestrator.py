@@ -56,15 +56,43 @@ class AgentOrchestrator:
         registry.register(DuckDuckGoSearchTool())
         return registry
 
-    async def run(self, mode: str, user_id=None, event_data: dict[str, Any] | None = None, lang: str = "en") -> FinalAgentReport:
-        return await asyncio.wait_for(self._run(mode, user_id=user_id, event_data=event_data, lang=lang), timeout=pipeline_timeout())
+    async def run(
+        self,
+        mode: str,
+        user_id=None,
+        event_data: dict[str, Any] | None = None,
+        lang: str = "en",
+        custom_prompt: str | None = None,
+        style: str = "detailed",
+    ) -> FinalAgentReport:
+        return await asyncio.wait_for(
+            self._run(
+                mode,
+                user_id=user_id,
+                event_data=event_data,
+                lang=lang,
+                custom_prompt=custom_prompt,
+                style=style,
+            ),
+            timeout=pipeline_timeout(),
+        )
 
-    async def _run(self, mode: str, user_id=None, event_data: dict[str, Any] | None = None, lang: str = "en") -> FinalAgentReport:
+    async def _run(
+        self,
+        mode: str,
+        user_id=None,
+        event_data: dict[str, Any] | None = None,
+        lang: str = "en",
+        custom_prompt: str | None = None,
+        style: str = "detailed",
+    ) -> FinalAgentReport:
         context = AgentRunContext(
             mode=mode,
             user_id=user_id,
             event_data=event_data,
             lang=lang,
+            custom_prompt=custom_prompt,
+            style=style,
             max_sources=int(getattr(settings, "AGENT_MAX_SOURCES_PER_RUN", 80) or 80),
             max_queries=int(getattr(settings, "AGENT_MAX_SEARCH_QUERIES", 12) or 12),
         )
@@ -142,6 +170,8 @@ class AgentOrchestrator:
             "mode": context.mode,
             "user_id": context.user_id,
             "event_data": context.event_data,
+            "custom_prompt": context.custom_prompt,
+            "style": context.style,
         }, sort_keys=True, default=str).encode("utf-8")).hexdigest()
         try:
             cache_tasks = []

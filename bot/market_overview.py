@@ -518,11 +518,9 @@ Provide a concise summary with key bullet points."""
             user_id=user_id,
             event_data=event_data,
             lang=lang,
+            custom_prompt=custom_prompt,
+            style=style,
         )
-        if custom_prompt:
-            report.output["custom_prompt_applied"] = custom_prompt[:500]
-        if style:
-            report.output["style"] = style
         return report
 
     async def generate_hedge_comment(self, 

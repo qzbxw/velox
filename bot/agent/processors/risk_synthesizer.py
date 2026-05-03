@@ -84,6 +84,8 @@ async def synthesize_final_report(
         "Synthesize this structured market intelligence into JSON only with exactly these keys: "
         "summary, sentiment, regime, top_risks, top_opportunities, portfolio_relevance, "
         "next_event, actionable_notes, sources. Use concise institutional tone. "
+        f"Generation style: {context.style or 'detailed'}. "
+        f"{'User generation instructions: ' + context.custom_prompt.strip() + ' ' if context.custom_prompt else ''}"
         f"Data:\n{json.dumps(compact, ensure_ascii=False)}"
     )
     model = getattr(settings, "AGENT_LLM_MODEL", "gemma-4-31b-it")

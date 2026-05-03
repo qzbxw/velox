@@ -2,7 +2,7 @@ import asyncio
 
 from bot.agent.context import AgentRunContext, MarketEvent, MarketRegime, MarketSnapshot, SourceItem
 from bot.agent.orchestrator import AgentOrchestrator
-from bot.agent.processors.risk_synthesizer import synthesize_final_report
+from bot.agent.processors.risk_synthesizer import deterministic_report, normalize_report_output, synthesize_final_report
 from bot.agent.registry import ToolRegistry
 from bot.agent.tools.base import BaseAgentTool, ToolResult
 
@@ -196,3 +196,53 @@ def test_synthesizer_includes_generation_settings_in_prompt(monkeypatch):
 
     assert "Generation style: brief." in captured["prompt"]
     assert "User generation instructions: Focus on ETF flow risk." in captured["prompt"]
+
+
+def test_deterministic_report_synthesizes_instead_of_dumping_raw_links():
+    report = deterministic_report(
+        MarketSnapshot(),
+        MarketRegime(regime="transitional", summary="Transitional regime with score 1.74."),
+        [
+            MarketEvent(
+                title="ETH ETF flows flip late",
+                summary="<a href=\"https://news.google.com/rss/articles/raw\">Ethereum source</a>",
+                sentiment="bullish",
+            )
+        ],
+        [],
+        [
+            SourceItem(
+                title="Ethereum (ETH) Holds $2.3K as ETF Flows Flip Late",
+                url="https://news.google.com/rss/articles/raw?oc=5",
+                source="Google News",
+                source_type="rss",
+            )
+        ],
+    )
+
+    assert "score 1.74" not in report["summary"]
+    assert "<a href" not in report["summary"]
+    assert "https://news.google.com" not in report["summary"]
+    assert "Market regime is transitional" in report["summary"]
+    assert report["sources"][0]["url"] == "https://news.google.com/rss/articles/raw?oc=5"
+
+
+def test_normalize_report_output_removes_links_from_text_fields_only():
+    output = normalize_report_output({
+        "summary": "Key event: <a href=\"https://example.com/a\">ETH flow flip</a>",
+        "sentiment": "neutral",
+        "regime": "transitional",
+        "top_risks": ["Raw https://example.com/risk"],
+        "top_opportunities": ["[ETF demand](https://example.com/opp)"],
+        "portfolio_relevance": [],
+        "next_event": "Watch https://example.com/event",
+        "actionable_notes": ["Check <b>funding</b>"],
+        "sources": [{"title": "Source <b>title</b>", "url": "https://example.com/a", "source": "Example"}],
+    })
+
+    assert output["summary"] == "Key event: ETH flow flip"
+    assert output["top_risks"] == ["Raw"]
+    assert output["top_opportunities"] == ["ETF demand"]
+    assert output["next_event"] == "Watch"
+    assert output["actionable_notes"] == ["Check funding"]
+    assert output["sources"] == [{"title": "Source title", "url": "https://example.com/a", "source": "Example"}]

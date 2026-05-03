@@ -851,6 +851,53 @@ async def send_scheduled_overviews(bot):
 
     for user_id, cfg, lang in users_to_send:
         try:
+            if settings.AGENT_ENABLED:
+                try:
+                    report = await market_overview.generate_agentic_overview(
+                        user_id=user_id,
+                        lang=lang,
+                        custom_prompt=cfg.get("prompt_override"),
+                        style=cfg.get("style", "detailed"),
+                    )
+                    output = report.output if isinstance(report.output, dict) else {}
+                    btc_d = {
+                        "price": pretty_float(float(report.market_snapshot.majors.get("BTC", {}).get("price", 0) or 0)),
+                        "change": float(report.market_snapshot.majors.get("BTC", {}).get("change", 0) or 0),
+                    }
+                    eth_d = {
+                        "price": pretty_float(float(report.market_snapshot.majors.get("ETH", {}).get("price", 0) or 0)),
+                        "change": float(report.market_snapshot.majors.get("ETH", {}).get("change", 0) or 0),
+                    }
+                    top_gainer = (report.market_snapshot.top_gainers or [{"name": "N/A", "change": 0}])[0]
+                    top_loser = (report.market_snapshot.top_losers or [{"name": "N/A", "change": 0}])[0]
+                    top_vol = (report.market_snapshot.highest_volume or [{"name": "N/A", "volume": 0}])[0]
+                    top_fund = (report.market_snapshot.highest_funding or [{"name": "N/A", "funding": 0}])[0]
+                    render_data = {
+                        "period_label": period_label,
+                        "date": datetime.datetime.now().strftime("%d %b %H:%M"),
+                        "btc": btc_d,
+                        "eth": eth_d,
+                        "sentiment": output.get("sentiment", "Neutral"),
+                        "fng": report.market_snapshot.fear_greed or {"value": 0, "classification": "N/A"},
+                        "gemini_model": "Velox Agent",
+                        "top_gainer": {"sym": top_gainer.get("name", "N/A"), "val": top_gainer.get("change", 0)},
+                        "top_loser": {"sym": top_loser.get("name", "N/A"), "val": top_loser.get("change", 0)},
+                        "top_vol": {"sym": top_vol.get("name", "N/A"), "val": f"${float(top_vol.get('volume', 0) or 0)/1e6:.0f}M"},
+                        "top_fund": {"sym": top_fund.get("name", "N/A"), "val": f"{float(top_fund.get('funding', 0) or 0)*100*24*365:.0f}%"},
+                    }
+                    img_buf = await render_html_to_image("market_overview.html", render_data, width=1000, height=1000, lang=lang)
+                    header = f"<b>BTC: ${btc_d.get('price', '0')} ({'🟢' if btc_d.get('change', 0) >= 0 else '🔴'} {btc_d.get('change', 0):+.2f}%)</b>\n<b>ETH: ${eth_d.get('price', '0')} ({'🟢' if eth_d.get('change', 0) >= 0 else '🔴'} {eth_d.get('change', 0):+.2f}%)</b>"
+                    await bot.send_photo(user_id, BufferedInputFile(img_buf.read(), filename="overview.png"), caption=f"{header}\n\n<b>VELOX AI ({period_label})</b>", parse_mode="HTML")
+                    summary = html.escape(str(output.get("summary", "")))
+                    notes = output.get("actionable_notes", [])
+                    if isinstance(notes, list) and notes:
+                        summary += "\n\n<b>Actionable notes</b>\n" + "\n".join(f"• {html.escape(str(n))}" for n in notes[:5])
+                    if summary.strip():
+                        await bot.send_message(user_id, summary[:3900], parse_mode="HTML")
+                    continue
+                except Exception as agent_exc:
+                    logger.error(f"Scheduled agent overview failed for {user_id}, falling back: {agent_exc}", exc_info=True)
+
             ai_data, img_bytes = await _get_cached_overview(market_data, news if not isinstance(news, Exception) else [], period_label, cfg, lang, p_universe, p_assets, fng)
             btc_d, eth_d = res.get("BTC", {}), res.get("ETH", {})
             header = f"<b>BTC: ${btc_d.get('price', '0')} ({'🟢' if btc_d.get('change', 0) >= 0 else '🔴'} {btc_d.get('change', 0):+.2f}%)</b>\n<b>ETH: ${eth_d.get('price', '0')} ({'🟢' if eth_d.get('change', 0) >= 0 else '🔴'} {eth_d.get('change', 0):+.2f}%)</b>"
@@ -943,6 +990,26 @@ async def refresh_news_cache(bot):
     articles = await rss_engine.fetch_all(since_hours=settings.RSS_ARTICLE_TTL_HOURS)
     logger.info(f"RSS cache refreshed: {len(articles)} articles, age={rss_engine.cache_age_seconds:.0f}s")
 
+@safe_job
+async def refresh_agent_sources(bot=None):
+    """Best-effort agent source/search refresh."""
+    if not settings.AGENT_ENABLED:
+        return
+    from bot.agent.orchestrator import AgentOrchestrator
+
+    report = await AgentOrchestrator().run(mode="overview", lang="en")
+    logger.info(f"Agent source refresh complete: {len(report.sources)} sources, {len(report.events)} events")
+
+@safe_job
+async def extract_agent_market_events(bot=None):
+    """Best-effort market event extraction refresh."""
+    if not settings.AGENT_ENABLED:
+        return
+    from bot.agent.orchestrator import AgentOrchestrator
+
+    report = await AgentOrchestrator().run(mode="overview", lang="en")
+    logger.info(f"Agent event extraction complete: {len(report.events)} events")
+
 def setup_scheduler(bot):
     scheduler = AsyncIOScheduler()
 
@@ -1032,6 +1099,26 @@ def setup_scheduler(bot):
         misfire_grace_time=300,
         max_instances=1,
         jitter=30
+    )
+
+    scheduler.add_job(
+        refresh_agent_sources,
+        'cron',
+        minute='*/30',
+        args=[bot],
+        misfire_grace_time=300,
+        max_instances=1,
+        jitter=30
+    )
+
+    scheduler.add_job(
+        extract_agent_market_events,
+        'cron',
+        minute='*/20',
+        args=[bot],
+        misfire_grace_time=300,
+        max_instances=1,
+        jitter=20
     )
     
     scheduler.start()

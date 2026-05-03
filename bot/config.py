@@ -23,6 +23,20 @@ class Settings(BaseSettings):
     NEWS_SUMMARIZER_ENABLED: bool = Field(True, description="Enable AI pre-summarization of RSS headlines")
     NEWS_SUMMARIZER_MODEL: str = Field("gemma-4-31b-it", description="Gemini model for news summarization")
 
+    # Agentic Market Intelligence
+    AGENT_ENABLED: bool = Field(True, description="Enable agentic market overview pipeline")
+    AGENT_SEARCH_ENABLED: bool = Field(True, description="Enable agent search collectors")
+    AGENT_BRAVE_SEARCH_ENABLED: bool = Field(True, description="Enable Brave Search scraping collector")
+    AGENT_DUCKDUCKGO_FALLBACK_ENABLED: bool = Field(True, description="Enable DuckDuckGo search fallback collector")
+    AGENT_MAX_SOURCES_PER_RUN: int = Field(80, description="Maximum scored sources kept per agent run")
+    AGENT_MAX_SEARCH_QUERIES: int = Field(12, description="Maximum search queries per agent run")
+    AGENT_SOURCE_CACHE_TTL_MIN: int = Field(60, description="Agent source cache TTL in minutes")
+    AGENT_EVENT_TTL_HOURS: int = Field(48, description="Agent market event freshness TTL in hours")
+    AGENT_LLM_MODEL: str = Field("gemma-4-31b-it", description="Gemini model for final agent report synthesis")
+    AGENT_EVENT_EXTRACTOR_MODEL: str = Field("gemini-3.1-flash-lite-preview", description="Gemini model for event extraction")
+    AGENT_PIPELINE_TIMEOUT_SEC: int = Field(120, description="Total agent pipeline timeout in seconds")
+    AGENT_TOOL_TIMEOUT_SEC: int = Field(15, description="Per agent tool timeout in seconds")
+
     FARSIDE_BTC_URL: str = Field("https://farside.co.uk/btc/", description="Farside BTC ETF Flow URL")
     FARSIDE_ETH_URL: str = Field("https://farside.co.uk/eth/", description="Farside ETH ETF Flow URL")
     PAY_SUPPORT_CONTACT: str = Field("", description="Telegram handle or URL for payment support")

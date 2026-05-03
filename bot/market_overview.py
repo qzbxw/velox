@@ -498,6 +498,33 @@ Provide a concise summary with key bullet points."""
 
         return default_res
 
+    async def generate_agentic_overview(
+        self,
+        user_id: int | str | None = None,
+        lang: str = "en",
+        event_data: dict | None = None,
+        mode: str = "overview",
+        custom_prompt: str | None = None,
+        style: str = "detailed",
+    ):
+        """
+        Run the additive agentic overview pipeline. Existing generate_summary()
+        remains the compatibility fallback used by callers when this fails.
+        """
+        from bot.agent import AgentOrchestrator
+
+        report = await AgentOrchestrator().run(
+            mode=mode,
+            user_id=user_id,
+            event_data=event_data,
+            lang=lang,
+        )
+        if custom_prompt:
+            report.output["custom_prompt_applied"] = custom_prompt[:500]
+        if style:
+            report.output["style"] = style
+        return report
+
     async def generate_hedge_comment(self, 
                                    context_type: str, 
                                    event_data: dict, 

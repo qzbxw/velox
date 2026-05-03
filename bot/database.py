@@ -16,6 +16,9 @@ class Database:
         self.wallet_states = self.db.wallet_states  # Tracks last update times
         self.vault_snapshots = self.db.vault_snapshots  # Historical vault equity snapshots
         self.billing_payments = self.db.billing_payments
+        self.agent_runs = self.db.agent_runs
+        self.market_events = self.db.market_events
+        self.agent_source_cache = self.db.agent_source_cache
 
     async def init_db(self):
         """Initialize database indexes for performance and integrity."""
@@ -32,6 +35,17 @@ class Database:
         await self.vault_snapshots.create_index([("snapshot_ts", -1)])
         await self.billing_payments.create_index([("telegram_payment_charge_id", 1)], unique=True)
         await self.billing_payments.create_index([("user_id", 1), ("created_at", -1)])
+        await self.agent_runs.create_index([("run_id", 1)], unique=True)
+        await self.agent_runs.create_index([("user_id", 1), ("started_at", -1)])
+        await self.agent_runs.create_index([("mode", 1), ("started_at", -1)])
+        await self.agent_runs.create_index([("input_hash", 1)])
+        await self.market_events.create_index([("event_id", 1)], unique=True)
+        await self.market_events.create_index([("category", 1), ("last_seen_ts", -1)])
+        await self.market_events.create_index([("assets", 1)])
+        await self.market_events.create_index([("last_seen_ts", -1)])
+        await self.agent_source_cache.create_index([("cache_key", 1)], unique=True)
+        await self.agent_source_cache.create_index([("expires_at", 1)])
+        await self.agent_source_cache.create_index([("url", 1)])
 
     async def add_user(self, user_id, wallet_address=None):
         existing = await self.users.find_one({"user_id": user_id})
@@ -612,6 +626,41 @@ class Database:
             {"$set": {"hedge_memory": []}},
             upsert=True
         )
+
+    # --- AGENT MEMORY ---
+    async def save_agent_run(self, run_doc: dict):
+        await self.agent_runs.update_one(
+            {"run_id": run_doc["run_id"]},
+            {"$set": run_doc},
+            upsert=True
+        )
+
+    async def upsert_market_event(self, event_doc: dict):
+        now_ts = time.time()
+        event_doc = dict(event_doc)
+        event_doc["last_seen_ts"] = now_ts
+        await self.market_events.update_one(
+            {"event_id": event_doc["event_id"]},
+            {
+                "$set": event_doc,
+                "$setOnInsert": {"first_seen_ts": now_ts},
+            },
+            upsert=True
+        )
+
+    async def list_recent_market_events(self, limit: int = 50):
+        cursor = self.market_events.find({}).sort("last_seen_ts", -1).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def save_agent_source_cache(self, cache_doc: dict):
+        await self.agent_source_cache.update_one(
+            {"cache_key": cache_doc["cache_key"]},
+            {"$set": cache_doc},
+            upsert=True
+        )
+
+    async def get_agent_source_cache(self, cache_key: str):
+        return await self.agent_source_cache.find_one({"cache_key": cache_key, "expires_at": {"$gt": time.time()}})
 
     # --- WALLET STATES (Ledger Tracking) ---
     async def get_all_watched_addresses(self):

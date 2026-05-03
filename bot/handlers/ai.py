@@ -12,6 +12,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.database import db
+from bot.config import settings
 from bot.locales import _t
 from bot.services import (
     get_perps_context, get_fear_greed_index, pretty_float
@@ -66,12 +67,114 @@ def _build_overview_settings_ui(lang: str, cfg: dict, include_back: bool = True)
 async def _fetch_market_snapshot():
     return await get_perps_context()
 
+def _agent_major(report, symbol: str) -> dict:
+    major = report.market_snapshot.majors.get(symbol, {}) if report and report.market_snapshot else {}
+    price = float(major.get("price", 0) or 0)
+    change = float(major.get("change", 0) or 0)
+    return {"price": pretty_float(price), "change": round(change, 2)}
+
+def _agent_top(report, field: str, default_sym: str = "N/A") -> dict:
+    rows = getattr(report.market_snapshot, field, []) if report and report.market_snapshot else []
+    return rows[0] if rows else {"name": default_sym, "change": 0, "volume": 0, "funding": 0}
+
+def _format_agent_report_text(output: dict, lang: str) -> str:
+    def as_lines(value):
+        if isinstance(value, list):
+            return [str(v) for v in value if v]
+        if value:
+            return [str(value)]
+        return []
+
+    parts = []
+    summary = output.get("summary")
+    if summary:
+        parts.append(html.escape(str(summary)))
+
+    sections = [
+        ("Top risks", output.get("top_risks")),
+        ("Opportunities", output.get("top_opportunities")),
+        ("Portfolio relevance", output.get("portfolio_relevance")),
+        ("Actionable notes", output.get("actionable_notes")),
+    ]
+    if lang == "ru":
+        sections = [
+            ("Риски", output.get("top_risks")),
+            ("Возможности", output.get("top_opportunities")),
+            ("Релевантно портфелю", output.get("portfolio_relevance")),
+            ("Действия", output.get("actionable_notes")),
+        ]
+
+    for title, value in sections:
+        lines = as_lines(value)[:5]
+        if lines:
+            parts.append(f"<b>{html.escape(title)}</b>\n" + "\n".join(f"• {html.escape(line)}" for line in lines))
+
+    sources = output.get("sources")
+    if isinstance(sources, list) and sources:
+        src_lines = []
+        for item in sources[:5]:
+            if isinstance(item, dict):
+                title = html.escape(str(item.get("title") or item.get("source") or "Source"))
+                url = html.escape(str(item.get("url") or ""))
+                src_lines.append(f"• <a href=\"{url}\">{title}</a>" if url else f"• {title}")
+        if src_lines:
+            parts.append("<b>Sources</b>\n" + "\n".join(src_lines))
+
+    text = "\n\n".join(parts) or html.escape(str(output))
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+    return text[:3900]
+
 async def _send_ai_overview(bot, chat_id, user_id, status_msg=None, back_target="sub:overview"):
     lang = await db.get_lang(chat_id)
     if not status_msg:
         status_msg = await bot.send_message(chat_id, _t(lang, "ai_generating"), parse_mode="HTML")
     
     try:
+        if settings.AGENT_ENABLED:
+            try:
+                user_config = await db.get_overview_settings(user_id)
+                report = await market_overview.generate_agentic_overview(
+                    user_id=user_id,
+                    lang=lang,
+                    custom_prompt=user_config.get("prompt_override"),
+                    style=user_config.get("style", "detailed"),
+                )
+                output = report.output if isinstance(report.output, dict) else {}
+                btc_d, eth_d = _agent_major(report, "BTC"), _agent_major(report, "ETH")
+                top_gainer = _agent_top(report, "top_gainers")
+                top_loser = _agent_top(report, "top_losers")
+                top_vol = _agent_top(report, "highest_volume")
+                top_fund = _agent_top(report, "highest_funding")
+                render_data = {
+                    "period_label": "INTELLIGENCE",
+                    "date": datetime.datetime.now().strftime("%d %b %H:%M"),
+                    "btc": btc_d,
+                    "eth": eth_d,
+                    "sentiment": output.get("sentiment", "Neutral"),
+                    "fng": report.market_snapshot.fear_greed or {"value": 0, "classification": "N/A"},
+                    "gemini_model": "Velox Agent",
+                    "top_gainer": {"sym": top_gainer.get("name", "N/A"), "val": top_gainer.get("change", 0)},
+                    "top_loser": {"sym": top_loser.get("name", "N/A"), "val": top_loser.get("change", 0)},
+                    "top_vol": {"sym": top_vol.get("name", "N/A"), "val": f"${float(top_vol.get('volume', 0) or 0)/1e6:.0f}M"},
+                    "top_fund": {"sym": top_fund.get("name", "N/A"), "val": f"{float(top_fund.get('funding', 0) or 0)*100*24*365:.0f}%"}
+                }
+                img_buf = await render_html_to_image("market_overview.html", render_data, width=1000, height=1000, lang=lang)
+                btc_icon, eth_icon = ("🟢" if btc_d.get("change", 0) >= 0 else "🔴"), ("🟢" if eth_d.get("change", 0) >= 0 else "🔴")
+                header = f"<b>BTC: ${btc_d.get('price', '0')} ({btc_icon} {btc_d.get('change', 0):+.2f}%)</b>\n<b>ETH: ${eth_d.get('price', '0')} ({eth_icon} {eth_d.get('change', 0):+.2f}%)</b>"
+                await bot.send_photo(chat_id=chat_id, photo=BufferedInputFile(img_buf.read(), filename="overview.png"), caption=f"{header}\n\n🧠 <b>Velox Insight</b>", parse_mode="HTML")
+
+                kb = InlineKeyboardBuilder()
+                kb.button(text=_t(lang, "btn_refresh"), callback_data=f"cb_market_overview_refresh:{back_target}")
+                kb.button(text=_t(lang, "btn_settings"), callback_data="cb_overview_settings_menu")
+                kb.button(text=_t(lang, "btn_back"), callback_data="cb_ai_cleanup")
+                kb.adjust(1, 2)
+                await bot.send_message(chat_id=chat_id, text=_format_agent_report_text(output, lang), parse_mode="HTML", reply_markup=kb.as_markup(), disable_web_page_preview=True)
+                await status_msg.delete()
+                return
+            except Exception as agent_exc:
+                logger.error(f"Agent overview failed, falling back to legacy summary: {agent_exc}", exc_info=True)
+
         # ... existing logic ...
         # (skipping for brevity in research, but implementation must be full)
         # Fetch data in parallel
